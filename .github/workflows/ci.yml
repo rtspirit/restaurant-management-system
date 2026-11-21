@@ -3,9 +3,13 @@ on:
   pull_request:
   push:
     branches: [main]
+
+# Runs everything against a throwaway local Supabase stack (database, sign-in, pooler) started
+# inside the job. No hosted project, no real keys, no secrets from the repository settings.
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -16,4 +20,15 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm build
+      - name: Start the local database and sign-in service
+        run: pnpm exec supabase start -x realtime,storage-api,imgproxy,postgrest,postgres-meta,studio,edge-runtime,logflare,vector
+      - name: Create local logins and settings
+        run: scripts/dev-db-roles.sh
+      - name: Database wall checks
+        run: |
+          bash tests/security/db-walls.smoke.sh | tee walls.log
+          grep -q '^FAILS=0$' walls.log
       - run: pnpm test
+      - name: Stop the local stack
+        if: always()
+        run: pnpm exec supabase stop --no-backup || true

@@ -117,7 +117,12 @@ const blockedOnWrite = new Set<string>(SYSTEM_FIELDS.filter((f) => !(WRITABLE_SY
  * locations (checked by the API and again by row-level security WITH CHECK). Writing a field
  * the caller's role cannot read is `forbidden_field`.
  */
-export const WriteValues = z.record(Ident, z.unknown()).refine((v) => Object.keys(v).every((k) => !blockedOnWrite.has(k)), "A system field cannot be set");
+/** JSON field values may nest, but not without limit (a 5,000-deep value crashed the server before any check). */
+export const MAX_VALUE_DEPTH = 16;
+export const WriteValues = z
+  .unknown()
+  .refine(maxDepth(MAX_VALUE_DEPTH + 1), "A value is nested too deeply")
+  .pipe(z.record(Ident, z.unknown()).refine((v) => Object.keys(v).every((k) => !blockedOnWrite.has(k)), "A system field cannot be set"));
 export type WriteValues = z.infer<typeof WriteValues>;
 
 /** Writes take a child model key (`Ident`). "parent.x" is not an Ident, so it cannot be written. */

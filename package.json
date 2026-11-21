@@ -11,7 +11,8 @@
     "lint": "turbo run lint",
     "test": "turbo run test",
     "test:security": "vitest run --dir tests/security",
-    "preflight:vercel": "scripts/preflight-vercel.sh"
+    "preflight:vercel": "scripts/preflight-vercel.sh",
+    "reset-demo": "pnpm --filter @rms/seed reset-demo"
   },
   "devDependencies": {
     "supabase": "3.2.0",

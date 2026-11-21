@@ -42,7 +42,9 @@ let admin: Sql | undefined;
 export const apiDb = (): Sql => (api ??= open(need("DATABASE_URL")));
 
 /** Sign-up, provisioning, jobs, seed, maintainer console (login `rms_admin`). */
-export const adminDb = (): Sql => (admin ??= open(need("DATABASE_ADMIN_URL"), 3));
+// Sized so a handful of sign-ups at once cannot starve it: onboarding holds one connection for
+// its per-user lock while the restaurant is created on others.
+export const adminDb = (): Sql => (admin ??= open(need("DATABASE_ADMIN_URL"), 10));
 
 export const closeAll = async (): Promise<void> => {
   await Promise.all([api?.end({ timeout: 5 }), admin?.end({ timeout: 5 })]);
