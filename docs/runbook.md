@@ -66,7 +66,7 @@ Full detail is in section 2. In short, from the repo root:
 4. Open `http://127.0.0.1:3000` and `http://127.0.0.1:3001`. **Not `localhost`**: sign-in will not stick there.
 5. **Resetting the demo data:** `pnpm reset-demo`. It wipes every restaurant, including the ones tests left behind, and every sign-in, then sets up the two seeded restaurants again with eight weeks of numbers. About 16 seconds. Sign in again everywhere afterwards. Never run it while anyone is running tests. `pnpm reset-demo --no-sales` gives the same restaurants with no numbers, for beat 3.
 6. **The rehearsal check:** `scripts/rehearse.sh`. It checks the three servers answer and the two seeded restaurants exist, runs the browser tests, and prints PASS or FAIL per beat. It never resets, never calls a model and never prints a secret. It signs up one test owner per run and removes it after. See the caveat above about beats 2 and 3.
-7. **The 25-restaurant cap:** the local database takes at most 25 restaurants. When tests have filled it, sign-up is refused. The screen says "We could not set up your restaurant just now. Please try again." (it should say "We are not taking new restaurants right now"; that wording is a known bug). Trying again will not help. `pnpm reset-demo` clears it.
+7. **The 25-restaurant cap:** the local database takes at most 25 restaurants. When tests have filled it, sign-up is refused. The screen says "We are not taking new restaurants right now." Trying again will not help. `pnpm reset-demo` clears it.
 
 ---
 
@@ -188,7 +188,7 @@ In demo order first, then the rest. Each says who, how, what you should see, wha
 
 - **Caveat:** the name the owner types is **not used**. Every new owner gets a fresh copy of one of the two seeded restaurants, which keeps its fictional name, so its menu, staff and licences stay consistent. Only the answer to "How do guests order?" picks which one.
 - **Caveat:** a new sign-up gets its tables but **no sales numbers**. The seeded owners have eight weeks of numbers.
-- **Caveat:** at most 25 restaurants on one database by default. After that the last question fails with "We could not set up your restaurant just now. Please try again." (the API means "We are not taking new restaurants right now"; the screen hides it, a known bug). Trying again will not help. Reset to clear.
+- **Caveat:** at most 25 restaurants on one database by default. After that the last question fails with "We are not taking new restaurants right now." Trying again will not help. Reset to clear.
 
 **Who:** a new owner, signed out.
 
@@ -212,7 +212,7 @@ In demo order first, then the rest. Each says who, how, what you should see, wha
 
 **What it proves:** a restaurant is ready to use in seconds with its parent data already filled in, and nothing of anyone else's is visible.
 
-**If it goes wrong:** "Your restaurant is being set up. Give it a moment." means a second press while the first is still working: wait. "We could not set up your restaurant just now" means the API had a problem, or 25 restaurants already exist: check the API terminal, then try again. If it says the same again, reset.
+**If it goes wrong:** "Your restaurant is being set up. Give it a moment." means a second press while the first is still working: wait. "We could not set up your restaurant just now" means the API had a problem: check the API terminal, then try again. "We are not taking new restaurants right now" means 25 restaurants already exist: reset.
 
 ### 3.2 Looking at parent data: Menu, Staff, Locations (beat 1)
 
@@ -375,7 +375,7 @@ Sign in as `staff@marigold.test`.
 
 **Works** for the feed and the review queue. Rows from beats 2 and 4 to 8: not built yet. Connecting Demo POS (beat 3) adds a row.
 
-- **Caveat:** the console is for maintainers only. An owner who signs in there sees "This account is not a maintainer." and no rows. The Tier and Status filters still show (a known bug: wording only, no data).
+- **Caveat:** the console is for maintainers only. An owner who signs in there sees only "This account is not a maintainer." and a way to sign out.
 
 **Steps:** open `http://127.0.0.1:3001/sign-in`, sign in as `maintainer@rms.test`.
 
@@ -642,7 +642,7 @@ Total: about 19 minutes plus questions.
 | Building stops working and says it cannot start (Wave 2) | The sandbox allowance is used up. Vercel Hobby gives about 5 CPU hours a month and 45-minute sessions | Plan fix: start the Pro trial on the personal Vercel team (only with Rahul's yes). Meanwhile the local sandbox (`RMS_SANDBOX=local`) builds from generators only, without the build agent. |
 | The agent answers nothing, or every build fails at once (Wave 2) | The OpenRouter key is out of credit (50 dollar limit) or expired (it expires **2026-11-22 at 18:26 UTC**) | Check the key's usage and expiry on the OpenRouter website. Rahul replaces or tops up the key in `.env.local` and restarts the API. Never paste the key in chat. |
 | The numbers look wrong | Leftover changes from a rehearsal, tests ran against the database, or the reset did not finish | `pnpm reset-demo`. It must print $84,310.00 and 61.3% for Marigold, $28,750.00 and 55.3% for Slice Yard. |
-| "We could not set up your restaurant just now" on the last onboarding question, again and again | 25 restaurants already exist (too many sign-ups or test leftovers). The screen hides the real reason, "We are not taking new restaurants right now" | `pnpm reset-demo`. |
+| "We are not taking new restaurants right now" on the last onboarding question | 25 restaurants already exist (too many sign-ups or test leftovers) | `pnpm reset-demo`. |
 | The checks on GitHub fail | A broken build, type error, failing test, or a red security suite (a red suite blocks merging) | Run `pnpm typecheck`, `pnpm build`, `pnpm test` and `pnpm test:security` locally (not on the demo machine during a rehearsal). Two security tests are known to fail only when the whole suite runs on a shared database: check them on their own before calling it a real failure. |
 
 ---
