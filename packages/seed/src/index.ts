@@ -17,3 +17,4 @@ export {
   type AuthAdmin,
   type DemoUserSpec,
 } from "./reset.js";
+export { checkLibraryTemplates, installPlatformLibrary, type TemplateProblem } from "./library.js";

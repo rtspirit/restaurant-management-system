@@ -436,6 +436,9 @@ importers:
       '@rms/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@rms/data':
+        specifier: workspace:*
+        version: link:../data
       '@rms/db':
         specifier: workspace:*
         version: link:../db

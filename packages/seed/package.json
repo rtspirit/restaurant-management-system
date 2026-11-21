@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@rms/contracts": "workspace:*",
+    "@rms/data": "workspace:*",
     "@rms/db": "workspace:*",
     "@rms/parent": "workspace:*",
     "@rms/models": "workspace:*",
