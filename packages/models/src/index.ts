@@ -15,3 +15,11 @@ export {
   ensureModels,
   publishModelChanges,
 } from "./store.js";
+
+// The real library, assembled from the packs. Wired by the lead at integration.
+import * as packs from "./packs/index.js";
+import { buildLibrary } from "./library.js";
+
+/** Every library model, named query and named action RMS ships today. */
+export const LIBRARY = buildLibrary({ models: packs.models, namedQueries: packs.namedQueries, namedActions: packs.namedActions });
+export { DEFAULT_CHART_OF_ACCOUNTS, DEFAULT_POSTING_RULES, STANDARD_CALENDAR_NAME } from "./packs/index.js";
