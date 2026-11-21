@@ -7,9 +7,10 @@
 //   * the table is one of the ten fixed parent tables, in that restaurant's own parent schema,
 //   * a column the role may not read (staff pay and contact details, for staff) is left out,
 //   * a member tied to some locations sees only rows of those locations,
-//   * the transaction is read-only, and parent tables are read-only to restaurant roles anyway.
-import { ParentModelKey, type ParentListResponse, type Row, type TenantContext } from "@rms/contracts";
-import { ident } from "@rms/db";
+//   * the transaction is read-only, and parent tables are read-only to restaurant roles anyway,
+//   * a restaurant whose store is not ready gets a plain "still being set up" answer (409).
+import { ParentModelKey, type ParentListResponse, type Row, type TenantContext, toUuid } from "@rms/contracts";
+import { apiDb, ident, withOrg } from "@rms/db";
 import { DataApiError } from "./errors.js";
 import { PARENT_SPECS } from "./parent-models.js";
 import { baseConditions, decode, parentShape, selectExprs, tableOf } from "./shape.js";
@@ -31,6 +32,12 @@ export const readParent = async (tenant: TenantContext, model: unknown): Promise
   const key = parsed.data;
   // Screens show live data only. A build or preview context has no business here.
   if (tenant.env !== "live") throw new DataApiError("unauthenticated");
+
+  // A restaurant whose store is still being made (or has been taken away) has nothing to read
+  // yet. Say so plainly, rather than letting the read fail on tables that are not there.
+  const orgUuid = toUuid(tenant.orgId);
+  const [org] = await withOrg(apiDb(), orgUuid, (tx) => run(tx, "select store_ready from platform.organizations where id = ($1::text)::uuid", [orgUuid]));
+  if (org?.store_ready !== true) throw new DataApiError("conflict", "Your restaurant is still being set up. Give it a moment, then try again.");
 
   const shape = parentShape(key, tenant.role, tenant.env);
   const wanted = shape.list.filter((a) => a.readable);

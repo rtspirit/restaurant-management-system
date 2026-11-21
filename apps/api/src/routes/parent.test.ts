@@ -2,7 +2,8 @@
 // nothing else. Real sign-in users against the local sign-in service, two seeded restaurants.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ParentModelKey } from "@rms/contracts";
-import { adminDb, closeAll, newUuid } from "@rms/db";
+import { maxInFlight } from "@rms/data";
+import { adminDb, asParentSync, closeAll, newUuid } from "@rms/db";
 import { requireTestEnv } from "@rms/db/testing";
 import { createDemoRestaurant, removeRestaurants } from "@rms/seed";
 import app from "../index.js";
@@ -155,6 +156,57 @@ describe("GET /auth/parent/:model", () => {
     expect(r.status).toBe(403);
     expect(r.body?.rows).toBeUndefined();
   });
+
+  it("a restaurant whose store is not ready gets a plain answer, not an error from the database", async () => {
+    const setReady = (ready: boolean) => adminDb()`update platform.organizations set store_ready = ${ready} where id = ${S.org}`;
+    await setReady(false);
+    try {
+      const r = await get("/auth/parent/staff", ownerS.token);
+      expect(r.status, r.text).toBe(409);
+      expect(r.body.error.code).toBe("conflict");
+      expect(r.body.error.message).toMatch(/still being set up/);
+      expect(r.body.rows).toBeUndefined();
+      expect(r.text).not.toMatch(/permission denied|relation|schema|o_[0-9a-f]{12}/);
+      // The other restaurant is not affected.
+      ok(await get("/auth/parent/staff", ownerM.token));
+    } finally {
+      await setReady(true);
+    }
+    expect(ok(await get("/auth/parent/staff", ownerS.token)).rows).toHaveLength(9);
+  });
+
+  it("counts toward the restaurant's cap on requests at once, and another restaurant still answers quickly", async () => {
+    const cap = maxInFlight();
+    // Hold the team list locked, so Marigold's reads of it wait.
+    let release!: () => void;
+    let locked!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const isLocked = new Promise<void>((r) => (locked = r));
+    const holder = asParentSync(adminDb(), async (tx) => {
+      await tx.unsafe(`lock table "${M.prefix}_parent".staff in access exclusive mode`);
+      locked();
+      await gate;
+    });
+    await isLocked;
+    const slow = Array.from({ length: cap }, () => get("/auth/parent/staff", ownerM.token));
+    await new Promise((r) => setTimeout(r, 400)); // let them reach the lock
+    try {
+      for (const token of [ownerM.token, staffM.token]) {
+        // Marigold is at its cap, whoever asks and whichever list they ask for.
+        const r = await get("/auth/parent/locations", token);
+        expect(r.status, r.text).toBe(429);
+        expect(r.body.error.code).toBe("limit");
+      }
+      const started = Date.now();
+      ok(await get("/auth/parent/staff", ownerS.token));
+      expect(Date.now() - started).toBeLessThan(1000);
+    } finally {
+      release();
+      await holder;
+    }
+    for (const r of await Promise.all(slow)) expect(ok(r).rows).toHaveLength(24);
+    ok(await get("/auth/parent/locations", ownerM.token)); // the count went back down
+  }, 30_000);
 
   it("is read-only: there is nothing to write to", async () => {
     for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {

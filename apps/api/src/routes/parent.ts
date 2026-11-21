@@ -7,18 +7,15 @@
 // `readParent` checks it against that list. What a role may not see (staff pay and contact
 // details, for staff) is left out by the same rules the Data API uses.
 import { type SessionEnv, requireSession } from "@rms/auth";
-import { errorResponse, readParent } from "@rms/data";
+import { handleParentRead } from "@rms/data";
 import { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 
 export const parentRoutes = new Hono<SessionEnv>();
 
+// `handleParentRead` counts the request toward the restaurant's cap on requests in flight (the
+// same count the Data API keeps), and always returns a reply in plain words.
 parentRoutes.get("/parent/:model", requireSession, async (c) => {
-  const requestId = crypto.randomUUID();
-  try {
-    return c.json(await readParent(c.var.tenant, c.req.param("model")));
-  } catch (e) {
-    const reply = errorResponse(e, requestId, "parent");
-    return c.json(reply.body, reply.status as ContentfulStatusCode);
-  }
+  const reply = await handleParentRead(c.var.tenant, c.req.param("model"), crypto.randomUUID());
+  return c.json(reply.body as object, reply.status as ContentfulStatusCode);
 });

@@ -12,7 +12,7 @@ import { handleData } from "@rms/data";
 import { type Sql, newUuid } from "@rms/db";
 import { DEFAULT_POSTING_RULES, LIBRARY, ensureModels } from "@rms/models";
 import { addDays } from "./rng.js";
-import { type GenerateSalesOptions, type GeneratedSales, type LabourGroup, type PaymentType, generateSales } from "./sales.js";
+import { DEFAULT_SALES_END, type GenerateSalesOptions, type GeneratedSales, type LabourGroup, type PaymentType, generateSales } from "./sales.js";
 import type { CostGroup, StockUnit } from "./stock.js";
 import { type DemoTemplate, templateSpec } from "./templates.js";
 
@@ -101,6 +101,8 @@ export const ensureBooksApp = async (adminSql: Sql, orgUuid: string): Promise<Bo
       select id, published_version_id as version from platform.apps where org_id = ${orgUuid} and slug = 'demo-data' and kind = 'system'`;
     if (existing?.version) {
       await tx`update platform.app_versions set manifest = ${manifest}::text::jsonb where id = ${existing.version} and org_id = ${orgUuid}`;
+      // It is paused between loads (see `pauseBooksApp`). Switch it back on for this one.
+      await tx`update platform.apps set status = 'published' where id = ${existing.id} and org_id = ${orgUuid}`;
       return { appUuid: existing.id, versionUuid: existing.version };
     }
     const appUuid = existing?.id ?? newUuid();
@@ -114,6 +116,36 @@ export const ensureBooksApp = async (adminSql: Sql, orgUuid: string): Promise<Bo
     await tx`update platform.apps set current_version_id = ${versionUuid}, published_version_id = ${versionUuid}, status = 'published' where id = ${appUuid} and org_id = ${orgUuid}`;
     return { appUuid, versionUuid };
   }) as Promise<BooksApp>;
+
+/**
+ * Switches the hidden "demo data" mini-app off. It may write to every library model, so it is
+ * only ever on while a load is running: the Data API refuses a paused mini-app outright.
+ * Admin connection only. Safe to run again, and when there is no such mini-app.
+ */
+export const pauseBooksApp = async (adminSql: Sql, orgUuid: string): Promise<void> => {
+  await adminSql`update platform.apps set status = 'paused' where org_id = ${orgUuid} and slug = 'demo-data' and kind = 'system' and status <> 'deleted'`;
+};
+
+/** The first and last day the numbers cover, without generating them. Same defaults as `generateSales`. */
+const salesRange = (range: GenerateSalesOptions): { startsOn: string; endsOn: string } => {
+  const endsOn = range.endingOn ?? DEFAULT_SALES_END;
+  return { startsOn: addDays(endsOn, -(7 * (range.weeks ?? 8) - 1)), endsOn };
+};
+
+export type BooksSetUp = { accountsAndRules: number; calendar: number };
+
+/**
+ * What a restaurant's books need before any number arrives: the chart of accounts with its
+ * posting rules, and a fiscal calendar for the weeks the demo numbers cover (one week early,
+ * for the opening stock count). Both are library actions, safe to run again.
+ */
+export const setUpBooks = async (client: BooksClient, range: GenerateSalesOptions = {}): Promise<BooksSetUp> => {
+  const act = async (action: string, params: Record<string, string>): Promise<number> => ((await client("action", { action, params })) as { affected: number }).affected;
+  const { startsOn, endsOn } = salesRange(range);
+  const accountsAndRules = await act("seed_chart_of_accounts", {});
+  const calendar = await act("seed_fiscal_calendar", { from_date: addDays(startsOn, -7), to_date: endsOn });
+  return { accountsAndRules, calendar };
+};
 
 /**
  * Loads `weeks` weeks of the template's generated numbers through `client` and posts them.
@@ -156,9 +188,8 @@ export const loadDemoBooks = async (client: BooksClient, opts: LoadBooksOptions)
   const locationId = new Map(sales.locations.map((l) => [l.key, need(locationByName, l.name, "location")]));
   const loc = (key: string) => need(locationId, key, "location");
 
-  // ---- set-up: chart of accounts, posting rules, fiscal calendar (one week early, for the opening stock count)
-  const accountsAndRules = await act("seed_chart_of_accounts", {});
-  const calendar = await act("seed_fiscal_calendar", { from_date: addDays(sales.startsOn, -7), to_date: sales.endsOn });
+  // ---- set-up: chart of accounts, posting rules, fiscal calendar
+  const { accountsAndRules, calendar } = await setUpBooks(client, range);
   const accounts = (await client("query", { model: "account", fields: ["id", "code"], limit: 500 })) as { rows: { id: string; code: string }[] };
   const accountByCode = new Map(accounts.rows.map((r) => [r.code, r.id]));
 
@@ -312,52 +343,74 @@ export type SeedBooksOptions = GenerateSalesOptions & {
   template: DemoTemplate;
   /** The owner the rows are recorded as written by. A real sign-in user of this restaurant. */
   ownerUserId: string;
-  /** Load and post the sales, bills, staff cost and stock counts. Without it only the tables are made. */
+  /**
+   * Load and post the sales, bills, staff cost and stock counts. Without it the restaurant gets
+   * its tables, its chart of accounts and its fiscal calendar, and no numbers.
+   */
   withSales: boolean;
 };
 
 /** What was loaded, and the last week as the prime cost report now shows it. */
 export type SeededBooks = LoadBooksResult & { lastWeek: { weekStart: string; netSalesMinor: number; primeCostPct: string; stockCounted: boolean } };
 
+export type SeedBooksResult = {
+  /** What the two set-up actions added in this run. Zero when they had been run before. */
+  setUp: BooksSetUp;
+  /** Null without `withSales`. */
+  books: SeededBooks | null;
+};
+
 /**
- * What the reset does for one restaurant after it exists: make its library tables, and, with
- * `withSales`, load and post the demo numbers. The library must be installed first
- * (`installPlatformLibrary`). Admin connection only, and only for seeded demo restaurants.
+ * Gives one demo restaurant its books. Used by the reset (with numbers) and by onboarding
+ * (without): make the library tables, add the chart of accounts and the fiscal calendar, and,
+ * with `withSales`, load and post the demo numbers.
+ *
+ * Everything after the tables goes through the Data API as the hidden "demo data" mini-app,
+ * which is switched on for the load and ALWAYS switched off again, whether the load worked or
+ * not. The library must be installed first (`installPlatformLibrary`). Admin connection only,
+ * and only for seeded demo restaurants.
  */
-export const seedDemoBooks = async (adminSql: Sql, opts: SeedBooksOptions): Promise<SeededBooks | null> => {
+export const seedDemoBooks = async (adminSql: Sql, opts: SeedBooksOptions): Promise<SeedBooksResult> => {
   const { orgUuid, template, ownerUserId, withSales, ...range } = opts;
   await ensureModels(adminSql, orgUuid, LIBRARY.models.map((m) => m.key));
-  if (!withSales) return null;
 
   const [org] = await adminSql<{ prefix: string }[]>`select store_prefix as prefix from platform.organizations where id = ${orgUuid}`;
   if (!org) throw new Error("Unknown restaurant");
   const app = await ensureBooksApp(adminSql, orgUuid);
-  // The same context a signed app token would give: this restaurant, its owner, live data.
-  const tenant: TenantContext = {
-    orgId: toPublicId("org", orgUuid),
-    storePrefix: org.prefix,
-    actor: { type: "user", id: toPublicId("usr", ownerUserId) },
-    role: "owner",
-    locations: "all",
-    env: "live",
-    appId: toPublicId("app", app.appUuid),
-    appVersionId: toPublicId("ver", app.versionUuid),
-  };
-  const client: BooksClient = async (route, body) => {
-    const reply = await handleData(route, tenant, body, newUuid());
-    if (reply.status !== 200) {
-      const error = (reply.body as { error?: { code?: string; message?: string } }).error;
-      throw new Error(`Loading the demo numbers failed (${route}: ${error?.code ?? "unknown"}). ${error?.message ?? ""}`.trim());
-    }
-    return reply.body;
-  };
-  const loaded = await loadDemoBooks(client, { template, ...range });
+  try {
+    // The same context a signed app token would give: this restaurant, its owner, live data.
+    const tenant: TenantContext = {
+      orgId: toPublicId("org", orgUuid),
+      storePrefix: org.prefix,
+      actor: { type: "user", id: toPublicId("usr", ownerUserId) },
+      role: "owner",
+      locations: "all",
+      env: "live",
+      appId: toPublicId("app", app.appUuid),
+      appVersionId: toPublicId("ver", app.versionUuid),
+    };
+    const client: BooksClient = async (route, body) => {
+      const reply = await handleData(route, tenant, body, newUuid());
+      if (reply.status !== 200) {
+        const error = (reply.body as { error?: { code?: string; message?: string } }).error;
+        throw new Error(`Setting up the books failed (${route}: ${error?.code ?? "unknown"}). ${error?.message ?? ""}`.trim());
+      }
+      return reply.body;
+    };
+    if (!withSales) return { setUp: await setUpBooks(client, range), books: null };
 
-  // Read the last week back through the prime cost report, so the reset can show that the
-  // reports work on what it just loaded.
-  const weekStart = addDays(loaded.endsOn, -6);
-  const report = (await client("named", { query: "prime_cost_by_week", params: { from_date: weekStart, to_date: loaded.endsOn } })) as { rows: Record<string, unknown>[] };
-  const all = report.rows.find((r) => r.scope === "all_locations" && r.week_start === weekStart);
-  if (!all) throw new Error("Loading the demo numbers: the prime cost report has no row for the last week");
-  return { ...loaded, lastWeek: { weekStart, netSalesMinor: Number(all.net_sales), primeCostPct: String(all.prime_cost_pct), stockCounted: all.stock_counted === true } };
+    const loaded = await loadDemoBooks(client, { template, ...range });
+    // Read the last week back through the prime cost report, so the reset can show that the
+    // reports work on what it just loaded.
+    const weekStart = addDays(loaded.endsOn, -6);
+    const report = (await client("named", { query: "prime_cost_by_week", params: { from_date: weekStart, to_date: loaded.endsOn } })) as { rows: Record<string, unknown>[] };
+    const all = report.rows.find((r) => r.scope === "all_locations" && r.week_start === weekStart);
+    if (!all) throw new Error("Loading the demo numbers: the prime cost report has no row for the last week");
+    return {
+      setUp: loaded.setUp,
+      books: { ...loaded, lastWeek: { weekStart, netSalesMinor: Number(all.net_sales), primeCostPct: String(all.prime_cost_pct), stockCounted: all.stock_counted === true } },
+    };
+  } finally {
+    await pauseBooksApp(adminSql, orgUuid);
+  }
 };

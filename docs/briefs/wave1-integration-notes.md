@@ -144,3 +144,29 @@ By hand, in a browser. The password for every demo user is the value of `DEMO_PA
 ## Screenshots
 
 `docs/design/c1/`, named `<who>-<screen>-<desktop|phone>.png`. Desktop is 1440x900, phone is 390x844. `marigold-*` and `sliceyard-*` cover Home, the location switcher, Mini-apps Build and Marketplace, Menu, Staff and Locations. `marigold-staff-as-staff-desktop.png` is the staff user's view. `newowner-*` is sign-up, the five questions and the landing. `console-*` is the feed, the queue and the owner being refused. Menu, Staff and Locations on a desktop are whole-page pictures. Phone pictures are one screen.
+
+## Follow-up after the code and security reviews (2026-11-21)
+
+Done in the same worktree after merging `main`. The demo data on the shared database was left alone: no reset, no walkthrough. Everything was proved on throwaway restaurants (uuid suffix `70` to `7f`), which were removed again.
+
+| # | Asked | Done |
+|---|---|---|
+| 1 | The walkthrough could print the demo password inside a browser error | `safeMessage` in `scripts/c1-walkthrough.mts`: first line only, nothing after "Call log", every password the run knows replaced, anything quoted after `fill` dropped. It is the only place an error is printed |
+| 2 | `GET /auth/parent/:model` had no limiter and answered when the store was not ready | It shares the Data API's count of requests in flight per restaurant (`packages/data/src/limit.ts`, `handleParentRead`). A store that is not ready gets a plain 409. The default cap is now 8 (`RMS_DATA_MAX_INFLIGHT`). Tests: Marigold at its cap is refused, Slice Yard still answers in under a second |
+| 3 | The hidden "Demo data" mini-app stayed published | `seedDemoBooks` switches it on for the load and always off again (`paused`), also when the load fails. Tests in `packages/seed/src/books.test.ts` |
+| 4 | `checkSameDatabase` trusted the text of a connection string | It compares what the two drivers will really connect to. The test found one more way round the old check: `?database=other` wins over the name in the path, because the driver sends its extra settings last |
+| 5 | The attack fixtures showed custom rows as library packs | The security world now has a real custom model (`x_sec_memo`), made with `applyChange` and `create_custom_model`, with 7 Data API attack tests of its own. Its compiler-made grants are in the exact-holdings tests |
+| 6 | Test results could be replayed from the cache | `turbo.json`: `"cache": false` on `test` |
+| 7 | New sign-ups got no tables and did not show in the feed | Onboarding calls `setUpNewRestaurant` after the owner is added: library tables, chart of accounts, fiscal calendar, no sales, and one change set (system, settings, no signals). If it fails, the owner still lands in RMS and it is logged. Tests in `apps/api/src/routes/auth.setup.test.ts` |
+| 8 | A CI-safe test of `seedDemoBooks` with sales | `packages/seed/src/books.test.ts` runs the very function the reset calls, on a throwaway Marigold: $84,310.00 and 61.3% |
+
+Things to know:
+
+- **The restaurant-facing pool went from 5 to 10 connections** (`packages/db/src/index.ts`, lead-owned). With a cap of 8 and a pool of 5, one restaurant at its cap would have held every connection. Ten is the most the security suite allows a pool to hold. That leaves two connections for everyone else while one restaurant is at its cap.
+- **The two demo restaurants on the shared database still have a published loader.** They were seeded before this change, and I was told not to touch them. The next `pnpm reset-demo` fixes it. Until then: `update platform.apps set status = 'paused' where kind = 'system'`.
+- **`seedDemoBooks` now returns `{ setUp, books }`**, and without sales it also adds the chart of accounts and the fiscal calendar (it used to make tables only).
+- **Root `package.json`** gained the dev dependency `@rms/models` (workspace link), for the security world's custom model.
+- **`apps/api/src/routes/auth.test.ts`**: the "at the restaurant cap" test read the count and then set the cap to it. Other test files make and remove restaurants at the same time, so it failed now and then. It now sets the cap to one.
+- Items 2, 4, 5 and 7 from "Left for the lead" above are closed by this. The rest stand.
+
+Checks after the follow-up: `pnpm typecheck` 21 of 21, `pnpm build` 12 of 12, `pnpm test` 892 pass (run twice, nothing replayed), `pnpm test:security` 886 pass and 4 skipped.

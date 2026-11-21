@@ -11,7 +11,8 @@
 //   pnpm c1-walkthrough
 //
 // Local only. It uses the seeded demo users and DEMO_PASSWORD from the settings file, and never
-// prints a password. The new owner's password is random and is thrown away.
+// prints a password, not even inside a browser error (see `safeMessage`). The new owner's
+// password is random and is thrown away.
 import { randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -40,6 +41,24 @@ const SIZES = {
   phone: { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
 } as const;
 type Size = keyof typeof SIZES;
+
+/** Every password this run types. Nothing that is printed may contain one of them. */
+const secrets = new Set<string>([DEMO_PASSWORD]);
+
+/**
+ * What may be printed about a failure. A browser error can carry what was typed: Playwright's
+ * text for a failed `fill()` includes the value, in its first line or in the call log under it.
+ * So: only the text before "Call log", only its first line, with every password this run knows
+ * replaced, and cut short. The arguments to `fill` are never logged anywhere in this file.
+ */
+const safeMessage = (e: unknown): string => {
+  const raw = e instanceof Error ? e.message : "The walkthrough failed";
+  let text = (raw.split(/call log/i)[0] ?? "").split("\n")[0]?.trim() ?? "";
+  for (const secret of secrets) if (secret) text = text.split(secret).join("[hidden]");
+  // A failed fill names its value in quotes on the first line. Drop anything quoted after "fill".
+  text = text.replace(/(fill[^"'`]*)(["'`]).*$/i, "$1[hidden]");
+  return text.slice(0, 300) || "The walkthrough failed";
+};
 
 const checks: string[] = [];
 const check = (ok: boolean, what: string): void => {
@@ -189,6 +208,7 @@ const newOwnerTour = async (browser: Browser): Promise<void> => {
   const page = await context.newPage();
   const email = `walkthrough-${randomBytes(5).toString("hex")}@c1.rms.test`;
   const password = randomBytes(18).toString("base64url");
+  secrets.add(password);
 
   await page.goto(`${WEB}/sign-up`);
   await page.locator("#email").fill(email);
@@ -284,7 +304,8 @@ try {
   await consoleTour(browser);
 } catch (e) {
   failed = true;
-  console.error(e instanceof Error ? e.message : "The walkthrough failed");
+  // Never the raw error: see `safeMessage`.
+  console.error(safeMessage(e));
 } finally {
   await browser.close();
 }

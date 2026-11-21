@@ -7,7 +7,8 @@ import { cors } from "hono/cors";
 import { type DemoTemplate, type MeResponse, type MyRestaurant, OnboardingAnswers, type ServiceStyle, toPublicId } from "@rms/contracts";
 import { type Sql, adminDb, apiDb, newUuid, withOrg } from "@rms/db";
 import { type SignedInUser, type UserEnv, membershipsFor, requireUser } from "@rms/auth";
-import { createDemoRestaurant } from "@rms/seed";
+import { drainOutbox, recordChange } from "@rms/governance";
+import { createDemoRestaurant, seedDemoBooks } from "@rms/seed";
 
 /** The interface task B exports from `@rms/seed` (wave 1 brief, task A section). */
 export type CreateDemoRestaurant = (
@@ -15,10 +16,50 @@ export type CreateDemoRestaurant = (
   opts: { template: DemoTemplate },
 ) => Promise<{ orgUuid: string; storePrefix: string; name: string }>;
 
+/** What is done for a restaurant right after its owner is in place. It may fail without failing the sign-up. */
+export type SetUpRestaurant = (adminSql: Sql, opts: { orgUuid: string; template: DemoTemplate; ownerUserId: string }) => Promise<void>;
+
 export type AuthRouteDeps = {
   createDemoRestaurant: CreateDemoRestaurant | undefined;
+  /** Runs once for a newly created restaurant, after its owner is added. Left out: nothing more is done. */
+  setUpRestaurant?: SetUpRestaurant;
   /** The platform login. Defaults to `adminDb`; tests pass a wrapper to simulate failures. */
   adminSql?: () => Sql;
+};
+
+/**
+ * What a new restaurant gets beyond its parent data: the library tables, the chart of accounts
+ * and the fiscal calendar (no sales: those arrive when the owner connects Demo POS), and a line
+ * in the maintainer console's feed saying it signed up.
+ *
+ * The two halves do not depend on each other: a restaurant whose books could not be set up still
+ * goes on the record. Whatever fails is thrown at the end, for the caller to log.
+ */
+export const setUpNewRestaurant: SetUpRestaurant = async (adminSql, { orgUuid, template, ownerUserId }) => {
+  const problems: string[] = [];
+  let booksReady = false;
+  try {
+    await seedDemoBooks(adminSql, { orgUuid, template, ownerUserId, withSales: false });
+    booksReady = true;
+  } catch {
+    problems.push("the books could not be set up");
+  }
+  try {
+    await adminSql.begin((tx) =>
+      recordChange(tx, {
+        orgUuid,
+        origin: "system",
+        actor: { type: "system", id: "onboarding" },
+        signals: [],
+        subject: { kind: "settings", name: "New restaurant" },
+        diff: { template, booksReady },
+      }),
+    );
+    await drainOutbox(adminSql, { orgUuids: [orgUuid] });
+  } catch {
+    problems.push("the sign-up could not be recorded");
+  }
+  if (problems.length > 0) throw new Error(problems.join(", and "));
 };
 
 /** Which demo restaurant a new owner gets, from their answer about service style. */
@@ -163,6 +204,16 @@ export const createAuthRoutes = (deps: AuthRouteDeps) => {
           throw e;
         }
         made = undefined; // owned now
+
+        // The restaurant exists and has its owner. What follows makes it more useful, and must
+        // never take that away: if it fails, the owner still lands in RMS and the failure is logged.
+        if (deps.setUpRestaurant) {
+          try {
+            await deps.setUpRestaurant(adminSql(), { orgUuid: result.orgUuid, template: templateFor(parsed.data.serviceStyle), ownerUserId: user.userUuid });
+          } catch (e) {
+            logError(c.req.path, `new restaurant set-up did not finish: ${e instanceof Error ? e.message : "unknown"}`);
+          }
+        }
         return "created";
       })();
     } finally {
@@ -204,4 +255,5 @@ export const createAuthRoutes = (deps: AuthRouteDeps) => {
 // The real seed function from @rms/seed (task B), wired by the lead at integration.
 export const authRoutes = createAuthRoutes({
   createDemoRestaurant,
+  setUpRestaurant: setUpNewRestaurant,
 });

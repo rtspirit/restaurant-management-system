@@ -11,7 +11,7 @@ import { ASK_QUERY_LIMITS } from "@rms/contracts";
 import { type Sql, adminDb, mintAskLogin, openAsk } from "@rms/db";
 import { type AskHandle, DENIED, READ_ONLY, type Row, askAs, forgetAsk, holds, outcome, platform, refusal } from "../helpers/actors.js";
 import { PARENT_ATTACKS } from "../helpers/attacks.js";
-import { CANARY, MODEL_KEYS, ORG, PARENT_TABLES, ids, roles, schemas } from "../helpers/world.js";
+import { CANARY, CUSTOM_MODEL_KEY, MODEL_KEYS, ORG, PARENT_TABLES, ids, roles, schemas } from "../helpers/world.js";
 
 const A = schemas("a");
 const B = schemas("b");
@@ -116,7 +116,7 @@ describe("the Ask login cannot read anything else", () => {
 
   it("control: the information schema does show it its own tables (so the check above can see)", async () => {
     const own = (await ask.query(`select table_name from information_schema.tables where table_schema = '${A.live}'`)).rows.map((r) => r.table_name);
-    expect(own.sort()).toEqual([...MODEL_KEYS].sort());
+    expect(own.sort()).toEqual([...MODEL_KEYS, CUSTOM_MODEL_KEY].sort());
   });
 
   it("column statistics (which hold real values) are hidden for B's tables", async () => {

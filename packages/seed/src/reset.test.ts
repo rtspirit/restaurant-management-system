@@ -114,23 +114,41 @@ describe("resetDemo refuses before touching anything", () => {
 
 describe("checkSameDatabase", () => {
   // The numbers are loaded through the Data API's own connection. It must be the same database.
-  const admin = parsed(LOCAL.DATABASE_ADMIN_URL);
-  afterAll(() => admin.end({ timeout: 0 }));
+  // What is compared is where each driver will really connect, not the text of a connection string.
+  const opened: ReturnType<typeof parsed>[] = [];
+  const at = (url: string) => {
+    const sql = parsed(url);
+    opened.push(sql);
+    return sql;
+  };
+  const admin = at(LOCAL.DATABASE_ADMIN_URL);
+  afterAll(async () => {
+    for (const sql of opened) await sql.end({ timeout: 0 });
+  });
 
   it("allows the restaurant-facing login on the same server and database", () => {
-    expect(checkSameDatabase(admin, "postgresql://rms_api:y@127.0.0.1:54322/postgres").ok).toBe(true);
+    expect(checkSameDatabase(admin, at("postgresql://rms_api:y@127.0.0.1:54322/postgres")).ok).toBe(true);
   });
   it.each([
-    ["no connection string", undefined],
     ["another host", "postgresql://rms_api:y@db.example.com:54322/postgres"],
     ["another port", "postgresql://rms_api:y@127.0.0.1:6543/postgres"],
     ["another database", "postgresql://rms_api:y@127.0.0.1:54322/other"],
-    ["the '#' trick", "postgresql://rms_api:y@127.0.0.1:54322#@remote.example/postgres"],
+    ["a port override in the query", "postgresql://rms_api:y@127.0.0.1:54322/postgres?port=6543"],
     ["a host override in the query", "postgresql://rms_api:y@127.0.0.1:54322/postgres?host=db.example.com"],
+    ["a database override in the query", "postgresql://rms_api:y@127.0.0.1:54322/postgres?database=other"],
+    ["two hosts", "postgresql://rms_api:y@127.0.0.1:54322,db.example.com:54322/postgres"],
   ])("refuses %s", (_name, url) => {
-    const check = checkSameDatabase(admin, url);
-    expect(check.ok).toBe(false);
+    const check = checkSameDatabase(admin, at(url));
+    expect(check.ok, JSON.stringify(at(url).options.host)).toBe(false);
     if (!check.ok) expect(check.reason).toMatch(/do not point at the same database/);
+  });
+  it("the override cases really do send the driver somewhere else (so the check is about the driver, not the text)", () => {
+    expect(at("postgresql://rms_api:y@127.0.0.1:54322/postgres?port=6543").options.port).toEqual([6543]);
+    expect(at("postgresql://rms_api:y@127.0.0.1:54322/postgres?host=db.example.com").options.host).toEqual(["db.example.com"]);
+  });
+  it("refuses a connection through a socket path", () => {
+    expect(checkSameDatabase(admin, { options: { ...admin.options, path: "/tmp/.s.PGSQL.5432" } } as never).ok).toBe(false);
+    expect(checkSameDatabase({ options: { ...admin.options, host: [], port: [] } } as never, admin).ok).toBe(false);
   });
 });
 

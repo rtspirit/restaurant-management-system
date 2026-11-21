@@ -5,8 +5,9 @@
 // Ids: orgs use the task G range (uuid suffix 90 to 9f, store prefix o_919191919xxx). Every other
 // row id is derived from a name, with a `9191` marker, so runs are repeatable and nothing collides.
 import { createHash } from "node:crypto";
-import { AppManifest, type FieldDef, ModelDefinition, NamedQueryDefinition, SYSTEM_COLUMNS, columnsForField, toPublicId } from "@rms/contracts";
+import { AppManifest, CustomModelDefinition, type FieldDef, ModelDefinition, NamedQueryDefinition, SYSTEM_COLUMNS, columnsForField, toPublicId } from "@rms/contracts";
 import { type Sql, type Tx, asMigrator, asParentSync, ident, provisionStore } from "@rms/db";
+import { applyChange } from "@rms/models";
 
 export type OrgKey = "a" | "b";
 export type AnyOrgKey = OrgKey | "c" | "d";
@@ -98,6 +99,7 @@ export const ids = (k: OrgKey) => ({
   visitRow2: rid(`${k}:row:visit2`),
   ledgerRow: rid(`${k}:row:ledger`),
   ledgerRow2: rid(`${k}:row:ledger2`),
+  memoRow: rid(`${k}:row:memo`),
 });
 
 export const STAFF_USER_ID = rid("maintainer:staff_user");
@@ -145,6 +147,23 @@ export const MODELS = {
     fields: [text("body")], locationScoped: false, appendOnly: true, softDelete: false, defaultAccess: { owner: "write", staff: "none" },
   }),
 } as const;
+/**
+ * A REAL custom model: the kind a restaurant designs for itself through the build agent. Its key
+ * starts with `x_`, its pack is "custom", and its tables are made by the model compiler through
+ * `applyChange` (create_custom_model), in draft and live, exactly as the product does it. The
+ * three models above are hand-made stand-ins that claim a library pack; this one makes sure the
+ * attack tests also cover what restaurants really create.
+ */
+export const CUSTOM_MODEL_KEY = "x_sec_memo";
+export const CUSTOM_MODEL = CustomModelDefinition.parse({
+  key: CUSTOM_MODEL_KEY, pack: "custom", version: 1, name: "Security memo", description: "A memo the restaurant designed for itself, used by the isolation suite.",
+  fields: [{ key: "body", label: "Body", type: "text", required: true }], locationScoped: false, defaultAccess: { owner: "write", staff: "read" },
+});
+/** The one memo each restaurant starts with, in each environment. */
+export const memoRows = (k: OrgKey, env: "live" | "draft") => [
+  { id: env === "live" ? ids(k).memoRow : rid(`${ids(k).memoRow}:draft`), ...sys, body: `memo ${CANARY[k]} ${env}` },
+];
+
 export type ModelKey = keyof typeof MODELS;
 export const MODEL_KEYS = Object.keys(MODELS) as ModelKey[];
 
@@ -154,6 +173,7 @@ export const APP_MANIFEST = AppManifest.parse({
   models: [
     { use: "sec_note", access: "write" },
     { use: "sec_visit", access: "write" },
+    { use: CUSTOM_MODEL_KEY, access: "write" },
     { use: "parent.jobs", access: "read" },
     { use: "parent.staff", access: "read" },
   ],
@@ -315,6 +335,13 @@ export const createWorld = async (admin: Sql, users: WorldUsers): Promise<void> 
     await admin`insert into platform.org_model_changes (id, org_id, org_model_id, change, compiled_sql, applied_draft_at, applied_live_at) values
       (${i.orgModelChange}, ${o.uuid}, ${i.orgModelNote}, ${admin.json({ op: "use_template", template: "sec_note" })}, ${`-- ${c}`}, now(), now())`;
 
+    // The custom model, made the way the product makes one: the compiler, draft and live.
+    await applyChange(admin, o.uuid, { op: "create_custom_model", definition: CUSTOM_MODEL }, { live: true });
+    await asMigrator(admin, async (tx) => {
+      for (const env of ["live", "draft"] as const) await insert(tx, env === "live" ? schemas(k).live : schemas(k).draft, CUSTOM_MODEL_KEY, memoRows(k, env));
+      await tx.unsafe(`analyze ${ident(schemas(k).live)}.${ident(CUSTOM_MODEL_KEY)}`);
+    });
+
     // Mini-apps, versions and everything hanging off them.
     await admin`insert into platform.apps (id, org_id, slug, number, name, status) values
       (${i.app}, ${o.uuid}, 'sec-app', 1, ${`Security app ${c}`}, 'published'),
@@ -408,6 +435,7 @@ export const restoreStoreRows = async (admin: Sql): Promise<void> => {
           const keep = rows[key].map((r) => r.id);
           await tx`delete from ${tx(schema)}.${tx(key)} where id <> all(${keep}::uuid[])`;
         }
+        await tx`delete from ${tx(schema)}.${tx(CUSTOM_MODEL_KEY)} where id <> all(${memoRows(k, env).map((r) => r.id)}::uuid[])`;
       }
     }
   });

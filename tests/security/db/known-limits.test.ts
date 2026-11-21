@@ -9,7 +9,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { apiDb } from "@rms/db";
 import { createHmac } from "node:crypto";
 import { type AskHandle, type Row, askAs, holds, noOrgSql, orgSql, outcome, rolledBack, storeSql } from "../helpers/actors.js";
-import { CANARY, ORG, ids, roles, schemas } from "../helpers/world.js";
+import { CANARY, CUSTOM_MODEL_KEY, ORG, ids, roles, schemas } from "../helpers/world.js";
 
 const A = schemas("a");
 const B = schemas("b");
@@ -152,14 +152,14 @@ describe("KNOWN LIMIT (ADR 0004): catalog leaks", () => {
 
   it("KNOWN LIMIT: it can read B's table names and column names", async () => {
     const tables = (await ask.query(`select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = '${B.live}' and c.relkind = 'r'`)).rows.map((r) => r.relname);
-    expect(tables.sort()).toEqual(["sec_ledger", "sec_note", "sec_visit"]);
+    expect(tables.sort()).toEqual(["sec_ledger", "sec_note", "sec_visit", CUSTOM_MODEL_KEY]);
     const columns = (await ask.query(`select a.attname from pg_attribute a join pg_class c on c.oid = a.attrelid join pg_namespace n on n.oid = c.relnamespace where n.nspname = '${B.live}' and c.relname = 'sec_visit' and a.attnum > 0`)).rows.map((r) => r.attname);
     expect(columns).toEqual(expect.arrayContaining(["body", "wage", "location_id"]));
   });
 
   it("KNOWN LIMIT: it can read B's rough row counts and table sizes", async () => {
     const rows = (await ask.query(`select c.relname, c.reltuples::int as rows, pg_total_relation_size(c.oid) as bytes from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = '${B.live}' and c.relkind = 'r' order by 1`)).rows;
-    expect(rows.map((r) => [r.relname, r.rows])).toEqual([["sec_ledger", 2], ["sec_note", 1], ["sec_visit", 2]]);
+    expect(rows.map((r) => [r.relname, r.rows])).toEqual([["sec_ledger", 2], ["sec_note", 1], ["sec_visit", 2], [CUSTOM_MODEL_KEY, 1]]);
     for (const r of rows) expect(Number(r.bytes)).toBeGreaterThan(0);
   });
 

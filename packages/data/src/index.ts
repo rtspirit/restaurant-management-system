@@ -14,7 +14,9 @@ import type { TenantContext } from "@rms/contracts";
 import { runBatch } from "./batch.js";
 import { runCatalog } from "./catalog.js";
 import { DataApiError, type ErrorHints, errorResponse } from "./errors.js";
+import { enterRestaurant } from "./limit.js";
 import { runNamedAction, runNamedQuery } from "./named.js";
+import { readParent } from "./parent-read.js";
 import { runQuery } from "./query.js";
 
 export { runBatch } from "./batch.js";
@@ -27,24 +29,14 @@ export { TemplateError, parseTemplate, renderTemplate } from "./template.js";
 export { FUNCTIONS, checkNamedAction, checkNamedQuery, checkTemplate } from "./template-check.js";
 export { decodeCursor, encodeCursor } from "./cursor.js";
 export { readOnlyStore, run } from "./sql.js";
+export { DEFAULT_MAX_IN_FLIGHT, maxInFlight } from "./limit.js";
 
 export type DataRoute = "query" | "batch" | "named" | "action" | "catalog";
 export type DataReply = { status: number; body: unknown };
 
-const HINTS: Record<DataRoute, ErrorHints> = { query: { op: "read" }, batch: { op: "write" }, named: { op: "named" }, action: { op: "named" }, catalog: { op: "read" } };
+const TOO_MUCH_AT_ONCE = "Too much is being asked for at once. Please try again in a moment.";
 
-/**
- * Requests in flight, per restaurant. The server has a small pool of database connections
- * shared by every restaurant, so one restaurant sending many slow requests at once must not be
- * able to use them all. Above the cap a request is answered `limit` at once, without touching
- * the database. The count is per server instance.
- */
-const inFlight = new Map<string, number>();
-const DEFAULT_MAX_IN_FLIGHT = 4;
-const maxInFlight = (): number => {
-  const n = Number(process.env.RMS_DATA_MAX_INFLIGHT);
-  return Number.isInteger(n) && n >= 1 ? n : DEFAULT_MAX_IN_FLIGHT;
-};
+const HINTS: Record<DataRoute, ErrorHints> = { query: { op: "read" }, batch: { op: "write" }, named: { op: "named" }, action: { op: "named" }, catalog: { op: "read" } };
 
 const dispatch = async (route: DataRoute, tenant: TenantContext, body: unknown, requestId: string): Promise<unknown> => {
   switch (route) {
@@ -67,19 +59,31 @@ const dispatch = async (route: DataRoute, tenant: TenantContext, body: unknown, 
  * `body` is the parsed JSON body, untrusted.
  */
 export const handleData = async (route: DataRoute, tenant: TenantContext, body: unknown, requestId: string): Promise<DataReply> => {
-  const org = tenant.orgId;
-  const now = inFlight.get(org) ?? 0;
-  if (now >= maxInFlight()) {
-    return errorResponse(new DataApiError("limit", "Too much is being asked for at once. Please try again in a moment."), requestId, route);
-  }
-  inFlight.set(org, now + 1);
+  const leave = enterRestaurant(tenant.orgId);
+  if (!leave) return errorResponse(new DataApiError("limit", TOO_MUCH_AT_ONCE), requestId, route);
   try {
     return { status: 200, body: await dispatch(route, tenant, body, requestId) };
   } catch (e) {
     return errorResponse(e, requestId, route, HINTS[route]);
   } finally {
-    const left = (inFlight.get(org) ?? 1) - 1;
-    if (left <= 0) inFlight.delete(org);
-    else inFlight.set(org, left);
+    leave();
+  }
+};
+
+/**
+ * Reads one of a restaurant's parent-data lists for RMS's own screens and always returns a
+ * reply. Counts toward the same per-restaurant cap as mini-app requests.
+ * `tenant` must be the context `requireSession` built from a verified sign-in. `model` is
+ * untrusted: it is checked against the ten fixed lists.
+ */
+export const handleParentRead = async (tenant: TenantContext, model: unknown, requestId: string): Promise<DataReply> => {
+  const leave = enterRestaurant(tenant.orgId);
+  if (!leave) return errorResponse(new DataApiError("limit", TOO_MUCH_AT_ONCE), requestId, "parent");
+  try {
+    return { status: 200, body: await readParent(tenant, model) };
+  } catch (e) {
+    return errorResponse(e, requestId, "parent", { op: "read" });
+  } finally {
+    leave();
   }
 };
