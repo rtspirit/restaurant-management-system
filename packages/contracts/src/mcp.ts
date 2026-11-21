@@ -97,7 +97,14 @@ export type ToolGrant = z.infer<typeof ToolGrant>;
 /** The consumer the platform's sync runs as. */
 export const SYNC_CONSUMER = { type: "import", id: "sync" } as const satisfies ToolConsumer;
 
-/** A connection as the owner sees it. No address, no token, no hash. */
+/**
+ * The version of a tool list: its `tools_hash` (SHA-256 of `canonicalToolList`, lowercase hex).
+ * Not a secret: it names the list the owner was shown, so Allow can only allow that list.
+ */
+export const ToolsVersion = z.string().regex(/^[0-9a-f]{64}$/);
+export type ToolsVersion = z.infer<typeof ToolsVersion>;
+
+/** A connection as the owner sees it. No address, no token. `toolsVersion` is the shown list's version (never shown on screen). */
 export const ConnectionView = z.object({
   id: ConnectionId,
   name: z.string(),
@@ -109,11 +116,20 @@ export const ConnectionView = z.object({
   lastSyncedAt: z.iso.datetime().nullable(),
   /** True when RMS knows how to bring this system's information in (today: Demo POS only). */
   canSync: z.boolean(),
+  /** The version of `tools` as shown. Null before the system has listed any. Allow sends it back. */
+  toolsVersion: ToolsVersion.nullable(),
 });
 export type ConnectionView = z.infer<typeof ConnectionView>;
 
-/** Approve the tool list as it is now. `tools` must equal the names the owner was shown, or it is refused as stale. */
-export const ApproveToolsRequest = z.strictObject({ tools: z.array(z.string().regex(/^[a-z][a-z0-9_]{0,63}$/)).min(1).max(60) });
+/**
+ * Approve the tool list the owner was shown. `tools` must equal its names AND `toolsVersion` its
+ * version (from `ConnectionView`), or it is refused as stale: a changed description with the
+ * same names is a different list.
+ */
+export const ApproveToolsRequest = z.strictObject({
+  tools: z.array(z.string().regex(/^[a-z][a-z0-9_]{0,63}$/)).min(1).max(60),
+  toolsVersion: ToolsVersion,
+});
 export type ApproveToolsRequest = z.infer<typeof ApproveToolsRequest>;
 
 /** Bring information in. Omitted dates = the last eight weeks the system has. */

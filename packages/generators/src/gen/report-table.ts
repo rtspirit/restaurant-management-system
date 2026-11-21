@@ -42,7 +42,7 @@ export const reportTable = (input: Input, catalog: SandboxCatalog, component: st
       ? [
           `const TOTALS = [${totals.map((c) => lit(c.key)).join(", ")}] as const;`,
           "",
-          "const sum = (rows: Record<string, unknown>[], key: string): number =>",
+          "const sum = (rows: Record<string, unknown>[], key: (typeof TOTALS)[number]): number =>",
           "  rows.reduce<number>((total, row) => {",
           "    const value = row[key];",
           '    return total + (typeof value === "number" ? value : 0);',

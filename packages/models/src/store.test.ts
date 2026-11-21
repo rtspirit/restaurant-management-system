@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type ModelDefinition, SYSTEM_COLUMNS, type TenantContext, columnsForField, toPublicId } from "@rms/contracts";
-import { type Tx, adminDb, apiDb, closeAll, newUuid, provisionStore, withOrg, withStore } from "@rms/db";
+import { type Tx, adminDb, apiDb, closeAll, newStorePrefix, newUuid, provisionStore, withOrg, withStore } from "@rms/db";
 import { fixtureModel, fixtureModels } from "./compiler/__fixtures__/pack.js";
 import { compileModel, objectName, ruleConstraintName, targetsFor } from "./compiler/index.js";
 import { buildLibrary, installLibrary } from "./library.js";
@@ -27,22 +27,30 @@ if (!process.env.DATABASE_URL || !process.env.DATABASE_ADMIN_URL) {
   throw new Error("The model store tests need the local database: DATABASE_URL and DATABASE_ADMIN_URL are not set (no .env.local found)");
 }
 
-const id = (suffix: string) => `0193a3c0-0000-7000-8000-0000000000${suffix}`;
-const A = id("c1");
-const B = id("c2");
-const C = id("c5");
-const PA = "o_c1c1c1c1c101";
-const PB = "o_c1c1c1c1c102";
-const PC = "o_c1c1c1c1c103";
-const L1 = id("c3");
-const L2 = id("c4");
-const USER = toPublicId("usr", id("c9"));
+// Fresh ids, store prefixes and platform template keys on every run, so parallel runs on the
+// shared local database never create, use or drop each other's rows. newUuid is time-ordered, so A < B < C.
+const RUN = newStorePrefix().slice(2);
+const A = newUuid();
+const B = newUuid();
+const C = newUuid();
+const PA = newStorePrefix();
+const PB = newStorePrefix();
+const PC = newStorePrefix();
+const L1 = newUuid();
+const L2 = newUuid();
+const USER_UUID = newUuid();
+const USER = toPublicId("usr", USER_UUID);
 const ORGS = [
-  { id: A, prefix: PA, slug: "c-test-a" },
-  { id: B, prefix: PB, slug: "c-test-b" },
-  { id: C, prefix: PC, slug: "c-test-c" },
+  { id: A, prefix: PA, slug: `c-test-a-${RUN}` },
+  { id: B, prefix: PB, slug: `c-test-b-${RUN}` },
+  { id: C, prefix: PC, slug: `c-test-c-${RUN}` },
 ];
-const TEST_TEMPLATES = ["c1test_item", "c1test_note"];
+const T = `c1t${RUN}`;
+const ITEM = `${T}_item`;
+const NOTE = `${T}_note`;
+const REPORT = `${T}_report`;
+const TOUCH = `${T}_touch`;
+const TEST_TEMPLATES = [ITEM, NOTE];
 
 const library = { models: fixtureModels };
 const allKeys = fixtureModels.map((m) => m.key);
@@ -73,8 +81,8 @@ const cleanup = async () => {
     await sql`delete from platform.org_models where org_id = ${o.id}`;
     await sql`delete from platform.organizations where id = ${o.id}`;
   }
-  await sql`delete from platform.named_queries where key = 'c1test_report'`;
-  await sql`delete from platform.named_actions where key = 'c1test_touch'`;
+  await sql`delete from platform.named_queries where key = ${REPORT}`;
+  await sql`delete from platform.named_actions where key = ${TOUCH}`;
   await sql`delete from platform.model_template_versions where template_key in ${sql(TEST_TEMPLATES)}`;
   await sql`delete from platform.model_templates where key in ${sql(TEST_TEMPLATES)}`;
 };
@@ -91,7 +99,8 @@ const expectedColumns = (def: ModelDefinition) => {
   return [...system, ...def.fields.flatMap(columnsForField)].map((c) => ({ name: c.name, type: catalogType(c.sqlType), notnull: !c.nullable }));
 };
 
-describe("model tables in a restaurant's store", () => {
+// Shared local database: under parallel runs these wait on other runs. Give them time.
+describe("model tables in a restaurant's store", { timeout: 60_000 }, () => {
   let first: Awaited<ReturnType<typeof ensureModels>>;
 
   beforeAll(async () => {
@@ -579,7 +588,7 @@ describe("model tables in a restaurant's store", () => {
        returning created_by, source, deleted_at, created_at::text as created_at, updated_at::text as updated_at`,
       [v],
     );
-    expect(row).toMatchObject({ created_by: `user:${id("c9")}`, source: "app", deleted_at: null });
+    expect(row).toMatchObject({ created_by: `user:${USER_UUID}`, source: "app", deleted_at: null });
     for (const at of [row?.created_at, row?.updated_at]) expect(String(at)).toMatch(/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d(\.\d{1,3})?[+-]\d\d/);
 
     // The same source record again changes nothing (a bare "on conflict do nothing" uses the source index).
@@ -653,7 +662,7 @@ describe("model tables in a restaurant's store", () => {
     await expect(ensureModels(sql, C, ["vendor", "journal_entry"], { library: noPeriod })).rejects.toThrow('Model "fiscal_period" is not in the library. Model "journal_entry" needs it');
     await expect(ensureModels(sql, C, ["vendor", "no_such_model"], { library })).rejects.toThrow('Model "no_such_model" is not in the library');
     expect(await left()).toEqual({ models: 0, tables: 0 });
-    await expect(ensureModels(sql, id("ce"), ["vendor"], { library })).rejects.toThrow(/store is not ready/);
+    await expect(ensureModels(sql, newUuid(), ["vendor"], { library })).rejects.toThrow(/store is not ready/);
 
     // A record that says the restaurant has its OWN model under a library name. The library model's
     // rules (and their trigger functions) must never be put on such a table, asked for by name or pulled in.
@@ -935,31 +944,31 @@ describe("model tables in a restaurant's store", () => {
       defaultAccess: { owner: "write", staff: "read" },
     });
     const lib = buildLibrary({
-      models: [model("c1test_item", [{ key: "name", label: "Name", type: "text", required: true }]), model("c1test_note", [{ key: "item", label: "Item", type: "ref", model: "c1test_item", required: true }])],
-      namedQueries: [{ key: "c1test_report", pack: "inventory", name: "Test report", description: "A report made only for this test.", reads: ["c1test_item"], sql: "select name from {{c1test_item}} as i", columns: [{ key: "name", label: "Name", type: "text" }] }],
-      namedActions: [{ key: "c1test_touch", pack: "inventory", name: "Test action", description: "An action made only for this test.", reads: ["c1test_item"], writes: ["c1test_note"], sql: "insert into {{c1test_note}} (id) select gen_random_uuid()", idempotent: true }],
+      models: [model(ITEM, [{ key: "name", label: "Name", type: "text", required: true }]), model(NOTE, [{ key: "item", label: "Item", type: "ref", model: ITEM, required: true }])],
+      namedQueries: [{ key: REPORT, pack: "inventory", name: "Test report", description: "A report made only for this test.", reads: [ITEM], sql: `select name from {{${ITEM}}} as i`, columns: [{ key: "name", label: "Name", type: "text" }] }],
+      namedActions: [{ key: TOUCH, pack: "inventory", name: "Test action", description: "An action made only for this test.", reads: [ITEM], writes: [NOTE], sql: `insert into {{${NOTE}}} (id) select gen_random_uuid()`, idempotent: true }],
     });
     expect(await installLibrary(sql, lib)).toEqual({ models: 2, namedQueries: 1, namedActions: 1 });
     expect(await installLibrary(sql, lib)).toEqual({ models: 2, namedQueries: 1, namedActions: 1 });
     const stored = await sql`select t.key, t.pack, t.current_version, t.status, v.definition from platform.model_templates t join platform.model_template_versions v on v.template_key = t.key and v.version = t.current_version where t.key in ${sql(TEST_TEMPLATES)} order by t.key`;
     expect(stored.map((s) => s.key)).toEqual(TEST_TEMPLATES);
     expect(stored[0]?.definition).toEqual(lib.models[0]);
-    expect((await sql`select definition from platform.named_queries where key = 'c1test_report'`)[0]?.definition).toEqual(lib.namedQueries[0]);
-    expect((await sql`select definition from platform.named_actions where key = 'c1test_touch'`)[0]?.definition).toEqual(lib.namedActions[0]);
+    expect((await sql`select definition from platform.named_queries where key = ${REPORT}`)[0]?.definition).toEqual(lib.namedQueries[0]);
+    expect((await sql`select definition from platform.named_actions where key = ${TOUCH}`)[0]?.definition).toEqual(lib.namedActions[0]);
 
     // No library passed in: definitions come from the installed templates, and the template is recorded.
-    expect(await ensureModels(sql, C, ["c1test_note"])).toEqual({ created: ["c1test_item", "c1test_note"], madeLive: [], unchanged: [] });
-    const rows = await sql`select key, kind, template_key, template_version, status from platform.org_models where org_id = ${C} and key like 'c1test%' order by key`;
+    expect(await ensureModels(sql, C, [NOTE])).toEqual({ created: [ITEM, NOTE], madeLive: [], unchanged: [] });
+    const rows = await sql`select key, kind, template_key, template_version, status from platform.org_models where org_id = ${C} and key like ${`${T}%`} order by key`;
     expect(rows.map((r) => ({ ...r }))).toEqual(TEST_TEMPLATES.map((key) => ({ key, kind: "standard", template_key: key, template_version: 1, status: "live" })));
     // A custom model may not take a library model's name, even in a restaurant that does not use that model.
-    await expect(applyChange(sql, A, { op: "create_custom_model", definition: { ...model("c1test_item", [{ key: "name", label: "Name", type: "text" }]), pack: "custom" } } as never)).rejects.toThrow(/must start with "x_"/);
+    await expect(applyChange(sql, A, { op: "create_custom_model", definition: { ...model(ITEM, [{ key: "name", label: "Name", type: "text" }]), pack: "custom" } } as never)).rejects.toThrow(/must start with "x_"/);
 
     // A stored version is never changed in place.
     const edited = (version: number) => buildLibrary({ models: [{ ...lib.models[0], version, description: "The same model with different words in it." }, lib.models[1]], namedQueries: [], namedActions: [] });
-    await expect(installLibrary(sql, edited(1))).rejects.toThrow('Library model "c1test_item" changed but is still version 1. Give it a new version number');
-    expect((await sql`select definition from platform.model_template_versions where template_key = 'c1test_item' and version = 1`)[0]?.definition).toEqual(lib.models[0]);
+    await expect(installLibrary(sql, edited(1))).rejects.toThrow(`Library model "${ITEM}" changed but is still version 1. Give it a new version number`);
+    expect((await sql`select definition from platform.model_template_versions where template_key = ${ITEM} and version = 1`)[0]?.definition).toEqual(lib.models[0]);
     expect(await installLibrary(sql, edited(2))).toMatchObject({ models: 2 });
-    const versions = await sql`select v.version, t.current_version, v.definition from platform.model_template_versions v join platform.model_templates t on t.key = v.template_key where v.template_key = 'c1test_item' order by v.version`;
+    const versions = await sql`select v.version, t.current_version, v.definition from platform.model_template_versions v join platform.model_templates t on t.key = v.template_key where v.template_key = ${ITEM} order by v.version`;
     expect(versions.map((v) => [v.version, v.current_version])).toEqual([[1, 2], [2, 2]]);
     expect(versions[0]?.definition).toEqual(lib.models[0]);
     // Installing the older library again is harmless: version 1 is unchanged and stays stored.

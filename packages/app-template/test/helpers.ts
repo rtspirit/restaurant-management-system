@@ -62,3 +62,6 @@ export const prepareApp = (dir: string, shellOrigin = "http://localhost:3000"): 
   writeFileSync(join(dir, ".env.local"), `VITE_RMS_SHELL_ORIGIN=${shellOrigin}\n`);
 };
 
+
+// Chromium does not support the webrtc directive yet and says so once; WebRTC is refused by rms check as well.
+export const KNOWN_UNSUPPORTED = /^Unrecognized Content-Security-Policy directive 'webrtc'\.$/;

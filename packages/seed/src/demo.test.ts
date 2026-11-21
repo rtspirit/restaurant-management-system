@@ -2,7 +2,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type TenantContext, toPublicId } from "@rms/contracts";
-import { adminDb, apiDb, closeAll, ident, newUuid, withStore } from "@rms/db";
+import { adminDb, apiDb, closeAll, ident, newStorePrefix, newUuid, withStore } from "@rms/db";
 import { PARENT_TABLES, syncParent } from "@rms/parent";
 import { createDemoRestaurant, removeRestaurants } from "./demo.js";
 import { PARENT_SOURCE_TABLES, buildParentRows } from "./parent-data.js";
@@ -12,9 +12,9 @@ import { loadTestEnv } from "@rms/db/testing";
 loadTestEnv();
 const hasDb = Boolean(process.env.DATABASE_URL && process.env.DATABASE_ADMIN_URL);
 
-// Task B test range.
-const MARIGOLD = { orgUuid: "0193a3c0-0000-7000-8000-0000000000b4", storePrefix: "o_b1b1b1b1b1b4" };
-const SLICE = { orgUuid: "0193a3c0-0000-7000-8000-0000000000b5", storePrefix: "o_b1b1b1b1b1b5" };
+// Fresh ids and store prefixes on every run, so parallel runs on the shared local database never meet.
+const MARIGOLD = { orgUuid: newUuid(), storePrefix: newStorePrefix() };
+const SLICE = { orgUuid: newUuid(), storePrefix: newStorePrefix() };
 const TODAY = "2026-11-21";
 
 const EXPECTED: Record<"marigold" | "slice_yard", Record<string, number>> = {
@@ -75,9 +75,6 @@ describe("parent data (no database)", () => {
 });
 
 describe.skipIf(!hasDb)("createDemoRestaurant", () => {
-  beforeAll(async () => {
-    await removeRestaurants(adminDb(), [MARIGOLD.orgUuid, SLICE.orgUuid]);
-  });
   afterAll(async () => {
     await removeRestaurants(adminDb(), [MARIGOLD.orgUuid, SLICE.orgUuid]);
     await closeAll();
@@ -94,7 +91,7 @@ describe.skipIf(!hasDb)("createDemoRestaurant", () => {
     const orgs = await adminDb()<{ id: string; brand_colour: string; store_ready: boolean; slug: string }[]>`
       select id, brand_colour, store_ready, slug from platform.organizations where id in ${adminDb()([m.orgUuid, s.orgUuid])} order by id`;
     expect(orgs.map((o) => [o.brand_colour, o.store_ready])).toEqual([["#E8892B", true], ["#C8372D", true]]);
-    expect(orgs[0]?.slug).toBe("marigold-kitchen-b1b1b1b1b1b4");
+    expect(orgs[0]?.slug).toBe(`marigold-kitchen-${MARIGOLD.storePrefix.slice(2)}`);
   });
 
   it("row counts match the brief, in the platform and in each parent schema", async () => {

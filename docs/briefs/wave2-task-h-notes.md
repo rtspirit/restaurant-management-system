@@ -45,8 +45,8 @@ Screenshots (git-ignored, made by the tests): `packages/app-template/test-output
 | `RMS_ENV_FILE=... pnpm test` | 36 of 36 tasks |
 | `@rms/sdk` tests | 41 passed |
 | `@rms/generators` tests | 28 passed (9 golden files plus the screen list) |
-| `@rms/app-template` tests | 102 passed, including the bundle test |
-| bundle test (in the 102) | 2 passed: `npm ci` outside the repo, `rms lock`, `rms gen`, `npm run build`, `rms check` all pass |
+| `@rms/app-template` tests | 163 passed, including the bundle test |
+| bundle test (in the 163) | 2 passed: `npm ci` outside the repo, `rms lock`, `rms gen`, `npm run build`, `rms check` all pass |
 
 `pnpm test:security` not run: nothing here touches data, tokens or queries.
 
@@ -60,6 +60,19 @@ Screenshots (git-ignored, made by the tests): `packages/app-template/test-output
 - `rms check` safety: names are looked up in a Map (no more `toString` or `valueOf` refusals). Refused now: bare `location`, `open`, `parent`, `top`, `opener`, `frames`, `self`, `window`, `globalThis` (unless the file declares its own, such as `const [open, setOpen]`), `document.defaultView`, `Function` and `eval` as values, `createElement`, `href`/`action`/`formAction`/`httpEquiv`/`srcDoc` on host elements (an in-page `#` link is fine), `<meta>`, `<base>`, `<script>`, `<iframe>`, `<object>`, `<embed>`, `<link>`, `<style>`, spreads onto host elements, every stylesheet extension, and imports with a query. Still a ban list, not an allow list of globals: `rms check` only warns early, and the runner, the policy header and the relay are the real walls.
 - Dev policy: `connect-src 'self'` (no more `ws: wss:`; a test proves hot reload still connects), `form-action 'none'`, `base-uri 'none'`.
 - Forms and details leave out fields the Data API reports as `masked`, and never send them.
+
+## Security review fixes (round 2)
+
+- **Lead-owned change, as agreed:** `packages/contracts/src/build.ts` `ALLOWED_APP_IMPORTS` no longer lists `react/jsx-runtime` (the compiler's own automatic use is not an import in source). The matching line in `packages/contracts/src/wave2.test.ts` was updated with it.
+- `rms check` safety is now an allow list, using the TypeScript checker: every name must be the mini-app's own (resolved by scope) or one of a short list of safe globals (`Math`, `JSON`, `Array`, `Date`, `Intl`, ..., `Object` with `keys`, `fromEntries`, `freeze`, `is` only). Names that are the page's own (`window`, `location`, `parent`, `open`, `document`, ...) may not be declared. A computed key must have a fixed literal type, checked against the banned member names. No casts but `as const`, no `any`. No `ref`, no spreads in JSX. An event is read only as `target.value` / `target.checked`. Members that reach the page (`ownerDocument`, `defaultView`, `view`, `nativeEvent`, `parentNode`, `call`, `constructor`, ...) are refused. Host elements come from an allow list; `img` only with a relative `src`; no `video`, `audio`, `source`, `iframe`, `object`, `embed`, `link`, `script`, SVG `image`/`use`. Workers, `RTCPeerConnection`, channels, `URL`, `Blob`, `Image`, `Audio` are refused because they are not on the list. No namespace imports, no `export *`, no `import()`.
+- Only `.ts` and `.tsx` (exactly, lower case) may be in `src/screens/` and `src/components/`; links are refused; any new root file (`vite.config.js`, `.env.development.local`, `.npmrc`, ...) fails `locked`. The root-file tests passed before this round too: the locked rule already refused them.
+- Dev policy adds `object-src`, `frame-src`, `worker-src`, `media-src`, `manifest-src` all `'none'` and `webrtc 'block'`; a test checks there is no `unsafe-eval`. Chromium does not support `webrtc` yet and logs "Unrecognized Content-Security-Policy directive 'webrtc'." once; the browser tests ignore exactly that line. WebRTC is refused by `rms check` anyway.
+- Generated `report_table` code now types its `sum` key as a literal union, so it passes the new key rule. Every golden mini-app and the template still pass all checks and build.
+
+**For the publish task (Wave 3):**
+1. Publish never trusts the sandbox's `node_modules/` or `dist/`: it does a clean `npm ci` from the locked `package-lock.json`.
+2. It runs its own `rms check` (all seven checks) on the server side, against its own trusted hash list, not the app's `.rms/locked.json`.
+3. It builds again from that clean install and publishes only that build, with the production policy header.
 
 ## Can wait
 
