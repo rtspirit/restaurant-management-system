@@ -1,8 +1,7 @@
 // Pure helpers. No database, no network.
 import { AGENT_RULES, normaliseRequest } from "@rms/contracts";
 import { describe, expect, it } from "vitest";
-import { contentWords, dataBlock, mergeRequests, profileText, reasonFor, wordOverlap } from "../src/index.js";
-import { checkedEmbedding } from "../src/text.js";
+import { checkedEmbedding, contentWords, dataBlock, mergeRequests, profileText, reasonFor, wordOverlap } from "../src/testing.js";
 
 describe("mergeRequests", () => {
   it("appends, newest last, and skips a word-for-word repeat", () => {

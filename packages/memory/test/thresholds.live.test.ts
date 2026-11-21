@@ -8,7 +8,8 @@ import { DUPLICATE_THRESHOLDS, type TenantContext, toPublicId } from "@rms/contr
 import { type NewAgentEvent, adminDb, apiDb, appendAgentEvents, closeAll, newUuid, withOrg } from "@rms/db";
 import { requireTestEnv } from "@rms/db/testing";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { type JudgeAnswer, checkDuplicate, checkDuplicateWithThresholds, defaultJudge, recall, saveAppProfile, similaritiesForMeasurement, summariseSession, useMemoryModels } from "../src/index.js";
+import { checkDuplicate, recall, saveAppProfile, summariseSession } from "../src/index.js";
+import { type JudgeAnswer, checkDuplicateWithThresholds, defaultJudge, similaritiesForMeasurement, useMemoryModels } from "../src/testing.js";
 
 const LIVE = process.env.RMS_LIVE === "1";
 const RUNS = 3;

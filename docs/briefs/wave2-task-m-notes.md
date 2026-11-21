@@ -70,6 +70,13 @@ The whole live test was run twice, three runs each time, with the same verdicts.
   - `packages/memory/test/thresholds.live.test.ts`: live, skipped unless `RMS_LIVE=1`
   - `apps/api/src/routes/memory.test.ts`
 
+## Review fixes (third round)
+
+- **No model call can hang.** Embedding and summary calls are limited to `MODEL_CALL_TIMEOUT_MS` (8000, in `packages/memory/src/models.ts`). The confirm call keeps the contract's 5 s. All three go through one helper, `bounded`, which aborts the call and rejects on time even if the call ignores the abort. A stalled embedder sends `checkDuplicate` to the word shortlist, `saveAppProfile` keeps the text, and `summariseSession` returns null. Tested with stalled stand-ins.
+- **A long or empty reason no longer throws the verdict away.** The confirm schema takes any reason string. `ownerReason` replaces one that is too long, empty, or has numbers or score words with plain words from the purpose.
+- **The package root exports only** `checkDuplicate`, `saveAppProfile`, `summariseSession`, `recall`, `recallBlock` (and the `Recalled` type). A test pins this. Raw scores, thresholds-by-argument, model stand-ins and helpers moved to `@rms/memory/testing` (new `./testing` entry in `packages/memory/package.json`).
+- Left for later, as the review said: a `different` verdict overrides any score, even for a near-repeat; after a cache clear, lines are re-embedded one call each.
+
 ## Not done, on purpose or out of scope
 
 - **The owner deleting memories, and a "What RMS knows" screen.** The brief puts these out of scope. If you want delete, add `MEMORY_ROUTES.forget` and I add a route that sets `deleted_at`. `recall` already skips deleted rows.

@@ -6,7 +6,9 @@ import { AGENT_RULES, EMBEDDING_DIMENSIONS, type TenantContext, toPublicId } fro
 import { type NewAgentEvent, adminDb, apiDb, appendAgentEvents, closeAll, newUuid, withOrg } from "@rms/db";
 import { requireTestEnv } from "@rms/db/testing";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { type Embedder, type Judge, type JudgeAnswer, type Summariser, checkDuplicate, recall, recallBlock, saveAppProfile, summariseSession, useMemoryModels } from "../src/index.js";
+import * as root from "../src/index.js";
+import { checkDuplicate, recall, recallBlock, saveAppProfile, summariseSession } from "../src/index.js";
+import { type Embedder, type Judge, type JudgeAnswer, MODEL_CALL_TIMEOUT_MS, type Summariser, useMemoryModels } from "../src/testing.js";
 
 const id = (suffix: string) => `0193a3c0-0000-7000-8000-0000000000${suffix}`;
 const A = { uuid: id("50"), prefix: "o_5151515151a1" };
@@ -475,5 +477,60 @@ describe("session summaries and recall", () => {
     expect(await summariseSession(tenant(B), toPublicId("ses", SESSION))).toBeNull();
     expect(captured).toBeNull();
     expect(await recall(tenant(B))).toEqual({ summaries: [], facts: [] });
+  });
+});
+
+describe("no model can make memory hang", () => {
+  const stalled = () => new Promise<never>(() => {});
+
+  it("a stalled embedding call: the word check shortlists, the model confirms, nothing hangs", async () => {
+    useMemoryModels({ embed: stalled, judge: scriptedJudge, timeoutMs: 300 });
+    const started = Date.now();
+    const r = await checkDuplicate(tenant(A), OWE);
+    expect(r.verdict).toBe("same");
+    expect(r.matches.map((m) => m.appName)).toEqual(["Vendors"]);
+    useMemoryModels({ embed: stalled, judge: stalled, timeoutMs: 300 });
+    const both = await checkDuplicate(tenant(A), OWE);
+    expect(both).toMatchObject({ verdict: "similar", matches: [{ appName: "Vendors" }] });
+    expect(Date.now() - started).toBeLessThan(3000);
+  });
+
+  it("a stalled embedding call does not hold up saving a profile; the text is kept", async () => {
+    useMemoryModels({ embed: stalled, timeoutMs: 300 });
+    await expect(saveAppProfile(tenant(A), draft(apps.aFree, "Second purpose", ["saved while stalled"]))).resolves.toBeUndefined();
+    expect((await storedRequests(apps.aFree)).at(-1)).toBe("saved while stalled");
+  });
+
+  it("a stalled summary call gives no summary instead of hanging", async () => {
+    useMemoryModels({ embed: fakeEmbed, summarise: stalled, timeoutMs: 300 });
+    expect(await summariseSession(tenant(A), toPublicId("ses", SESSION))).toBeNull();
+  });
+
+  it("the default limit is about eight seconds", () => {
+    expect(MODEL_CALL_TIMEOUT_MS).toBe(8000);
+  });
+});
+
+describe("the confirm answer's reason", () => {
+  it("an over-long or empty reason keeps the verdict and is replaced by plain words from the purpose", async () => {
+    for (const reason of ["word ".repeat(80), ""]) {
+      useMemoryModels({
+        embed: fakeEmbed,
+        judge: async (i) => {
+          const r = await scriptedJudge(i);
+          return { ...r, output: { verdicts: r.output.verdicts.map((v) => ({ ...v, reason })) } };
+        },
+      });
+      expect(await checkDuplicate(tenant(A), REWORDED)).toEqual({
+        verdict: "same",
+        matches: [{ appId: toPublicId("app", apps.aMoney), appName: "Money", reason: "It already does this: weekly sales, costs, profit and prime cost.", published: true }],
+      });
+    }
+  });
+});
+
+describe("the package root", () => {
+  it("exports the product functions only: no scores, no test seams", () => {
+    expect(Object.keys(root).sort()).toEqual(["checkDuplicate", "recall", "recallBlock", "saveAppProfile", "summariseSession"]);
   });
 });
