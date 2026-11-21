@@ -93,6 +93,7 @@ export type BottomBarItemProps = {
   label: string;
   /** A link to a page... */
   href?: string;
+  /** The place the owner is in. On a button (More), set it when the current page is one of the places behind the button. */
   current?: boolean;
   linkAs?: ElementType;
   /** ...or a button that opens something, such as the More sheet. */
@@ -116,7 +117,7 @@ export function BottomBarItem({ icon, label, href, current = false, linkAs, onPr
     );
   }
   return (
-    <button type="button" className="rms-bottom-bar__item" onClick={onPress} aria-haspopup="dialog" aria-expanded={expanded}>
+    <button type="button" className="rms-bottom-bar__item" onClick={onPress} aria-haspopup="dialog" aria-expanded={expanded} aria-current={current ? "true" : undefined}>
       {body}
     </button>
   );

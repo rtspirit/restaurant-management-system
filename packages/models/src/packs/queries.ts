@@ -1,7 +1,7 @@
 import { sql } from "./helpers.js";
 import type { NamedQueryInput } from "./helpers.js";
 import { FOOD_AND_DRINK_GROUPS } from "./finance.js";
-import { PAYOUT_MEMO_ONLY } from "./sales.js";
+import { PAYOUT_MEMO_ONLY, PAYOUT_TAKES } from "./sales.js";
 
 /**
  * The standard reports, as named queries on the model layer (docs/plan/02 section 4, last line).
@@ -64,6 +64,8 @@ const COUNTED_WEEKS = `counted as (
 )`;
 
 const FOOD_AND_DRINK = FOOD_AND_DRINK_GROUPS.map((g) => `'${g}'`).join(", ");
+/** Everything a delivery platform takes out of a payout: commission, fees, refunds and error charges. */
+const TAKEN_BY_PLATFORM = PAYOUT_TAKES.map((k) => `'${k}'`).join(", ");
 
 const CALENDAR_IN_USE = `cal as (
   select fc.id
@@ -503,7 +505,7 @@ const weeklyPnl: NamedQueryInput = {
   pack: "finance",
   name: "Weekly profit and loss",
   description:
-    "The profit and loss report for one fiscal week, from the books: each account with its amount and share of net sales, section totals, and lines for gross profit, prime cost and net profit. Food and drink cost is what was used (opening stock plus purchases minus closing stock) once a stock count is posted in the week. Until then stock counted is false. No rows if the week is not in the calendar.",
+    "One fiscal week's profit and loss, from the books: each account's amount and share of net sales, totals, gross profit, prime cost and net profit after every cost, including what delivery apps keep. Food and drink cost is what was used (opening stock plus purchases minus closing stock) once a stock count is posted that week. Until then stock counted is false. No rows for a week not in the calendar.",
   reads: ["journal_line", "journal_entry", "account", "fiscal_calendar", "fiscal_week"],
   params: [
     { key: "week_of", type: "date" },
@@ -607,7 +609,7 @@ const deliveryPayoutReconciliation: NamedQueryInput = {
   pack: "sales",
   name: "Delivery payout reconciliation",
   description:
-    "Checks each delivery platform payout against the till: what the till says the platform collected, what the statement says, the commission, fees, refunds and tips, the tax the platform pays over itself (shown, never owed by the restaurant), and whether the amount paid matches the statement lines.",
+    "Checks each delivery platform payout against the till: what the till says the platform collected, what the statement says, the commission, fees, refunds and tips, the total the delivery app kept, the tax the platform pays over itself (shown, never owed by the restaurant), and whether the amount paid matches the statement lines.",
   reads: ["delivery_payout", "delivery_payout_line", "payment_type", "payment_day", "sales_day", "parent.locations"],
   params: [
     { key: "from_date", type: "date", required: false },
@@ -624,6 +626,7 @@ const deliveryPayoutReconciliation: NamedQueryInput = {
              sum(case when l.kind = 'commission' then l.amount else 0 end) as commission,
              sum(case when l.kind in ('marketing_fee', 'service_fee') then l.amount else 0 end) as fees,
              sum(case when l.kind in ('refund', 'error_charge') then l.amount else 0 end) as refunds_and_errors,
+             sum(case when l.kind in (${TAKEN_BY_PLATFORM}) then l.amount else 0 end) as kept_by_platform,
              sum(case when l.kind = 'adjustment' then l.amount else 0 end) as adjustments,
              sum(case when l.kind = '${PAYOUT_MEMO_ONLY}' then l.amount else 0 end) as tax_remitted_by_platform,
              sum(case when l.kind <> '${PAYOUT_MEMO_ONLY}' then l.amount else 0 end) as expected_net
@@ -655,6 +658,7 @@ const deliveryPayoutReconciliation: NamedQueryInput = {
            cast(coalesce(s.commission, 0) as bigint) as commission,
            cast(coalesce(s.fees, 0) as bigint) as fees,
            cast(coalesce(s.refunds_and_errors, 0) as bigint) as refunds_and_errors,
+           cast(coalesce(s.kept_by_platform, 0) as bigint) as kept_by_platform,
            cast(coalesce(s.adjustments, 0) as bigint) as adjustments,
            cast(coalesce(s.tax_remitted_by_platform, 0) as bigint) as tax_remitted_by_platform,
            cast(coalesce(s.expected_net, 0) as bigint) as expected_net,
@@ -688,6 +692,7 @@ const deliveryPayoutReconciliation: NamedQueryInput = {
     moneyCol("commission", "Commission"),
     moneyCol("fees", "Marketing and service fees"),
     moneyCol("refunds_and_errors", "Refunds and error charges"),
+    moneyCol("kept_by_platform", "Kept by the delivery app (commission, fees, refunds)"),
     moneyCol("adjustments", "Adjustments"),
     moneyCol("tax_remitted_by_platform", "Tax the platform pays over (not owed by us)"),
     moneyCol("expected_net", "Payout the lines add up to"),

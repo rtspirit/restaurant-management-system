@@ -136,6 +136,9 @@ const runSync = async (
 
   await ask("get_stock_items", {});
   const weekly = new Map<string, number>();
+  // The supplier bills the POS itself sent. RMS also keeps each delivery payout's statement of
+  // what the app kept as a bill (ADR 0011), so the loader's own bill count is higher than this.
+  let posBills = 0;
   // One day early, so the opening stock count comes too.
   for (const range of chunks(addDays(from, -1), to)) {
     for (const tool of DATED) {
@@ -147,6 +150,7 @@ const runSync = async (
           weekly.set(week, (weekly.get(week) ?? 0) + d.netSalesMinor);
         }
       }
+      if (tool === "get_vendor_bills") posBills += (answer as { bills: { billDate: string }[] }).bills.filter((b) => b.billDate >= from).length;
     }
   }
   if (drift || weekly.size !== SYNC_WEEKS) {
@@ -163,7 +167,8 @@ const runSync = async (
 
   // ---- 4. the check: what the POS said, week by week, against what the reports now show
   const reported = new Map(books.weeks.map((w) => [w.weekStart, w.netSalesMinor]));
-  const mismatch = weekly.size !== SYNC_WEEKS || [...weekly].some(([week, net]) => reported.get(week) !== net);
+  // And no supplier bill the POS sent may be missing from what was loaded.
+  const mismatch = weekly.size !== SYNC_WEEKS || [...weekly].some(([week, net]) => reported.get(week) !== net) || (books.rows.vendor_bill ?? 0) < posBills;
   if (mismatch) return failed("The sales brought in do not add up to what Demo POS reported. Please try again, or tell us.", from, to);
 
   const posted = books.posted.salesDays + books.posted.vendorBills + books.posted.labourDays + books.posted.stockCounts;
@@ -171,7 +176,7 @@ const runSync = async (
     salesDays: books.rows.sales_day ?? 0,
     labourDays: books.rows.labour_day ?? 0,
     deliveryPayouts: books.rows.delivery_payout ?? 0,
-    vendorBills: books.rows.vendor_bill ?? 0,
+    vendorBills: posBills,
     stockCounts: books.rows.stock_count ?? 0,
     posted,
   };

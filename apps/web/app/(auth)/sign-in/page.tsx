@@ -8,6 +8,13 @@ import { SignedOutError } from "@/lib/api";
 import { createClient } from "@/lib/supabase/client";
 import { goToNextStep } from "../next-step";
 
+/**
+ * The sign-in service refuses with status 429 (code "over_request_rate_limit") after too many
+ * tries from one place in a few minutes. That is not a wrong password, so it gets its own words.
+ */
+const tooManyTries = (e: { status?: number | undefined; code?: string | undefined }): boolean => e.status === 429 || (e.code ?? "").endsWith("rate_limit");
+const TOO_MANY_TRIES = "Too many tries. Wait a minute and try again.";
+
 export default function SignInPage() {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
@@ -24,7 +31,7 @@ export default function SignInPage() {
         password: String(form.get("password") ?? ""),
       });
       if (signInError) {
-        setError("That email and password do not match. Please try again.");
+        setError(tooManyTries(signInError) ? TOO_MANY_TRIES : "That email and password do not match. Please try again.");
         return;
       }
       try {

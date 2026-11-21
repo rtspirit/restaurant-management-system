@@ -71,7 +71,7 @@ const SAMPLES: Record<string, Sample> = {
   "ConnectRequest (catalog)": { schema: c.ConnectRequest, value: { kind: "catalog", key: "demo_pos" } },
   // `token` here is the connected system's own token, typed by the owner. It is a legitimate key of this one shape.
   "ConnectRequest (custom)": { schema: c.ConnectRequest, value: { kind: "custom", name: "My POS", url: "https://pos.example.com/mcp", token: "a-long-token-value" }, allowed: ["token"] },
-  ApproveToolsRequest: { schema: c.ApproveToolsRequest, value: { tools: ["get_daily_sales"] } },
+  ApproveToolsRequest: { schema: c.ApproveToolsRequest, value: { tools: ["get_daily_sales"], toolsVersion: "a".repeat(64) } },
   SyncRequest: { schema: c.SyncRequest, value: { from: "2026-09-21", to: "2026-11-15" } },
   DemoPosRangeInput: { schema: c.DemoPosRangeInput, value: { from: "2026-11-09", to: "2026-11-15", location: "downtown" } },
   DemoPosNoInput: { schema: c.DemoPosNoInput, value: {} },

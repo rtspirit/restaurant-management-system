@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import { Button, FieldGroup, Heading, Notice, Row, Text, TextArea } from "@rms/ui";
+import { Button, EmptyState, FieldGroup, Heading, Notice, Row, Text, TextArea } from "@rms/ui";
 import { ChangeTable } from "@/components/change-table";
 import { ApiError, type FeedItem, apiFetch } from "@/lib/api";
 
@@ -52,7 +52,9 @@ export default function QueuePage() {
       <Text>Changes held until a maintainer approves them, oldest first.</Text>
       {status ? <Notice kind="status">{status}</Notice> : null}
       {error ? <Notice kind="problem">{error}</Notice> : null}
-      {!error && !loading && items.length === 0 ? <Text>Nothing is waiting for review.</Text> : null}
+      {!error && !loading && items.length === 0 ? (
+        <EmptyState title="The queue is empty">Nothing is waiting for review. A change that needs a maintainer shows here the moment it is held.</EmptyState>
+      ) : null}
       {items.length > 0 ? (
         <ChangeTable
           items={items}

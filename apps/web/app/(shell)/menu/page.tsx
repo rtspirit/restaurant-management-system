@@ -7,11 +7,12 @@ export const metadata: Metadata = { title: "Menu" };
 
 const price = (row: ParentRow): string => money(whole(row, "price_minor"), text(row, "currency") || "USD");
 
-/** The name, with what it is after it when the menu says. Long names wrap, they are never cut off. */
-const itemLabel = (row: ParentRow): string => {
-  const description = text(row, "description");
-  return description ? `${text(row, "name")}: ${description.charAt(0).toLowerCase()}${description.slice(1)}` : text(row, "name");
-};
+/** One dish or drink: its name in ink, what it is made of under it, its price beside it. Long names wrap, they are never cut off. */
+const itemRow = (row: ParentRow) => ({
+  label: row.active === false ? `${text(row, "name")} (off the menu)` : text(row, "name"),
+  note: text(row, "description") || undefined,
+  value: price(row),
+});
 
 // Read-only: the restaurant's menu as RMS holds it. Mini-apps read the same list.
 export default async function MenuPage() {
@@ -41,8 +42,9 @@ export default async function MenuPage() {
   return (
     <Page title="Menu">
       <Text tone="muted">
-        {count(items.length, "item", "items")} in {count(categories.length, "group", "groups")}. RMS keeps this list, and your mini-apps read from it so every number uses
-        the same menu.
+        {count(items.length, "item", "items")} in {count(categories.length, "group", "groups")}
+        {extras.length > 0 ? `, and ${count(extras.length, "extra", "extras")}` : ""}. RMS keeps this list, and your mini-apps read from it so every number uses the
+        same menu.
       </Text>
       <Columns>
         {categories.map((category) => {
@@ -50,16 +52,17 @@ export default async function MenuPage() {
           if (mine.length === 0) return null;
           return (
             <Card key={text(category, "id")} title={text(category, "name")} action={<Tag>{count(mine.length, "item", "items")}</Tag>} as="section">
-              <DetailList rows={mine.map((i) => ({ label: i.active === false ? `${itemLabel(i)} (off the menu)` : itemLabel(i), value: price(i) }))} />
+              <DetailList lead="label" rows={mine.map(itemRow)} />
             </Card>
           );
         })}
         {extras.length > 0 ? (
           <Card title="Extras" action={<Tag>{count(extras.length, "extra", "extras")}</Tag>} as="section">
             <DetailList
+              lead="label"
               rows={extras.map((x) => {
                 const goesWith = itemName.get(text(x, "item_id"));
-                return { label: goesWith ? `${text(x, "name")}, on ${goesWith}` : text(x, "name"), value: whole(x, "price_minor") === 0 ? "No charge" : price(x) };
+                return { label: text(x, "name"), note: goesWith ? `On ${goesWith}` : undefined, value: whole(x, "price_minor") === 0 ? "No charge" : price(x) };
               })}
             />
           </Card>
