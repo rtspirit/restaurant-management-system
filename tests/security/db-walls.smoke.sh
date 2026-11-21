@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -u
-set -a; . ./.env.local; set +a
+# ENV_FILE=.env.hosted runs the same checks against the hosted project.
+ENV_FILE="${ENV_FILE:-./.env.local}"
+set -a; . "$ENV_FILE"; set +a
+ASK_HOST="${ASK_DATABASE_HOST:-127.0.0.1:54322}"; ASK_SUFFIX="${ASK_DATABASE_USER_SUFFIX:-}"
+SSL=""; case "$ASK_HOST" in 127.0.0.1:*|localhost:*) ;; *) SSL="?sslmode=require";; esac
 A=0193a3c0-0000-7000-8000-00000000000a; B=0193a3c0-0000-7000-8000-00000000000b
 ASKPW="$(openssl rand -hex 24)"
 ASKVER="$(node -e 'const c=require("node:crypto");const pw=process.argv[1];const salt=c.randomBytes(16);const s=c.pbkdf2Sync(pw,salt,4096,32,"sha256");const ck=c.createHmac("sha256",s).update("Client Key").digest();const sk=c.createHash("sha256").update(ck).digest();const sv=c.createHmac("sha256",s).update("Server Key").digest();process.stdout.write("SCRAM-SHA-256$4096:"+salt.toString("base64")+"$"+sk.toString("base64")+":"+sv.toString("base64"))' "$ASKPW")"
@@ -16,8 +20,8 @@ expect() { local label="$1" want="$2" url="$3" sql="$4" out
   out="$(last "$url" "$sql")"
   [ "$out" = "$want" ] && s=PASS || { s=FAIL; fails=$((fails+1)); }
   printf '%s  %-52s got "%s" want "%s"\n' "$s" "$label" "$out" "$want"; }
-echo "setup: $(q "$DATABASE_ADMIN_URL" "insert into platform.organizations (id, slug, name, store_prefix) values ('$A','smoke-a','Smoke A','o_aaaaaaaaaaaa'), ('$B','smoke-b','Smoke B','o_bbbbbbbbbbbb') on conflict do nothing; select platform.provision_store('$A'); select platform.provision_store('$B'); select platform.set_ask_login('$A', '$ASKVER'); insert into platform.parent_jobs (id, org_id, name, house) values (gen_random_uuid(), '$A', 'Server', 'front'); set role rms_tenant_migrator; create table o_aaaaaaaaaaaa.notes (id int); grant select on o_aaaaaaaaaaaa.notes to o_aaaaaaaaaaaa_ask; grant select, insert on o_aaaaaaaaaaaa.notes to o_aaaaaaaaaaaa_rw; reset role; set role rms_parent_sync; insert into o_aaaaaaaaaaaa_parent.jobs (id, name, house) values (gen_random_uuid(), 'Server', 'front'); insert into o_bbbbbbbbbbbb_parent.jobs (id, name, house) values (gen_random_uuid(), 'Cook', 'back');")"
-ASK="postgresql://o_aaaaaaaaaaaa_ask:$ASKPW@127.0.0.1:54322/postgres"
+echo "setup: $(q "$DATABASE_ADMIN_URL" "insert into platform.organizations (id, slug, name, store_prefix) values ('$A','smoke-a','Smoke A','o_aaaaaaaaaaaa'), ('$B','smoke-b','Smoke B','o_bbbbbbbbbbbb') on conflict do nothing; select platform.provision_store('$A'); select platform.provision_store('$B'); select platform.set_ask_login('$A', '$ASKVER'); insert into platform.parent_jobs (id, org_id, name, house) values (gen_random_uuid(), '$A', 'Server', 'front'); begin; set local role rms_tenant_migrator; create table o_aaaaaaaaaaaa.notes (id int); grant select on o_aaaaaaaaaaaa.notes to o_aaaaaaaaaaaa_ask; grant select, insert on o_aaaaaaaaaaaa.notes to o_aaaaaaaaaaaa_rw; set local role rms_parent_sync; insert into o_aaaaaaaaaaaa_parent.jobs (id, name, house) values (gen_random_uuid(), 'Server', 'front'); insert into o_bbbbbbbbbbbb_parent.jobs (id, name, house) values (gen_random_uuid(), 'Cook', 'back'); commit;")"
+ASK="postgresql://o_aaaaaaaaaaaa_ask${ASK_SUFFIX}:$ASKPW@${ASK_HOST}/postgres${SSL}"
 RW="begin; set local role o_aaaaaaaaaaaa_rw;"
 echo "--- rms_api: platform rows are fenced by org"
 expect "no org set: sees 0 organizations" "0" "$DATABASE_URL" "select count(*) from platform.organizations"
@@ -91,6 +95,6 @@ run "cannot switch to postgres" blocked "$ASK" "set role postgres"
 run "cannot call provisioning" blocked "$ASK" "select platform.drop_store('$B')"
 run "cannot create a temp table, even read-write" blocked "$ASK" "begin read write; create temp table x (id int)"
 expect "reads its own live table" "0" "$ASK" "select count(*) from notes"
-run "B's ask role cannot log in" blocked "postgresql://o_bbbbbbbbbbbb_ask:$ASKPW@127.0.0.1:54322/postgres" "select 1"
+run "B's ask role cannot log in" blocked "postgresql://o_bbbbbbbbbbbb_ask${ASK_SUFFIX}:$ASKPW@${ASK_HOST}/postgres${SSL}" "select 1"
 echo "--- cleanup: $(q "$DATABASE_ADMIN_URL" "select platform.drop_store('$A'); select platform.drop_store('$B'); delete from platform.parent_jobs where org_id in ('$A','$B'); delete from platform.change_sets where org_id in ('$A','$B'); delete from platform.apps where org_id in ('$A','$B'); delete from platform.secrets where org_id in ('$A','$B'); delete from platform.organizations where id in ('$A','$B'); select 'roles left: ' || count(*) from pg_roles where rolname like 'o\_%'")"
 echo "FAILS=$fails"
