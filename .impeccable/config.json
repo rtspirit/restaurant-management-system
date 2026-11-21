@@ -1,0 +1,71 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "cramped-padding",
+        "value": "*",
+        "files": [
+          ".impeccable/mocks/decision/assigned.html"
+        ],
+        "createdAt": "2026-11-21T17:03:31.840Z",
+        "reason": "lead: C0 sketch, Tile & Steel shares tile edges by design; rendered text keeps 8px or more inside every tile"
+      },
+      {
+        "rule": "cramped-padding",
+        "value": "*",
+        "files": [
+          ".impeccable/mocks/decision/assigned-phone.html"
+        ],
+        "createdAt": "2026-11-21T17:03:31.854Z",
+        "reason": "lead: C0 sketch, Tile & Steel shares tile edges by design; rendered text keeps 8px or more inside every tile"
+      },
+      {
+        "rule": "codex-grid-background",
+        "value": "*",
+        "files": [
+          ".impeccable/mocks/decision/assigned.html"
+        ],
+        "createdAt": "2026-11-21T17:03:31.867Z",
+        "reason": "lead: C0 sketch, the grid lines are the chart scale (each square is 20,000 dollars), not decoration"
+      },
+      {
+        "rule": "repeating-stripes-gradient",
+        "value": "*",
+        "files": [
+          ".impeccable/mocks/decision/assigned.html"
+        ],
+        "createdAt": "2026-11-21T17:03:31.877Z",
+        "reason": "lead: C0 sketch, lines are the chart scale, not decoration"
+      },
+      {
+        "rule": "repeating-stripes-gradient",
+        "value": "*",
+        "files": [
+          ".impeccable/mocks/decision/assigned-phone.html"
+        ],
+        "createdAt": "2026-11-21T17:03:31.887Z",
+        "reason": "lead: C0 sketch, lines are the chart scale (a line every 5,000 dollars), not decoration"
+      },
+      {
+        "rule": "repeating-stripes-gradient",
+        "value": "*",
+        "files": [
+          ".impeccable/mocks/decision/model-pick.html"
+        ],
+        "createdAt": "2026-11-21T17:03:31.897Z",
+        "reason": "lead: C0 sketch, hatching marks the slow week by shape so the state does not rely on colour"
+      },
+      {
+        "rule": "cramped-padding",
+        "value": "*",
+        "files": [
+          ".impeccable/mocks/decision/challenger-warm-phone.html"
+        ],
+        "createdAt": "2026-11-21T17:03:31.907Z",
+        "reason": "lead: C0 sketch, week picker pill holds two 44px arrow buttons flush to its ends; the date label has its own 8px"
+      }
+    ]
+  }
+}

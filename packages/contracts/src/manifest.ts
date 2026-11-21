@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { Ident } from "./ids.js";
+import { Ident, ModelRef, isParentRef } from "./ids.js";
 import { ModelAccess } from "./models.js";
 
 /**
@@ -7,11 +7,9 @@ import { ModelAccess } from "./models.js";
  * against it, and governance reads its diffs to decide the tier of a change.
  */
 
-export const ManifestModel = z.strictObject({
-  /** A child model key, or "parent.<key>" for parent data. Parent models are read-only. */
-  use: z.string().regex(/^(parent\.)?[a-z][a-z0-9_]{0,47}$/),
-  access: ModelAccess,
-}).refine((m) => !(m.use.startsWith("parent.") && m.access === "write"), { message: "Parent data is read-only." });
+export const ManifestModel = z
+  .strictObject({ use: ModelRef, access: ModelAccess })
+  .refine((m) => !(isParentRef(m.use) && m.access === "write"), { message: "Parent data is read-only." });
 
 export const ManifestSlot = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("nav"), label: z.string().max(24).optional(), icon: z.string().max(32).optional() }),
@@ -20,27 +18,33 @@ export const ManifestSlot = z.discriminatedUnion("type", [
 
 export const ManifestConnection = z.strictObject({
   id: Ident,
-  tools: z.array(z.string().min(1).max(64)).min(1),
+  tools: z.array(z.string().min(1).max(64)).min(1).max(20),
   access: ModelAccess,
 });
 
-/** Demo: jobs are platform-run named queries on a schedule. No custom server logic today. */
+/** Demo: a job runs a named action or a named query on a schedule. No custom server logic today. */
 export const ManifestJob = z.strictObject({
   name: Ident,
   cron: z.string().min(9).max(64),
-  namedQuery: Ident,
+  run: z.discriminatedUnion("kind", [
+    z.strictObject({ kind: z.literal("action"), key: Ident }),
+    z.strictObject({ kind: z.literal("query"), key: Ident }),
+  ]),
 });
 
 export const AppManifest = z.strictObject({
   name: z.string().min(1).max(40),
   description: z.string().max(280).optional(),
-  slots: z.array(ManifestSlot).default([{ type: "nav" }]),
-  models: z.array(ManifestModel).default([]),
-  namedQueries: z.array(Ident).default([]),
-  connections: z.array(ManifestConnection).default([]),
-  jobs: z.array(ManifestJob).default([]),
-  /** Named queries offered to the Ask agent as tools. */
-  tools: z.array(Ident).default([]),
+  slots: z.array(ManifestSlot).max(6).default([{ type: "nav" }]),
+  models: z.array(ManifestModel).max(40).default([]),
+  /** Named queries this mini-app may call. Each needs read access to all the models it reads. */
+  namedQueries: z.array(Ident).max(40).default([]),
+  /** Named actions this mini-app may call. Each needs write access to all the models it writes. */
+  actions: z.array(Ident).max(20).default([]),
+  connections: z.array(ManifestConnection).max(6).default([]),
+  jobs: z.array(ManifestJob).max(10).default([]),
+  /** Named queries offered to the Ask agent as tools. Must also be in `namedQueries`. */
+  tools: z.array(Ident).max(20).default([]),
 });
 export type AppManifest = z.infer<typeof AppManifest>;
 export type AppManifestInput = z.input<typeof AppManifest>;

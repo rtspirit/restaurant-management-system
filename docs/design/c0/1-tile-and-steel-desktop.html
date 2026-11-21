@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>RMS: Mini-apps, Build (Tile and Steel)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&display=swap" rel="stylesheet">
+<style>
+/* Tile and Steel. One module: a 60px tile. 1440 = 24 tiles, 900 = 15 tiles. Steps inside a tile: 12, 24, 30. */
+:root{--steel:#1F2E35;--steel2:#34474F;--ground:#F4F6F3;--surf:#FFFFFF;--grout:#C8CFCB;--red:#B2452C;--teal:#2F7D6B;--ink:#14232A;--mute:#4D5F67;--edge:#7C8A8B;--bar:#B9C6C5;--cap:#5E7479;--l:1px solid var(--grout)}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:1440px;height:900px;overflow:hidden}
+body{display:grid;grid-template-columns:180px 540px 720px;grid-template-rows:60px 780px 60px;font:400 15px/1.35 Archivo,sans-serif;font-variant-numeric:tabular-nums;color:var(--ink);background:var(--ground);-webkit-font-smoothing:antialiased;caret-color:var(--red)}
+::selection{background:var(--steel);color:#fff}
+:focus-visible{outline:2px solid var(--red);outline-offset:2px}
+button,input{font:inherit;color:inherit}
+a{color:inherit;text-decoration:none}
+ul{list-style:none}
+.c{font-stretch:75%}
+.no{font:500 13px/1 Archivo,sans-serif;font-stretch:75%;letter-spacing:.03em;color:var(--mute)}
+.sq{display:inline-block;width:12px;height:12px;margin-right:8px;vertical-align:-1px}
+.sq.d{background:var(--teal)}
+.sq.h{border:2px solid var(--teal);background:linear-gradient(90deg,var(--teal) 50%,transparent 50%)}
+.sq.o{border:2px solid var(--red)}
+.btn{height:44px;padding:8px 20px;border-radius:2px;border:1.5px solid var(--ink);background:var(--surf);font-weight:600;font-size:15px;cursor:pointer}
+.btn.p{background:var(--red);border-color:var(--red);color:#fff;min-width:120px}
+.btn.s{background:var(--steel);border-color:var(--steel);color:#fff}
+
+/* shell rail: stainless */
+.rail{grid-row:1/4;display:flex;flex-direction:column;background:var(--steel);color:#DCE4E3}
+.rail>div,.rail nav a{height:60px;display:flex;align-items:center;padding:0 24px;border-bottom:1px solid var(--steel2)}
+.logo{gap:2px}
+.logo b,.av{width:30px;height:30px;padding:8px;display:grid;place-items:center;font:800 14px/1 Archivo,sans-serif;font-stretch:75%;background:var(--surf);color:var(--steel)}
+.logo b:first-child,.av.r{background:var(--red);color:#fff}
+.rail nav a{font-size:16px;font-weight:500}
+.rail nav a[aria-current]{background:var(--ground);color:var(--ink);font-weight:700}
+.rail .gap{flex:1;height:auto;border:0}
+.rail .rest{font-weight:600;color:#fff;border-top:1px solid var(--steel2)}
+.rail .who{gap:12px;border:0}
+.av{font-size:13px;font-weight:700}
+.av.r{font-size:14px;font-weight:800}
+
+/* top bar */
+.top{grid-column:2/4;display:flex;border-bottom:var(--l)}
+.top h1{width:180px;padding:0 24px;font:700 22px/60px Archivo,sans-serif;font-stretch:88%}
+.tabs{display:flex}
+.tabs a{width:120px;display:grid;place-items:center;font-size:16px;font-weight:500;color:var(--mute);border-left:var(--l)}
+.tabs a:last-child{border-right:var(--l)}
+.tabs a[aria-selected=true]{background:var(--surf);color:var(--ink);font-weight:700;box-shadow:inset 0 -3px 0 var(--ink)}
+.loc{margin-left:auto;display:flex;align-items:center;padding-right:24px}
+.sel{height:44px;display:flex;align-items:center;gap:10px;padding:8px 12px 8px 14px;border:1px solid var(--edge);border-radius:2px;background:var(--surf);font-weight:500;cursor:pointer}
+
+/* build conversation: a 60px speaker column, then the words */
+.talk{grid-column:2;grid-row:2;background:var(--surf);border-right:var(--l)}
+.m{display:grid;grid-template-columns:60px 1fr;box-shadow:inset 0 -1px 0 var(--grout)}
+.m>.g{display:flex;justify-content:center;padding-top:15px;border-right:var(--l)}
+.you{height:120px;background:var(--ground)}
+.you p{align-self:center;padding:0 24px;font-size:24px;font-weight:500;line-height:1.25;text-wrap:balance}
+.qa{height:60px;display:grid;grid-template-columns:1fr 1fr}
+.qa div{display:flex;flex-direction:column;justify-content:center;gap:2px;padding:0 24px}
+.qa div+div{border-left:var(--l)}
+.qa span{font-size:13px;color:var(--mute)}
+.plan h2{height:60px;padding:0 24px;font:700 18px/60px Archivo,sans-serif}
+.plan li{height:60px;padding:0 24px;font-size:16px;line-height:59px;border-top:var(--l)}
+.asm{height:120px;padding:18px 24px}
+.asm header{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}
+.asm h2{font-size:14px;font-weight:700}
+.asm button{background:none;border:0;font-size:14px;font-weight:600;text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+.asm p{font-size:14px;line-height:1.5;color:var(--mute)}
+.steps li{height:60px;display:flex;align-items:center;padding:0 24px;font-size:16px}
+.steps li+li{border-top:var(--l)}
+.steps em{margin-left:auto;font:600 13px/1 Archivo,sans-serif;font-stretch:75%;letter-spacing:.02em;color:var(--teal)}
+.comp{grid-column:2;grid-row:3;display:flex;align-items:center;gap:8px;padding:0 12px;border-right:var(--l)}
+.comp input{flex:1;height:44px;padding:8px 14px;border:1px solid var(--edge);border-radius:2px;background:var(--surf);font-size:15px}
+.comp input::placeholder{color:#5B6B72;opacity:1}
+
+/* preview: the Money mini-app as one wall of tiles, 12 across */
+.prev{grid-column:3;grid-row:2;display:grid;grid-template-rows:60px 720px}
+.ph{display:flex;align-items:center;gap:12px;padding:0 24px}
+.ph h2{font-size:18px;font-weight:700}
+.tag{padding:8px 10px;border:1px solid var(--mute);font:600 12px/1.2 Archivo,sans-serif;font-stretch:75%;letter-spacing:.03em;color:var(--mute)}
+.app{position:relative;display:grid;grid-template-columns:repeat(12,60px);grid-template-rows:60px 120px 120px 60px 300px 60px;background:var(--surf)}
+.app::after{content:"";position:absolute;inset:0;border:2px solid var(--steel);pointer-events:none}
+.t{border-right:var(--l);border-bottom:var(--l)}
+.bar{grid-column:1/-1;display:flex;align-items:center;padding-left:24px}
+.bar h3{font:700 22px/1 Archivo,sans-serif;font-stretch:88%;margin-right:10px}
+.wk{margin-left:auto;height:100%;display:flex;align-items:stretch}
+.wk button{width:60px;border:0;border-left:var(--l);background:none;display:grid;place-items:center;cursor:pointer}
+.wk span{width:180px;display:grid;place-items:center;font-weight:600;border-left:var(--l)}
+.lab{font:600 13px/1.3 Archivo,sans-serif;font-stretch:75%;letter-spacing:.02em;color:var(--mute)}
+.f{font-family:Archivo,sans-serif;font-stretch:70%;font-weight:700;line-height:1;letter-spacing:-.01em}
+.prime{grid-column:1/7;grid-row:2/4;padding:24px}
+.prime .lab{font-size:15px;color:var(--ink)}
+.prime .f{font-size:96px;margin:14px 0 22px -3px}
+.prime p{display:flex;gap:24px;font-size:15px}
+.prime strong{color:var(--red);font-weight:600}
+.net{grid-column:7/13;grid-row:2;padding:20px 24px}
+.net .f{font-size:44px;margin-top:8px}
+.cost{grid-row:3;padding:18px 24px}
+.cost .f{font-size:28px;margin:8px 0 6px}
+.cost small,.locs small{font-size:13px;color:var(--mute)}
+.ch{grid-row:4;display:flex;align-items:center;justify-content:space-between;padding:0 24px}
+.ch h4{font-size:15px;font-weight:700}
+.plot{grid-column:1/9;grid-row:5;display:flex;align-items:flex-end;background:linear-gradient(var(--grout) 1px,transparent 1px) 0 0/60px 60px,linear-gradient(90deg,var(--grout) 1px,transparent 1px) 0 0/60px 60px}
+.plot i{flex:none;position:relative;width:59px;margin-left:1px;border-top:2px solid var(--cap);background:repeating-linear-gradient(to top,var(--bar) 0 59px,#fff 59px 60px)}
+.plot i.on{border-color:var(--steel);background:repeating-linear-gradient(to top,var(--steel) 0 59px,#fff 59px 60px)}
+.plot b{position:absolute;left:0;right:0;bottom:calc(100% + 8px);text-align:center;font:700 12px/1.2 Archivo,sans-serif;font-stretch:75%;letter-spacing:.02em}
+.xl{grid-column:1/9;grid-row:6;display:grid;grid-template-columns:repeat(8,60px);border-top:var(--l)}
+.xl li{padding:13px 8px 8px;text-align:center;font:500 12px/1.4 Archivo,sans-serif;font-stretch:75%;color:var(--mute)}
+.xl li+li{border-left:var(--l)}
+.xl b{display:block;font-weight:600;color:var(--ink)}
+.xl .on{font-weight:800;color:var(--ink)}
+.xl .on b{font-weight:800}
+.locs{grid-column:9/13;grid-row:5/7;border-left:var(--l)}
+.locs>div{height:180px;padding:36px 24px}
+.locs>div+div{border-top:var(--l)}
+.locs .f{font-size:28px;margin:8px 0 16px}
+.locs u{display:block;height:15px;border-right:2px solid var(--cap);background:repeating-linear-gradient(90deg,var(--bar) 0 59px,#fff 59px 60px)}
+.act{grid-column:3;grid-row:3;display:flex;align-items:center;justify-content:flex-end;gap:12px;padding:0 24px}
+</style>
+</head>
+<body>
+
+<aside class="rail">
+  <div class="logo" role="img" aria-label="RMS"><b>R</b><b>M</b><b>S</b></div>
+  <nav aria-label="Main">
+    <a href="#">Home</a><a href="#">Menu</a><a href="#">Staff</a><a href="#">Locations</a><a href="#" aria-current="page">Mini-apps</a><a href="#">Settings</a>
+  </nav>
+  <div class="gap"></div>
+  <div class="rest">Marigold Kitchen</div>
+  <div class="who"><span class="av">AV</span>Asha Verma</div>
+</aside>
+
+<header class="top">
+  <h1>Mini-apps</h1>
+  <div class="tabs" role="tablist"><a href="#" role="tab" aria-selected="true">Build</a><a href="#" role="tab" aria-selected="false">Marketplace</a></div>
+  <div class="loc"><button class="sel" aria-label="Location">All locations <svg width="10" height="6" viewBox="0 0 10 6" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M1 1l4 4 4-4"/></svg></button></div>
+</header>
+
+<main class="talk" aria-label="Build conversation">
+  <div class="m you"><div class="g"><span class="av s" style="background:var(--steel);color:#fff">AV</span></div><p>I want to see how much money I'm making</p></div>
+  <div class="m"><div class="g"><span class="av r" aria-label="RMS">R</span></div>
+    <div class="qa"><div><span class="c">Which locations?</span><b><i class="sq d"></i>Both</b></div><div><span class="c">How often do you want to look?</span><b><i class="sq d"></i>Every week</b></div></div></div>
+  <div class="m plan"><div class="g"><span class="av r" aria-label="RMS">R</span></div>
+    <div><h2>Here's what I'll build</h2>
+      <ul><li>Money in, day by day</li><li>What food, drink and staff cost you</li><li>What's left each week</li><li>Prime cost, the number most owners watch</li></ul></div></div>
+  <div class="m"><div class="g"></div>
+    <div class="asm"><header><h2>What I assumed</h2><button>Change</button></header>
+      <p>Your week runs Monday to Sunday.</p><p>A day ends at 4am, so late tables count for the night before.</p></div></div>
+  <div class="m"><div class="g"></div>
+    <ul class="steps">
+      <li><i class="sq d"></i>Set up your sales days<em>Done</em></li>
+      <li><i class="sq d"></i>Built your weekly screen<em>Done</em></li>
+      <li><i class="sq h"></i>Checking the numbers add up<em style="color:var(--ink)">Working on it</em></li>
+    </ul></div>
+</main>
+<form class="comp"><input type="text" placeholder="Tell me what to change" aria-label="Tell me what to change"><button class="btn s" type="button">Send</button></form>
+
+<section class="prev" aria-label="Preview">
+  <div class="ph"><h2>Preview</h2><span class="tag">Sample numbers</span></div>
+  <div class="app">
+    <div class="bar t"><h3>Money</h3><span class="no">No. 014</span>
+      <div class="wk"><button aria-label="Previous week"><svg width="8" height="14" viewBox="0 0 8 14" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 1L1 7l6 6"/></svg></button><span>Nov 9 to Nov 15</span><button aria-label="Next week"><svg width="8" height="14" viewBox="0 0 8 14" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M1 1l6 6-6 6"/></svg></button></div></div>
+    <div class="prime t"><div class="lab">Prime cost</div><div class="f">61.3%</div><p><span>Target 60%</span><strong><i class="sq o"></i>1.3 points over</strong></p></div>
+    <div class="net t"><div class="lab">Net sales</div><div class="f">$84,310</div></div>
+    <div class="cost t" style="grid-column:7/10"><div class="lab">Food and drink cost</div><div class="f">$25,460</div><small>30.2% of sales</small></div>
+    <div class="cost t" style="grid-column:10/13"><div class="lab">Staff cost</div><div class="f">$26,220</div><small>31.1% of sales</small></div>
+    <div class="ch" style="grid-column:1/9"><h4>Net sales, last 8 weeks</h4><span class="no">Each square is $20,000</span></div>
+    <div class="ch" style="grid-column:9/13;border-left:var(--l)"><h4>By location</h4></div>
+    <div class="plot" role="img" aria-label="Net sales for the last eight weeks on one scale. The week of Oct 19 was a slow week. The week of Nov 9 is selected.">
+      <i style="height:246px"></i><i style="height:249px"></i><i style="height:248px"></i><i style="height:255px"></i><i style="height:184px"><b>Slow<br>week</b></i><i style="height:241px"></i><i style="height:251px"></i><i class="on" style="height:253px"></i>
+    </div>
+    <ul class="xl"><li><b>Sep 21</b>$81,940</li><li><b>Sep 28</b>$83,120</li><li><b>Oct 5</b>$82,560</li><li><b>Oct 12</b>$84,870</li><li><b>Oct 19</b>$61,480</li><li><b>Oct 26</b>$80,230</li><li><b>Nov 2</b>$83,790</li><li class="on" aria-current="true"><b>Nov 9</b>$84,310</li></ul>
+    <div class="locs">
+      <div><div class="lab">Downtown</div><div class="f">$51,870</div><u style="width:156px"></u></div>
+      <div><div class="lab">Riverside</div><div class="f">$32,440</div><u style="width:97px"></u></div>
+    </div>
+  </div>
+</section>
+<div class="act"><button class="btn">Try it on my phone</button><button class="btn p">Publish</button></div>
+
+</body>
+</html>

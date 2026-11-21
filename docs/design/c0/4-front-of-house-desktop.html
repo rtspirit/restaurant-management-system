@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>RMS: Mini-apps, Build (Front of House)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Nunito+Sans:opsz,wght@6..12,400..900&display=swap" rel="stylesheet">
+<style>
+/* Front of House. Rule: if it has colour, you can press it. --action is the only colour and becomes each restaurant's brand colour. */
+:root{--ground:#F4EEE6;--card:#FFFFFF;--ink:#1E2420;--action:#12804A;--on-action:#FFFFFF;--line:#E3DBD0;--muted:#6C7068;--muted-on-ground:#5A5E56;--bar:#D4CABC;--shadow:0 1px 2px rgba(30,36,32,.06)}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:1440px;height:900px;overflow:hidden}
+body{display:grid;grid-template-columns:224px 1fr;background:var(--ground);color:var(--ink);font:400 16px/1.5 "Nunito Sans",system-ui,sans-serif;font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}
+button,input{font:inherit;color:inherit}button{cursor:pointer}a{color:inherit;text-decoration:none}ul,ol{list-style:none}
+::selection{background:var(--ink);color:#fff}
+:focus-visible{outline:3px solid var(--ink);outline-offset:2px}
+.sprite{position:absolute;width:0;height:0}
+.i{width:20px;height:20px;flex:none;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round}
+.go,.ghost{color:var(--action)}
+/* Shape rule: fully rounded = a button. 8 to 10px corners = a label you only read. An ink outline = a note worth reading. */
+.pill{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:44px;padding:8px 20px;border-radius:999px;border:1px solid var(--line);background:var(--card);font-weight:700;white-space:nowrap}
+.fill{background:var(--action);border-color:var(--action);color:var(--on-action);font-size:19px;font-weight:800}
+.card{background:var(--card);border-radius:16px;padding:20px 24px;box-shadow:var(--shadow)}
+.tag{padding:8px 12px;border-radius:8px;background:var(--line);font-size:15px;font-weight:700;line-height:16px}
+.note{display:inline-flex;align-items:center;gap:4px;padding:8px 12px 8px 8px;border:1.5px solid var(--ink);border-radius:8px;font-size:15px;font-weight:800;line-height:16px;white-space:nowrap}.note .i{width:16px;height:16px;stroke-width:2.25}
+/* Side rail: one left edge at 32px */
+.rail{display:flex;flex-direction:column;padding:24px 16px}
+.logo{display:inline-flex;align-items:baseline;gap:3px;align-self:flex-start;margin-left:16px;font-size:26px;font-weight:900;line-height:32px;letter-spacing:-.03em}.logo i{width:8px;height:8px;border-radius:50%;background:var(--action)}
+.place{margin:28px 0 24px}.place strong{display:block;margin:0 0 8px 16px;font-weight:800}
+.place .pill{width:100%;justify-content:space-between;padding:8px 14px 8px 16px;font-size:15px}
+.rail ul{display:grid;gap:4px}
+.rail li a{display:flex;align-items:center;gap:12px;height:48px;padding:8px 16px;border-radius:999px;font-weight:600}
+.rail [aria-current]{background:var(--card);color:var(--action);font-weight:800;box-shadow:var(--shadow)}
+.me{display:flex;align-items:center;gap:12px;margin-top:auto;padding-left:16px}
+.av{display:grid;place-items:center;width:40px;height:40px;padding:8px;border-radius:50%;background:var(--line);font-size:14px;font-weight:800}
+.me strong,.me small{display:block;line-height:20px}.me strong{font-weight:700}.me small{font-size:15px;color:var(--muted-on-ground)}
+/* Page header and tabs */
+main{display:grid;grid-template-rows:auto 1fr;padding:20px 32px;min-width:0;min-height:0}
+.top{display:flex;align-items:flex-end;gap:40px;border-bottom:1px solid var(--line)}
+.top h1{font-size:28px;font-weight:800;line-height:48px;letter-spacing:-.01em}
+[role=tablist]{display:flex;gap:8px}
+[role=tab]{height:48px;margin-bottom:-1px;padding:8px 12px;border:0;border-bottom:3px solid transparent;background:none;font-size:19px;font-weight:700}
+[role=tab][aria-selected=true]{color:var(--action);border-color:var(--action);font-weight:800}
+.work{display:grid;grid-template-columns:560px 1fr;min-height:0}
+.talk,.preview{display:flex;flex-direction:column;min-height:0;padding-top:16px}
+/* Build conversation */
+.talk{gap:16px;padding-right:24px;border-right:1px solid var(--line)}
+.you{align-self:flex-end;padding:12px 20px;border-radius:20px 20px 6px 20px;background:var(--line);font-weight:600}
+.asked{display:flex;flex-wrap:wrap;gap:8px}
+.asked li{padding:8px 12px;border:1px solid var(--line);border-radius:10px;font-size:15px;color:var(--muted-on-ground)}
+.asked b{margin-left:4px;color:var(--ink);font-weight:800}
+.card h2{font-size:18px;font-weight:800;line-height:24px}.plan ul{margin-top:8px}
+.plan li{position:relative;padding-left:20px;line-height:30px}
+.plan li::before{content:"";position:absolute;left:2px;top:12px;width:6px;height:6px;border-radius:50%;background:var(--ink)}
+.assumed header{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+.assumed h2,.assumed a,.assumed p{font-size:15px}.assumed a{color:var(--action);font-weight:800}.assumed p{color:var(--muted)}
+.steps{display:grid;gap:8px}.steps li{display:flex;align-items:center;gap:12px;line-height:24px}.steps .now{font-weight:700}
+.steps small{margin-left:auto;font-size:15px;font-weight:400;color:var(--muted)}
+.tick,.ring{flex:none;width:22px;height:22px;border-radius:50%}
+.tick{display:grid;place-items:center;background:var(--ink);color:#fff}.tick .i{width:14px;height:14px;stroke-width:2.75}
+.ring{border:2.5px solid var(--line);border-top-color:var(--ink);animation:spin 1.2s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.ring{animation:none}}
+.composer{display:flex;align-items:center;gap:8px;height:60px;margin-top:auto;padding:8px 8px 8px 24px;border:1px solid var(--line);border-radius:999px;background:var(--card);box-shadow:var(--shadow)}
+.composer input{flex:1;min-width:0;border:0;outline:0;background:none}.composer input::placeholder{color:var(--muted);opacity:1}
+.composer .fill{padding:8px 24px}
+/* Live preview */
+.preview{gap:12px;padding-left:24px}
+.phead{display:flex;align-items:center;gap:10px}.phead h2{font-size:20px;font-weight:800;line-height:28px}
+.apphead{display:flex;justify-content:space-between;align-items:center}.apphead h3{font-size:24px;font-weight:800;line-height:44px;letter-spacing:-.01em}
+.week{gap:0;padding:0}.week b{padding:8px 4px;font-weight:700}
+.week button{display:grid;place-items:center;width:44px;height:42px;border:0;border-radius:999px;background:none;color:var(--action)}
+.lab{font-size:15px;font-weight:600;line-height:20px;color:var(--muted)}
+.prime{display:flex;justify-content:space-between;align-items:center}
+.big{font-size:44px;font-weight:800;line-height:48px;letter-spacing:-.02em}
+.vs{display:grid;justify-items:end;gap:6px;font-weight:600}
+.figs{display:grid;grid-template-columns:repeat(3,1fr)}.figs div+div{padding-left:20px;border-left:1px solid var(--line)}
+.figs dd{font-size:26px;font-weight:800;line-height:34px}.figs .sub{font-size:15px;font-weight:400;line-height:20px;color:var(--muted)}
+.card h4{font-size:16px;font-weight:800;line-height:22px}
+/* Compact report mode: the chart and the location rows run tighter inside their cards */
+.chart{flex:1;display:flex;flex-direction:column;min-height:0}
+.weeks{display:flex;gap:8px;margin-top:auto}
+.weeks li{position:relative;flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;padding-bottom:22px;font-size:13px;line-height:18px}
+.weeks b{font-weight:700}.weeks span{font-weight:600;color:var(--muted)}
+.weeks i{width:100%;height:calc(var(--v) / 84870 * 96px);margin:4px 0 6px;border-radius:8px 8px 3px 3px;background:var(--bar)}
+.weeks [aria-current] i{background:var(--action)}.weeks .slow i{border:1.5px solid var(--ink)}
+.weeks [aria-current] b,.weeks [aria-current] span{color:var(--ink);font-weight:800}
+.weeks em{position:absolute;bottom:0;left:50%;transform:translateX(-50%);font-style:normal;font-weight:800;white-space:nowrap}
+.loc ul{margin-top:4px}.loc li{display:grid;grid-template-columns:96px 1fr 76px;align-items:center;height:30px;font-size:15px}
+.loc span{font-weight:600}.loc b{text-align:right;font-weight:800}
+.loc i{width:calc(var(--v) / 51870 * 100%);height:10px;border-radius:5px;background:var(--bar)}
+.acts{display:flex;justify-content:flex-end;align-items:center;gap:12px;height:60px}
+.acts .pill{height:52px;padding:8px 28px;font-size:19px;font-weight:800}
+</style>
+</head>
+<body>
+<svg class="sprite" aria-hidden="true"><defs>
+<symbol id="home" viewBox="0 0 24 24"><path d="M4 11l8-7 8 7v8a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z"/></symbol>
+<symbol id="menu" viewBox="0 0 24 24"><path d="M5 3v5a2 2 0 0 0 4 0V3M7 3v18M17 21V3c-2 2-3 5-3 9h3"/></symbol>
+<symbol id="staff" viewBox="0 0 24 24"><path d="M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 6.5M18 14.5a6.5 6.5 0 0 1 3.5 5.5"/></symbol>
+<symbol id="pin" viewBox="0 0 24 24"><path d="M12 21s7-6.2 7-11.5a7 7 0 0 0-14 0C5 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></symbol>
+<symbol id="apps" viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="2"/><rect x="13" y="4" width="7" height="7" rx="2"/><rect x="4" y="13" width="7" height="7" rx="2"/><rect x="13" y="13" width="7" height="7" rx="2"/></symbol>
+<symbol id="set" viewBox="0 0 24 24"><path d="M4 7h8M18 7h2M4 17h2M12 17h8"/><circle cx="15" cy="7" r="2.5"/><circle cx="9" cy="17" r="2.5"/></symbol>
+<symbol id="down" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+<symbol id="prev" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></symbol>
+<symbol id="next" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+<symbol id="check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+<symbol id="up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+</defs></svg>
+<nav class="rail" aria-label="Main">
+  <a class="logo" href="#" aria-label="RMS home">RMS<i></i></a>
+  <div class="place"><strong>Marigold Kitchen</strong><button class="pill" aria-label="Location: All locations">All locations<svg class="i go"><use href="#down"/></svg></button></div>
+  <ul>
+    <li><a href="#"><svg class="i"><use href="#home"/></svg>Home</a></li>
+    <li><a href="#"><svg class="i"><use href="#menu"/></svg>Menu</a></li>
+    <li><a href="#"><svg class="i"><use href="#staff"/></svg>Staff</a></li>
+    <li><a href="#"><svg class="i"><use href="#pin"/></svg>Locations</a></li>
+    <li><a href="#" aria-current="page"><svg class="i"><use href="#apps"/></svg>Mini-apps</a></li>
+    <li><a href="#"><svg class="i"><use href="#set"/></svg>Settings</a></li>
+  </ul>
+  <div class="me"><span class="av">AV</span><span><strong>Asha Verma</strong><small>Owner</small></span></div>
+</nav>
+<main>
+  <header class="top"><h1>Mini-apps</h1>
+    <div role="tablist" aria-label="Mini-apps"><button role="tab" aria-selected="true">Build</button><button role="tab" aria-selected="false">Marketplace</button></div>
+  </header>
+  <div class="work">
+    <section class="talk" aria-label="Build conversation">
+      <p class="you">I want to see how much money I’m making</p>
+      <ul class="asked" aria-label="Your answers"><li>Which locations? <b>Both</b></li><li>How often do you want to look? <b>Every week</b></li></ul>
+      <article class="card plan">
+        <h2>Here’s what I’ll build</h2>
+        <ul>
+          <li>Money in, day by day</li>
+          <li>What food, drink and staff cost you</li>
+          <li>What’s left each week</li>
+          <li>Prime cost, the number most owners watch</li>
+        </ul>
+      </article>
+      <article class="card assumed">
+        <header><h2>What I assumed</h2><a href="#">Change</a></header>
+        <p>Your week runs Monday to Sunday.</p>
+        <p>A day ends at 4am, so late tables count for the night before.</p>
+      </article>
+      <ol class="card steps" aria-label="Progress">
+        <li><span class="tick"><svg class="i"><use href="#check"/></svg></span>Set up your sales days<small>Done</small></li>
+        <li><span class="tick"><svg class="i"><use href="#check"/></svg></span>Built your weekly screen<small>Done</small></li>
+        <li class="now"><span class="ring"></span>Checking the numbers add up<small>In progress</small></li>
+      </ol>
+      <form class="composer"><input type="text" placeholder="Tell me what to change" aria-label="Tell me what to change"><button type="button" class="pill fill">Send</button></form>
+    </section>
+    <section class="preview" aria-label="Preview">
+      <header class="phead"><h2>Preview</h2><span class="tag">Sample numbers</span></header>
+      <div class="apphead">
+        <h3>Money</h3>
+        <div class="pill week"><button aria-label="Previous week"><svg class="i"><use href="#prev"/></svg></button><b>Nov 9 to Nov 15</b><button aria-label="Next week"><svg class="i"><use href="#next"/></svg></button></div>
+      </div>
+      <article class="card prime">
+        <div><p class="lab">Prime cost</p><p class="big">61.3%</p></div>
+        <div class="vs"><p>Target 60%</p><p class="note"><svg class="i"><use href="#up"/></svg>1.3 points over</p></div>
+      </article>
+      <dl class="card figs">
+        <div><dt class="lab">Net sales</dt><dd>$84,310</dd></div>
+        <div><dt class="lab">Food and drink cost</dt><dd>$25,460</dd><dd class="sub">30.2% of sales</dd></div>
+        <div><dt class="lab">Staff cost</dt><dd>$26,220</dd><dd class="sub">31.1% of sales</dd></div>
+      </dl>
+      <article class="card chart">
+        <h4>Net sales, last eight weeks</h4>
+        <ol class="weeks">
+          <li style="--v:81940"><b>$81,940</b><i></i><span>Sep 21</span></li>
+          <li style="--v:83120"><b>$83,120</b><i></i><span>Sep 28</span></li>
+          <li style="--v:82560"><b>$82,560</b><i></i><span>Oct 5</span></li>
+          <li style="--v:84870"><b>$84,870</b><i></i><span>Oct 12</span></li>
+          <li class="slow" style="--v:61480"><b>$61,480</b><i></i><span>Oct 19</span><em>Slow week</em></li>
+          <li style="--v:80230"><b>$80,230</b><i></i><span>Oct 26</span></li>
+          <li style="--v:83790"><b>$83,790</b><i></i><span>Nov 2</span></li>
+          <li style="--v:84310" aria-current="true"><b>$84,310</b><i></i><span>Nov 9</span></li>
+        </ol>
+      </article>
+      <article class="card loc">
+        <h4>By location</h4>
+        <ul>
+          <li style="--v:51870"><span>Downtown</span><i></i><b>$51,870</b></li>
+          <li style="--v:32440"><span>Riverside</span><i></i><b>$32,440</b></li>
+        </ul>
+      </article>
+      <div class="acts"><button class="pill ghost">Try it on my phone</button><button class="pill fill">Publish</button></div>
+    </section>
+  </div>
+</main>
+</body>
+</html>

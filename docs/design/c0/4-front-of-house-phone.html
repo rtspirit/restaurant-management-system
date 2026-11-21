@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=390, initial-scale=1">
+<title>Money: Marigold Kitchen (Front of House)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Nunito+Sans:opsz,wght@6..12,400..900&display=swap" rel="stylesheet">
+<style>
+/* Front of House. Rule: if it has colour, you can press it. --action is the only colour and becomes each restaurant's brand colour. */
+:root{--ground:#F4EEE6;--card:#FFFFFF;--ink:#1E2420;--action:#12804A;--on-action:#FFFFFF;--line:#E3DBD0;--muted:#6C7068;--bar:#D4CABC;--shadow:0 1px 2px rgba(30,36,32,.06)}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:390px;height:844px;overflow:hidden}
+body{display:flex;flex-direction:column;background:var(--ground);color:var(--ink);font:400 16px/1.5 "Nunito Sans",system-ui,sans-serif;font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;cursor:pointer}a{color:inherit;text-decoration:none}ul,ol{list-style:none}
+::selection{background:var(--ink);color:#fff}
+:focus-visible{outline:3px solid var(--ink);outline-offset:2px}
+.sprite{position:absolute;width:0;height:0}
+.i{width:20px;height:20px;flex:none;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round}
+.go{color:var(--action)}
+/* Shape rule: fully rounded = a button. 8px corners = a label you only read. */
+.pill{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:44px;padding:8px 16px;border-radius:999px;border:1px solid var(--line);background:var(--card);font-weight:700;white-space:nowrap}
+.fill{background:var(--action);border-color:var(--action);color:var(--on-action);font-size:19px;font-weight:800}
+.card{background:var(--card);border-radius:16px;padding:20px;box-shadow:var(--shadow)}
+.note{display:inline-flex;align-items:center;gap:4px;padding:8px 12px 8px 8px;border:1.5px solid var(--ink);border-radius:8px;font-weight:800;line-height:16px;white-space:nowrap}
+.note .i{width:16px;height:16px;stroke-width:2.25}
+/* Top: way back to RMS, location */
+.top{display:flex;justify-content:space-between;align-items:center;padding:12px 16px 0}
+.back{gap:2px;padding:8px 16px 8px 8px}
+.logo{display:inline-flex;align-items:baseline;gap:2px;font-size:20px;font-weight:900;line-height:24px;letter-spacing:-.03em}
+.logo i{width:6px;height:6px;border-radius:50%;background:var(--action)}
+.where{padding:8px 12px 8px 16px}
+main{flex:1;display:flex;flex-direction:column;gap:12px;min-height:0;padding:12px 16px}
+.titlebar{display:flex;justify-content:space-between;align-items:center}
+h1{font-size:28px;font-weight:800;line-height:48px;letter-spacing:-.01em}
+.week{gap:0;height:48px;padding:0 2px}
+.week button{display:grid;place-items:center;width:44px;height:44px;border:0;border-radius:50%;background:none;color:var(--action)}
+.week b{padding:8px 2px;font-weight:700}
+.lab{font-weight:600;line-height:22px;color:var(--muted)}
+.prime{display:flex;justify-content:space-between;align-items:center}
+.big{font-size:44px;font-weight:800;line-height:48px;letter-spacing:-.02em}
+.vs{display:grid;justify-items:end;gap:6px;font-weight:600}
+.figs{padding:8px 20px}
+.figs div{display:flex;justify-content:space-between;align-items:center;min-height:44px;padding:6px 0}
+.figs div+div{border-top:1px solid var(--line)}
+.figs dt{font-weight:600;line-height:20px}
+.figs dt small{display:block;font-size:16px;font-weight:400;color:var(--muted)}
+.figs dd{font-size:22px;font-weight:800}
+/* Compact report mode: the day rows run tighter inside their card */
+.days{padding:16px 20px 12px}
+.days header{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px}
+.days h2{font-size:18px;font-weight:800;line-height:26px}
+.days li{display:grid;grid-template-columns:44px 1fr 76px;align-items:center;height:30px}
+.days span{font-weight:600}
+.days i{width:calc(var(--v) / 17950 * 100%);height:12px;border-radius:6px;background:var(--bar)}
+.days b{text-align:right;font-weight:800}
+.ask{height:52px;margin-top:auto;gap:10px}
+.ask .i{width:22px;height:22px;stroke-width:2}
+/* Bottom bar */
+.dock{display:flex;padding:0 8px 4px;border-top:1px solid var(--line);background:var(--card)}
+.dock a{position:relative;flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;height:60px;padding:8px 4px;font-size:13px;font-weight:700;line-height:16px}
+.dock .i{width:24px;height:24px}
+.dock [aria-current]{color:var(--action);font-weight:800}
+.dock [aria-current]::before{content:"";position:absolute;top:-1px;width:32px;height:3px;border-radius:0 0 3px 3px;background:var(--action)}
+</style>
+</head>
+<body>
+<svg class="sprite" aria-hidden="true"><defs>
+<symbol id="home" viewBox="0 0 24 24"><path d="M4 11l8-7 8 7v8a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z"/></symbol>
+<symbol id="apps" viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="2"/><rect x="13" y="4" width="7" height="7" rx="2"/><rect x="4" y="13" width="7" height="7" rx="2"/><rect x="13" y="13" width="7" height="7" rx="2"/></symbol>
+<symbol id="ask" viewBox="0 0 24 24"><path d="M5 4.5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-7l-5 4v-4H5a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2z"/></symbol>
+<symbol id="more" viewBox="0 0 24 24"><path stroke-width="3" d="M5 12h.01M12 12h.01M19 12h.01"/></symbol>
+<symbol id="down" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+<symbol id="prev" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></symbol>
+<symbol id="next" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+<symbol id="up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+</defs></svg>
+
+<header class="top">
+  <a class="pill back" href="#" aria-label="Back to RMS"><svg class="i go"><use href="#prev"/></svg><span class="logo">RMS<i></i></span></a>
+  <button class="pill where" aria-label="Location: All locations">All locations<svg class="i go"><use href="#down"/></svg></button>
+</header>
+
+<main>
+  <div class="titlebar">
+    <h1>Money</h1>
+    <div class="pill week">
+      <button aria-label="Previous week"><svg class="i"><use href="#prev"/></svg></button>
+      <b>Nov 9 to Nov 15</b>
+      <button aria-label="Next week"><svg class="i"><use href="#next"/></svg></button>
+    </div>
+  </div>
+  <section class="card prime">
+    <div><p class="lab">Prime cost</p><p class="big">61.3%</p></div>
+    <div class="vs"><p>Target 60%</p><p class="note"><svg class="i"><use href="#up"/></svg>1.3 points over</p></div>
+  </section>
+  <dl class="card figs">
+    <div><dt>Net sales</dt><dd>$84,310</dd></div>
+    <div><dt>Food and drink<small>30.2% of sales</small></dt><dd>$25,460</dd></div>
+    <div><dt>Staff<small>31.1% of sales</small></dt><dd>$26,220</dd></div>
+  </dl>
+  <section class="card days">
+    <header><h2>Day by day</h2><p class="lab">Net sales</p></header>
+    <ol>
+      <li style="--v:8140"><span>Mon</span><i></i><b>$8,140</b></li>
+      <li style="--v:8960"><span>Tue</span><i></i><b>$8,960</b></li>
+      <li style="--v:9870"><span>Wed</span><i></i><b>$9,870</b></li>
+      <li style="--v:11420"><span>Thu</span><i></i><b>$11,420</b></li>
+      <li style="--v:15830"><span>Fri</span><i></i><b>$15,830</b></li>
+      <li style="--v:17950"><span>Sat</span><i></i><b>$17,950</b></li>
+      <li style="--v:12140"><span>Sun</span><i></i><b>$12,140</b></li>
+    </ol>
+  </section>
+  <a class="pill fill ask" href="#"><svg class="i"><use href="#ask"/></svg>Ask about your numbers</a>
+</main>
+
+<nav class="dock" aria-label="Main">
+  <a href="#"><svg class="i"><use href="#home"/></svg>Home</a>
+  <a href="#" aria-current="page"><svg class="i"><use href="#apps"/></svg>Mini-apps</a>
+  <a href="#"><svg class="i"><use href="#ask"/></svg>Ask</a>
+  <a href="#"><svg class="i"><use href="#more"/></svg>More</a>
+</nav>
+</body>
+</html>

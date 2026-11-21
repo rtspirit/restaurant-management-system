@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=390, initial-scale=1">
+<title>Money: RMS (Next Step)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Hind:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--y:#FFD400;--k:#111111;--g:#F3F3EF;--w:#FFFFFF;--s:#6B6B66;--b:#1B6FB5;--l:#D8D8D2}
+*{box-sizing:border-box;margin:0;padding:0}html,body{width:390px;height:844px;overflow:hidden}
+body{font:400 17px/1.4 Hind,sans-serif;color:var(--k);background:var(--g);font-variant-numeric:tabular-nums;display:grid;grid-template-rows:56px 44px 1fr 72px}
+/* Hind's figures are all half an em wide; only its kerning pairs break the columns, so numbers switch kerning off */
+.big,.fig b,.fig small,.days b,.wkp span,.meta,.next{font-kerning:none}::selection{background:var(--b);color:var(--w)}:focus-visible{outline:3px solid var(--b);outline-offset:2px}
+a{color:inherit;text-decoration:none}button{font:inherit;color:inherit;cursor:pointer}svg{width:20px;height:20px;flex:none}.defs{position:absolute;width:0;height:0}ul{list-style:none}
+/* black top bar */
+.bar{background:var(--k);color:var(--w);display:flex;align-items:center;padding:8px 12px 8px 8px;gap:10px}
+.back{height:44px;margin:-2px 0;display:flex;align-items:center;gap:2px;padding:0 6px 0 2px;font-weight:600;color:#D2D2CC}.back span{padding-top:3px}
+.mk{width:34px;height:34px;background:#E8892B;color:var(--k);font-weight:700;font-size:12px;line-height:16px;text-align:center;padding:10px 8px 8px}
+.bar h1{font-size:22px;font-weight:700;line-height:1.2;padding-top:4px}.loc{margin:-2px 0 -2px auto;height:44px;padding:0;background:none;border:0;display:flex;align-items:center}
+.loc span{padding:10px 10px 8px 12px;line-height:20px;border:1px solid #8A8A84;border-radius:4px;color:var(--w);font-weight:500;font-size:16px;display:flex;align-items:center;gap:6px}
+.loc svg{width:15px;height:15px;margin-top:-3px}
+/* signature: the next-step band, the only yellow on the screen */
+.next{background:var(--y);position:relative;padding:11px 52px 9px 16px}.next strong{display:block;font-size:17px;font-weight:700;line-height:24px}
+.next i{position:absolute;right:0;top:0;width:44px;height:44px;background:var(--k);color:var(--w);display:grid;place-items:center}.next svg{width:24px;height:24px;transform:rotate(90deg)}
+/* content */
+main{padding:10px 16px 0;display:flex;flex-direction:column;gap:10px;min-height:0}.wkp{display:flex;align-items:center;justify-content:space-between;font-weight:600;font-size:18px}
+.wkp button{width:44px;height:44px;background:var(--w);border:1.5px solid var(--k);border-radius:4px;display:grid;place-items:center}.wkp span{padding-top:3px}
+.card{background:var(--w);border:1px solid var(--l);border-radius:6px;padding:14px 16px 8px}.card h2{font-size:17px;font-weight:600}
+.big{font-size:104px;font-weight:700;line-height:.86;letter-spacing:-.02em;margin:6px 0 0 -4px;height:82px}.meta{display:flex;align-items:center;gap:12px;margin:8px 0 12px}
+.meta>span{padding-top:2px}.over{background:var(--k);color:var(--w);font-weight:600;font-size:15px;line-height:15px;display:flex;align-items:center;gap:6px;padding:9px 12px 8px 10px}
+.over svg{width:13px;height:13px;margin-top:-2px}
+.fig li{display:grid;grid-template-columns:1fr auto 62px;align-items:baseline;padding:10px 0 8px;line-height:22px;border-top:1px solid var(--l)}
+.fig small{font-size:15px;color:var(--s);text-align:right}.fig b{font-size:21px;font-weight:700;text-align:right}
+.days h2{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px}.days h2 small{font-size:15px;font-weight:400;color:var(--s)}
+.days li{display:grid;grid-template-columns:42px 1fr 68px;align-items:center;height:31px}.days li>span{font-weight:600;padding-top:3px}
+.days i{height:14px;width:var(--w8);background:var(--k)}.days b{font-weight:600;text-align:right;padding-top:3px}
+/* ask */
+.ask{background:var(--w);border-top:1px solid var(--l);padding:10px 16px 12px}
+.ask button{width:100%;height:50px;padding:14px 16px 11px;line-height:25px;background:var(--k);color:var(--w);border:0;border-radius:4px;font-weight:600;font-size:18px;display:flex;align-items:center;justify-content:center;gap:10px}
+.ask svg{margin-top:-3px}
+</style>
+</head>
+<body>
+<svg class="defs" aria-hidden="true"><defs>
+<symbol id="ar" viewBox="0 0 24 24"><path d="M2.5 12h17M12 4.5l7.5 7.5-7.5 7.5" fill="none" stroke="currentColor" stroke-width="2.8"/></symbol>
+<symbol id="cd" viewBox="0 0 24 24"><path d="M5 8.5l7 7 7-7" fill="none" stroke="currentColor" stroke-width="2.8"/></symbol>
+<symbol id="cl" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.8"/></symbol>
+<symbol id="cr" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.8"/></symbol>
+<symbol id="up" viewBox="0 0 24 24"><path d="M12 4l10 17H2z" fill="currentColor"/></symbol>
+<symbol id="say" viewBox="0 0 24 24"><path d="M3.5 4.5h17v12h-9l-5 4v-4h-3z" fill="none" stroke="currentColor" stroke-width="2.6"/></symbol>
+</defs></svg>
+<header class="bar">
+  <a class="back" href="#" aria-label="Back to RMS"><svg><use href="#cl"/></svg><span>RMS</span></a>
+  <span class="mk" title="Marigold Kitchen">MK</span>
+  <h1>Money</h1>
+  <button class="loc" aria-label="Location: All locations"><span>All locations <svg><use href="#cd"/></svg></span></button>
+</header>
+<p class="next" role="status"><strong>Prime cost is 1.3 points over target</strong><i aria-hidden="true"><svg><use href="#ar"/></svg></i></p>
+<main>
+  <div class="wkp"><button aria-label="Previous week"><svg><use href="#cl"/></svg></button><span>Nov 9 to Nov 15</span><button aria-label="Next week"><svg><use href="#cr"/></svg></button></div>
+  <section class="card">
+    <h2>Prime cost</h2>
+    <p class="big">61.3%</p>
+    <p class="meta"><span>Target 60%</span><b class="over"><svg aria-hidden="true"><use href="#up"/></svg>1.3 points over</b></p>
+    <ul class="fig">
+      <li><span>Net sales</span><b>$84,310</b><small></small></li>
+      <li><span>Food and drink</span><b>$25,460</b><small>(30.2%)</small></li>
+      <li><span>Staff</span><b>$26,220</b><small>(31.1%)</small></li>
+    </ul>
+  </section>
+  <section class="card days">
+    <h2>Day by day <small>Net sales</small></h2>
+    <ul>
+      <li><span>Mon</span><i style="--w8:45.3%"></i><b>$8,140</b></li>
+      <li><span>Tue</span><i style="--w8:49.9%"></i><b>$8,960</b></li>
+      <li><span>Wed</span><i style="--w8:55%"></i><b>$9,870</b></li>
+      <li><span>Thu</span><i style="--w8:63.6%"></i><b>$11,420</b></li>
+      <li><span>Fri</span><i style="--w8:88.2%"></i><b>$15,830</b></li>
+      <li><span>Sat</span><i style="--w8:100%"></i><b>$17,950</b></li>
+      <li><span>Sun</span><i style="--w8:67.6%"></i><b>$12,140</b></li>
+    </ul>
+  </section>
+</main>
+<div class="ask"><button type="button"><svg aria-hidden="true"><use href="#say"/></svg>Ask about your numbers</button></div>
+</body>
+</html>

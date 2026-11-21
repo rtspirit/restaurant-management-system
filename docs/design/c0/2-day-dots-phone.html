@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Money: RMS mini-app (Day Dots)</title>
+<meta name="viewport" content="width=390,initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;700;800&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#14211C;--ground:#EEF1EE;--surface:#fff;--line:#D3DAD5;--steel:#E2E7E3;--mute:#55625C;
+--mon:#1F6FD0;--tue:#F2C230;--wed:#D8412F;--thu:#8A5A3B;--fri:#2E9B57;--sat:#F0872A;--sun:#14211C}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:390px;height:844px;overflow:hidden}
+body{font:400 16px/1.4 "Hanken Grotesk",system-ui,sans-serif;color:var(--ink);background:var(--ground);font-variant-numeric:tabular-nums;display:flex;flex-direction:column;-webkit-font-smoothing:antialiased}
+::selection{background:var(--ink);color:#fff}
+:focus-visible{outline:3px solid var(--ink);outline-offset:2px}
+button{font:inherit;color:inherit;cursor:pointer}
+svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+/* top bar: back to RMS, mini-app name on its label block, location switcher */
+.bar{height:60px;background:var(--ink);color:#fff;display:flex;align-items:center;justify-content:space-between;padding:8px 12px 8px 8px}
+.back{height:44px;padding:0 8px 0 0;display:flex;align-items:center;gap:2px;background:none;border:0;font-weight:800;font-size:17px;letter-spacing:-.01em}
+.back i{width:7px;height:7px;border-radius:50%;background:var(--sat);align-self:flex-end;margin:0 0 15px 2px}
+.label{background:#fff;color:var(--ink);font-weight:800;font-size:20px;line-height:1;padding:8px 14px 9px;border-radius:3px}
+.sel{height:44px;padding:8px 8px 8px 12px;display:flex;align-items:center;gap:4px;background:none;border:1px solid #47574F;border-radius:8px;font-weight:500;font-size:14px}
+main{flex:1;min-height:0;display:flex;flex-direction:column;gap:12px;padding:12px 16px 0}
+.wk{display:flex;align-items:center;height:48px;background:#fff;border:1px solid var(--line);border-radius:10px;font-weight:700}
+.wk button{width:48px;height:46px;background:none;border:0;display:grid;place-items:center}
+.wk span{flex:1;height:46px;padding:8px 12px;display:grid;place-items:center;border-inline:1px solid var(--line)}
+.card{background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+.k{font-size:14px;font-weight:700;color:var(--mute)}
+.prime{display:flex;align-items:flex-end;justify-content:space-between}
+.big{font-size:54px;font-weight:800;line-height:1;letter-spacing:-.02em;margin-top:2px}
+.tgt{display:grid;justify-items:end;gap:6px;font-size:14px;color:var(--mute);padding-bottom:4px}
+.over{display:inline-flex;align-items:center;gap:4px;padding:8px 12px 8px 8px;line-height:1;border:1.5px solid var(--ink);border-radius:17px;color:var(--ink);font-weight:700}
+.over svg{width:16px;height:16px;stroke-width:2.5}
+.three{display:grid;grid-template-columns:1fr 1.15fr 1fr;margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
+.three div+div{border-left:1px solid var(--line);padding-left:12px}
+.three span{display:block;font-size:13px;color:var(--mute);white-space:nowrap}
+.three b{display:block;font-size:20px;font-weight:800;line-height:1.3}
+.daycard{flex:1;min-height:0;display:flex;flex-direction:column;padding-bottom:8px}
+h2{font-size:17px;font-weight:800;display:flex;justify-content:space-between;align-items:baseline}
+h2 span{font-size:13px;font-weight:400;color:var(--mute)}
+.days{list-style:none;flex:1;display:grid;grid-auto-rows:1fr;margin-top:4px}
+.days li{min-height:44px;padding:8px 0;display:grid;grid-template-columns:14px 42px 1fr 68px;align-items:center;column-gap:8px}
+.days li+li{border-top:1px solid var(--line)}
+.dot{width:14px;height:14px;border-radius:50%;background:var(--c);border:1.5px solid color-mix(in srgb,var(--c) 62%,#14211C)}
+.days b{font-weight:800}
+.days i{display:block;height:20px;border-radius:0 3px 3px 0;background:var(--c);border:1.5px solid color-mix(in srgb,var(--c) 62%,#14211C);border-left:0}
+.days em{font-style:normal;font-weight:700;text-align:right}
+.ask{padding:12px 16px 20px}
+.ask button{width:100%;height:52px;padding:8px 16px;border:0;border-radius:10px;background:var(--ink);color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center;gap:10px}
+</style>
+</head>
+<body>
+<header class="bar">
+  <button class="back" aria-label="Back to RMS"><svg viewBox="0 0 24 24"><path d="m14 6-6 6 6 6"/></svg>RMS<i></i></button>
+  <div class="label">Money</div>
+  <button class="sel" aria-label="Location">All locations<svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button>
+</header>
+<main>
+  <div class="wk">
+    <button aria-label="Previous week"><svg viewBox="0 0 24 24"><path d="m14 6-6 6 6 6"/></svg></button>
+    <span>Nov 9 to Nov 15</span>
+    <button aria-label="Next week"><svg viewBox="0 0 24 24"><path d="m10 6 6 6-6 6"/></svg></button>
+  </div>
+  <section class="card" aria-label="This week">
+    <div class="prime">
+      <div><div class="k">Prime cost</div><div class="big">61.3%</div></div>
+      <div class="tgt">Target 60%<span class="over"><svg viewBox="0 0 24 24"><path d="M12 19V6M6.5 11.5 12 6l5.5 5.5"/></svg>1.3 points over</span></div>
+    </div>
+    <div class="three">
+      <div><span>Net sales</span><b>$84,310</b></div>
+      <div><span>Food and drink</span><b>$25,460</b><span>30.2%</span></div>
+      <div><span>Staff</span><b>$26,220</b><span>31.1%</span></div>
+    </div>
+  </section>
+  <section class="card daycard">
+    <h2>Day by day<span>Net sales</span></h2>
+    <ul class="days">
+      <li style="--c:var(--mon)"><span class="dot"></span><b>Mon</b><i style="width:45.3%"></i><em>$8,140</em></li>
+      <li style="--c:var(--tue)"><span class="dot"></span><b>Tue</b><i style="width:49.9%"></i><em>$8,960</em></li>
+      <li style="--c:var(--wed)"><span class="dot"></span><b>Wed</b><i style="width:55%"></i><em>$9,870</em></li>
+      <li style="--c:var(--thu)"><span class="dot"></span><b>Thu</b><i style="width:63.6%"></i><em>$11,420</em></li>
+      <li style="--c:var(--fri)"><span class="dot"></span><b>Fri</b><i style="width:88.2%"></i><em>$15,830</em></li>
+      <li style="--c:var(--sat)"><span class="dot"></span><b>Sat</b><i style="width:100%"></i><em>$17,950</em></li>
+      <li style="--c:var(--sun)"><span class="dot"></span><b>Sun</b><i style="width:67.6%"></i><em>$12,140</em></li>
+    </ul>
+  </section>
+</main>
+<div class="ask"><button><svg viewBox="0 0 24 24"><path d="M4 5h16v11H10l-5 4v-4H4z"/></svg>Ask about your numbers</button></div>
+</body>
+</html>

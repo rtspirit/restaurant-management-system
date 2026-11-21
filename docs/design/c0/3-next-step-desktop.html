@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>RMS: Mini-apps, Build (Next Step)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Hind:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--y:#FFD400;--k:#111111;--g:#F3F3EF;--w:#FFFFFF;--s:#6B6B66;--b:#1B6FB5;--l:#D8D8D2}
+*{box-sizing:border-box;margin:0;padding:0}html,body{width:1440px;height:900px;overflow:hidden}
+body{font:400 17px/1.4 Hind,sans-serif;color:var(--k);background:var(--g);font-variant-numeric:tabular-nums;display:grid;grid-template-rows:56px 60px 48px 1fr}
+/* Hind's figures are all half an em wide; only its kerning pairs break the columns, so numbers switch kerning off */
+.big,.fig b,.fig small,.wk b,.wk span,.by b,.wkp span,.meta,.next{font-kerning:none}::selection{background:var(--b);color:var(--w)}
+:focus-visible{outline:3px solid var(--b);outline-offset:2px}a{color:inherit;text-decoration:none}button,input{font:inherit;color:inherit}svg{width:20px;height:20px;flex:none}
+.defs{position:absolute;width:0;height:0}ul{list-style:none}
+/* shell: black top bar */
+.bar{background:var(--k);color:var(--w);display:flex;align-items:center;padding:8px 32px;gap:36px}
+.logo{display:flex;align-items:center;gap:9px;font-weight:700;font-size:23px;letter-spacing:.03em;line-height:1;padding-top:3px}
+.mark{width:26px;height:26px;background:var(--w);color:var(--k);display:grid;place-items:center;margin-top:-3px}.mark svg{width:18px;height:18px}
+.nav{display:flex;align-self:stretch;margin:-8px 0}
+.nav a{display:flex;align-items:center;padding:13px 16px 11px;font-weight:500;color:#D2D2CC;border-bottom:4px solid transparent;border-top:4px solid transparent}
+.nav a.on{color:var(--w);font-weight:700;border-bottom-color:var(--w)}.who{margin-left:auto;display:flex;align-items:center;gap:12px}
+.mk{width:34px;height:34px;background:#E8892B;color:var(--k);font-weight:700;font-size:12px;line-height:16px;text-align:center;padding:10px 8px 8px}
+.rest{font-weight:600;margin-right:12px;padding-top:2px}
+.loc{padding:10px 12px 8px 14px;line-height:20px;background:none;border:1px solid #8A8A84;border-radius:4px;color:var(--w);font-weight:500;display:flex;align-items:center;gap:8px}
+.loc svg{width:16px;height:16px;margin-top:-3px}
+.av{width:40px;height:40px;border-radius:50%;border:2px solid var(--w);font-weight:700;font-size:13px;line-height:18px;text-align:center;padding:10px 8px 8px}
+/* page title and tabs */
+.sub{background:var(--w);border-bottom:1px solid var(--l);display:flex;align-items:center;padding:8px 32px;gap:48px}.sub h1{font-size:28px;font-weight:700;line-height:1.2;padding-top:4px}
+.tabs{display:flex;gap:8px;align-self:stretch;margin:-8px 0}
+.tabs a{display:flex;align-items:center;padding:17px 14px 13px;font-weight:600;font-size:18px;line-height:25px;color:var(--s);border-bottom:4px solid transparent}
+.tabs a.on{color:var(--k);border-bottom-color:var(--b)}
+/* signature: the next-step band, the only yellow on the screen */
+.next{background:var(--y);position:relative;display:flex;align-items:baseline;padding:10px 68px 8px 32px}.next strong{font-size:21px;font-weight:700;line-height:30px}
+.next span{margin-left:auto;font-weight:600;font-size:18px;line-height:30px}
+.next i{position:absolute;right:0;top:0;width:48px;height:48px;background:var(--k);color:var(--w);display:grid;place-items:center}.next svg{width:28px;height:28px}
+/* work area */
+main{display:grid;grid-template-columns:592px 1fr;min-height:0}
+.talk{background:var(--w);border-right:1px solid var(--l);display:flex;flex-direction:column;padding:24px 32px 0;gap:20px;min-height:0}
+.me{align-self:flex-end;background:var(--g);border:1px solid var(--l);border-radius:4px;padding:11px 16px 8px;font-weight:500}
+.qa li{display:flex;align-items:center;gap:10px;padding:10px 0 8px;line-height:22px;border-bottom:1px solid var(--l);color:var(--s)}.qa svg{color:var(--k);margin-top:-2px}
+.qa b{margin-left:auto;color:var(--k);font-weight:600}.plan{border:1.5px solid var(--k);border-radius:4px;padding:16px 20px 8px}.plan h2{font-size:21px;font-weight:700;line-height:1.2}
+.plan ul{margin-top:6px}.plan li{display:flex;align-items:center;gap:12px;padding:10px 0 8px;line-height:22px;border-top:1px solid var(--l)}.plan li:first-child{border-top:0}
+.plan li::before{content:"";width:8px;height:8px;background:var(--k);margin-top:-2px}.as{font-size:15px;color:var(--s);line-height:1.5}
+.as h3{font-size:15px;font-weight:600;color:var(--k);display:flex;justify-content:space-between}.as a{color:var(--b);font-weight:600;text-decoration:underline;text-underline-offset:3px}
+.steps li{display:flex;align-items:center;gap:10px;height:32px}.steps li>*{padding-top:3px}.steps svg{padding:0}.steps em{margin-left:auto;font-style:normal;font-size:15px;color:var(--s)}
+.steps .now{font-weight:600}.steps .now em{color:var(--k);font-weight:600}.send{margin:auto -32px 0;padding:14px 32px 16px;border-top:1px solid var(--l);display:flex;gap:10px}
+.send input{flex:1;height:48px;border:1.5px solid var(--k);border-radius:4px;padding:12px 14px 9px;background:var(--w)}.send input::placeholder{color:var(--s);opacity:1}
+.btn{height:48px;padding:12px 22px 9px;line-height:24px;border-radius:4px;border:1.5px solid var(--k);background:var(--w);font-weight:600;cursor:pointer}
+.btn.pri{background:var(--k);color:var(--w)}
+/* preview */
+.prev{display:grid;grid-template-rows:auto 1fr;gap:16px;padding:20px 32px 24px;min-height:0}.ph{display:flex;align-items:center;gap:12px}
+.ph h2{font-size:21px;font-weight:700;padding-top:3px}.tag{border:1.5px solid var(--k);border-radius:3px;font-size:13px;font-weight:600;line-height:14px;padding:10px 10px 8px}
+.ph .btn:first-of-type{margin-left:auto}
+.app{background:var(--w);border:1px solid var(--l);border-radius:6px;padding:20px 28px 18px;display:grid;grid-template-rows:auto auto 1fr auto;gap:18px;min-height:0}
+.at{display:flex;align-items:center;justify-content:space-between}.at h3{font-size:24px;font-weight:700;padding-top:4px}
+.wkp{display:flex;align-items:stretch;border:1.5px solid var(--k);border-radius:4px;font-weight:600}
+.wkp button{width:44px;background:none;border:0;display:grid;place-items:center;cursor:pointer}.wkp span{padding:11px 8px 8px;line-height:22px}
+.top{display:grid;grid-template-columns:372px 1fr;gap:28px;align-items:end}.pc h4{font-size:18px;font-weight:600}
+.big{font-size:140px;font-weight:700;line-height:.86;letter-spacing:-.02em;margin:10px 0 0 -6px;height:112px}.meta{display:flex;align-items:center;gap:14px;margin-top:10px}
+.meta>span{padding-top:2px}.over{background:var(--k);color:var(--w);font-weight:600;font-size:15px;line-height:15px;display:flex;align-items:center;gap:6px;padding:9px 12px 8px 10px}
+.over svg{width:14px;height:14px;margin-top:-2px}
+.fig li{display:grid;grid-template-columns:1fr auto;align-items:center;min-height:61px;padding:10px 0 8px;line-height:22px;border-top:1px solid var(--l)}
+.fig li:last-child{border-bottom:1px solid var(--l)}.fig small{display:block;font-size:15px;line-height:20px;color:var(--s)}
+.fig b{font-size:30px;font-weight:700;line-height:1;padding-top:4px}.ch{display:flex;flex-direction:column;min-height:0}.ch h4,.by dt{font-size:16px;font-weight:600}
+.bars{flex:1;display:grid;grid-template-columns:repeat(8,1fr);align-items:end}.wk{display:grid;justify-items:center;font-size:14px}.wk b{font-weight:600;line-height:1.5}
+.wk u{text-decoration:none;font-weight:700;font-size:15px;line-height:1.3}.wk i{width:48px;height:var(--h);background:var(--k);margin-top:2px}
+.wk span{width:100%;text-align:center;border-top:2px solid var(--k);padding-top:8px;color:var(--s);line-height:1.2}.wk.slow i{background:var(--w);border:2px solid var(--k);border-bottom:0}
+.wk.sel i{background:var(--b)}.wk.sel span{color:var(--k);font-weight:700}.by{display:flex;align-items:baseline;gap:40px;border-top:1px solid var(--l);padding-top:14px}
+.by dd{display:flex;align-items:baseline;gap:10px}.by b{font-size:22px;font-weight:700;line-height:1}
+</style>
+</head>
+<body>
+<svg class="defs" aria-hidden="true"><defs>
+<symbol id="ar" viewBox="0 0 24 24"><path d="M2.5 12h17M12 4.5l7.5 7.5-7.5 7.5" fill="none" stroke="currentColor" stroke-width="2.8"/></symbol>
+<symbol id="cd" viewBox="0 0 24 24"><path d="M5 8.5l7 7 7-7" fill="none" stroke="currentColor" stroke-width="2.8"/></symbol>
+<symbol id="cl" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.8"/></symbol>
+<symbol id="cr" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.8"/></symbol>
+<symbol id="ok" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="currentColor"/><path d="M6.5 12.5l3.8 3.8 7.2-7.8" fill="none" stroke="#fff" stroke-width="2.6"/></symbol>
+<symbol id="go" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.6" fill="none" stroke="currentColor" stroke-width="2.8"/><circle cx="12" cy="12" r="4" fill="currentColor"/></symbol>
+<symbol id="up" viewBox="0 0 24 24"><path d="M12 4l10 17H2z" fill="currentColor"/></symbol>
+</defs></svg>
+<header class="bar">
+  <a class="logo" href="#" aria-label="RMS home"><span class="mark"><svg><use href="#ar"/></svg></span>RMS</a>
+  <nav class="nav" aria-label="Main">
+    <a href="#">Home</a><a href="#">Menu</a><a href="#">Staff</a><a href="#">Locations</a><a href="#" class="on" aria-current="page">Mini-apps</a><a href="#">Settings</a>
+  </nav>
+  <div class="who">
+    <span class="mk" aria-hidden="true">MK</span><span class="rest">Marigold Kitchen</span>
+    <button class="loc" aria-label="Location: All locations">All locations <svg><use href="#cd"/></svg></button>
+    <span class="av" title="Asha Verma">AV</span>
+  </div>
+</header>
+<div class="sub">
+  <h1>Mini-apps</h1>
+  <div class="tabs" role="tablist"><a href="#" role="tab" aria-selected="true" class="on">Build</a><a href="#" role="tab" aria-selected="false">Marketplace</a></div>
+</div>
+<p class="next" role="status"><strong>Next: check the preview, then publish</strong><span>about 1 minute</span><i aria-hidden="true"><svg><use href="#ar"/></svg></i></p>
+<main>
+  <section class="talk" aria-label="Build conversation">
+    <p class="me">I want to see how much money I'm making</p>
+    <ul class="qa" aria-label="Your answers">
+      <li><svg aria-label="Answered"><use href="#ok"/></svg><span>Which locations?</span><b>Both</b></li>
+      <li><svg aria-label="Answered"><use href="#ok"/></svg><span>How often do you want to look?</span><b>Every week</b></li>
+    </ul>
+    <div class="plan">
+      <h2>Here's what I'll build</h2>
+      <ul>
+        <li>Money in, day by day</li>
+        <li>What food, drink and staff cost you</li>
+        <li>What's left each week</li>
+        <li>Prime cost, the number most owners watch</li>
+      </ul>
+    </div>
+    <div class="as">
+      <h3>What I assumed <a href="#">Change</a></h3>
+      <p>Your week runs Monday to Sunday.</p>
+      <p>A day ends at 4am, so late tables count for the night before.</p>
+    </div>
+    <ul class="steps" aria-label="Progress">
+      <li><svg aria-hidden="true"><use href="#ok"/></svg><span>Set up your sales days</span><em>Done</em></li>
+      <li><svg aria-hidden="true"><use href="#ok"/></svg><span>Built your weekly screen</span><em>Done</em></li>
+      <li class="now"><svg aria-hidden="true"><use href="#go"/></svg><span>Checking the numbers add up</span><em>In progress</em></li>
+    </ul>
+    <form class="send"><input type="text" placeholder="Tell me what to change" aria-label="Tell me what to change"><button class="btn pri" type="button">Send</button></form>
+  </section>
+  <section class="prev" aria-label="Preview">
+    <div class="ph">
+      <h2>Preview</h2><span class="tag">Sample numbers</span>
+      <button class="btn" type="button">Try it on my phone</button><button class="btn pri" type="button">Publish</button>
+    </div>
+    <article class="app">
+      <div class="at">
+        <h3>Money</h3>
+        <div class="wkp"><button aria-label="Previous week"><svg><use href="#cl"/></svg></button><span>Nov 9 to Nov 15</span><button aria-label="Next week"><svg><use href="#cr"/></svg></button></div>
+      </div>
+      <div class="top">
+        <div class="pc">
+          <h4>Prime cost</h4>
+          <p class="big">61.3%</p>
+          <p class="meta"><span>Target 60%</span><b class="over"><svg aria-hidden="true"><use href="#up"/></svg>1.3 points over</b></p>
+        </div>
+        <ul class="fig">
+          <li><span>Net sales</span><b>$84,310</b></li>
+          <li><span>Food and drink cost<small>30.2% of sales</small></span><b>$25,460</b></li>
+          <li><span>Staff cost<small>31.1% of sales</small></span><b>$26,220</b></li>
+        </ul>
+      </div>
+      <div class="ch">
+        <h4>Net sales, last eight weeks</h4>
+        <div class="bars">
+          <div class="wk"><b>$81,940</b><i style="--h:162.2px"></i><span>Sep 21</span></div>
+          <div class="wk"><b>$83,120</b><i style="--h:164.5px"></i><span>Sep 28</span></div>
+          <div class="wk"><b>$82,560</b><i style="--h:163.4px"></i><span>Oct 5</span></div>
+          <div class="wk"><b>$84,870</b><i style="--h:168px"></i><span>Oct 12</span></div>
+          <div class="wk slow"><u>Slow week</u><b>$61,480</b><i style="--h:121.7px"></i><span>Oct 19</span></div>
+          <div class="wk"><b>$80,230</b><i style="--h:158.8px"></i><span>Oct 26</span></div>
+          <div class="wk"><b>$83,790</b><i style="--h:165.9px"></i><span>Nov 2</span></div>
+          <div class="wk sel"><b>$84,310</b><i style="--h:166.9px"></i><span>Nov 9</span></div>
+        </div>
+      </div>
+      <dl class="by"><dt>By location</dt><dd>Downtown <b>$51,870</b></dd><dd>Riverside <b>$32,440</b></dd></dl>
+    </article>
+  </section>
+</main>
+</body>
+</html>

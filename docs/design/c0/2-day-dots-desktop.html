@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>RMS: Mini-apps, Build (Day Dots)</title>
+<meta name="viewport" content="width=1440">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;700;800&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#14211C;--ground:#EEF1EE;--surface:#fff;--line:#D3DAD5;--steel:#E2E7E3;--mute:#55625C;--bar:#93A099;
+--mon:#1F6FD0;--tue:#F2C230;--wed:#D8412F;--thu:#8A5A3B;--fri:#2E9B57;--sat:#F0872A;--sun:#14211C}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:1440px;height:900px;overflow:hidden}
+body{font:400 15px/1.45 "Hanken Grotesk",system-ui,sans-serif;color:var(--ink);background:var(--ground);font-variant-numeric:tabular-nums;display:flex;-webkit-font-smoothing:antialiased}
+::selection{background:var(--ink);color:#fff}:focus-visible{outline:3px solid var(--ink);outline-offset:2px}
+button,input{font:inherit;color:inherit}
+svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;flex:none}
+/* shell */
+.rail{width:232px;background:var(--ink);color:#C5CEC9;padding:22px 12px 16px;display:flex;flex-direction:column}
+.logo{display:flex;align-items:baseline;gap:4px;padding:0 12px;font-weight:800;font-size:28px;letter-spacing:-.02em;color:#fff;line-height:1}
+.logo i{width:10px;height:10px;border-radius:50%;background:var(--sat)}
+.place{margin:18px 12px 16px;padding-bottom:16px;border-bottom:1px solid #2F3F38;color:#fff;font-weight:700}
+.nav{list-style:none;display:grid;gap:2px}
+.nav a{height:44px;padding:10px 12px;display:flex;align-items:center;gap:12px;border-radius:8px;font-weight:500;color:inherit;text-decoration:none}
+.nav a[aria-current]{background:#2B3B34;color:#fff;font-weight:700}
+.me{margin-top:auto;display:flex;align-items:center;gap:10px;padding:12px;border-top:1px solid #2F3F38;color:#fff;font-weight:700;font-size:14px}
+.av{width:36px;height:36px;padding:8px;line-height:1;border-radius:50%;background:var(--steel);color:var(--ink);display:grid;place-items:center;font-weight:800;font-size:13px}
+main{flex:1;min-width:0;display:flex;flex-direction:column;padding:0 32px 24px}
+.top{height:68px;display:flex;align-items:center;justify-content:space-between}
+h1{font-size:26px;font-weight:800;letter-spacing:-.01em}
+.sel{height:40px;padding:8px 10px 8px 12px;border:1px solid var(--line);background:#fff;border-radius:8px;font-weight:500;font-size:14px;display:flex;gap:8px;align-items:center}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line)}
+.tabs a{height:44px;padding:10px 16px;display:flex;align-items:center;font-weight:700;color:var(--mute);border-bottom:3px solid transparent;margin-bottom:-1px}
+.tabs a[aria-selected=true]{color:var(--ink);border-color:var(--ink)}
+.work{flex:1;min-height:0;display:grid;grid-template-columns:520px 1fr;gap:24px;margin-top:20px}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column;min-height:0}
+h2{font-size:17px;font-weight:800}h3{font-size:14px;font-weight:800}
+.btn{height:40px;padding:8px 16px;border-radius:8px;font-weight:700;font-size:14px;display:inline-flex;align-items:center;gap:8px;border:1.5px solid var(--ink);background:#fff;cursor:pointer}
+.btn.pri{background:var(--ink);color:#fff}
+.dot{display:inline-block;width:11px;height:11px;border-radius:50%;background:var(--c);border:1.5px solid color-mix(in srgb,var(--c) 62%,#14211C);flex:none}
+/* build conversation */
+.thread{flex:1;padding:24px;display:flex;flex-direction:column;gap:18px}
+.you{align-self:flex-end;background:var(--steel);padding:10px 14px;border-radius:14px 14px 4px 14px;font-weight:500}
+.qa{border:1px solid var(--line);border-radius:8px}.qa div{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;color:var(--mute)}
+.qa div+div{border-top:1px solid var(--line)}.qa b{display:flex;align-items:center;gap:6px;color:var(--ink)}
+.plan ul{list-style:none;margin-top:8px}.plan li{position:relative;padding-left:18px;line-height:28px}
+.plan li::before{content:"";position:absolute;left:2px;top:11px;width:6px;height:6px;background:var(--ink)}
+.assumed{background:var(--ground);border-radius:8px;padding:12px 14px;font-size:14px;display:grid;grid-template-columns:1fr auto;column-gap:16px;row-gap:2px}
+.assumed p{grid-column:1/3;color:#35423C}
+.assumed .dot{width:9px;height:9px;margin:0 1px 0 3px}
+.link{grid-column:2;grid-row:1;height:28px;padding:0 4px;background:none;border:0;font-weight:700;text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+.steps{list-style:none;display:grid;gap:2px}.steps li{display:flex;align-items:center;gap:10px;height:32px}
+.steps span{margin-left:auto;font-size:13px;color:var(--mute);font-weight:500}
+.steps .done{fill:var(--ink);stroke:#fff}.steps .now{font-weight:700}
+.steps .now span{color:var(--ink);font-weight:700}
+.composer{display:flex;gap:8px;padding:12px 16px;border-top:1px solid var(--line)}
+.composer input{flex:1;height:44px;border:1px solid #AEB8B2;border-radius:8px;padding:8px 14px;background:#fff}
+.composer input::placeholder{color:var(--mute);opacity:1}.composer .btn{height:44px;padding:8px 22px}
+/* preview */
+.phead{height:64px;padding:12px 20px 12px 24px;display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--line)}
+.tag{font-size:12px;font-weight:700;background:var(--steel);padding:8px 10px;line-height:1;border-radius:4px}
+.phead .btn:first-of-type{margin-left:auto}
+.app{flex:1;padding:8px 24px;display:flex;flex-direction:column}
+.app>section{padding:16px 0}.app>section+section{border-top:1px solid var(--line)}
+.ahead{display:flex;justify-content:space-between;align-items:center}
+.label{background:var(--ink);color:#fff;font-weight:800;font-size:20px;line-height:1;padding:8px 14px 9px;border-radius:3px}
+.wk{display:flex;align-items:center;height:40px;border:1px solid var(--line);border-radius:8px;font-weight:700;font-size:14px}
+.wk button{width:40px;height:38px;background:none;border:0;display:grid;place-items:center;cursor:pointer}.wk span{padding:8px 14px;height:38px;display:flex;align-items:center;border-inline:1px solid var(--line)}
+.figs{display:grid;grid-template-columns:200px 1fr;gap:24px;align-items:center}
+.k{font-size:14px;font-weight:700;color:var(--mute)}
+.big{font-size:48px;font-weight:800;line-height:1.05;letter-spacing:-.02em}
+.tgt{display:flex;align-items:center;gap:8px;margin-top:6px;font-size:13px;color:var(--mute);white-space:nowrap}
+.over{display:inline-flex;align-items:center;gap:4px;padding:8px 12px 8px 8px;line-height:1;border:1.5px solid var(--ink);border-radius:16px;color:var(--ink);font-weight:700}.over svg{width:14px;height:14px;stroke-width:2.5}
+table{width:100%;border-collapse:collapse;white-space:nowrap}
+th{text-align:left;font-weight:500}td,th{padding:8px 0;border-top:1px solid var(--line)}
+tr:first-child>*{border-top:0}
+.amt{text-align:right;font-weight:800;font-size:17px}
+.sh{text-align:right;font-size:13px;color:var(--mute);width:104px}
+.shead{display:flex;align-items:baseline;gap:8px;margin-bottom:10px}.shead span{font-size:13px;color:var(--mute)}
+.cols{display:grid;align-items:end}.cols>div{display:flex;flex-direction:column;align-items:center;gap:4px;font-size:13px}
+.cols b{font-weight:700}.cols i{display:block;width:44px;border-radius:3px 3px 0 0}
+.days{grid-template-columns:repeat(7,1fr)}
+.days i{background:var(--c);border:1.5px solid color-mix(in srgb,var(--c) 62%,#14211C);border-bottom:0}
+.nm{display:flex;align-items:center;gap:6px;font-weight:700;margin-top:2px}
+.weeks{grid-template-columns:repeat(8,1fr)}
+.weeks b{font-weight:500;font-size:12px;color:var(--mute)}.weeks i{width:40px;background:var(--bar)}
+.weeks em{font-style:normal;font-weight:500;color:var(--mute);font-size:12px;margin-top:2px}
+.weeks .slow i{background:repeating-linear-gradient(135deg,var(--ink) 0 2px,#fff 2px 6px);border:1.5px solid var(--ink);border-bottom:0}
+.weeks .slow u{text-decoration:none;font-size:12px;font-weight:800;white-space:nowrap}
+.weeks .slow b{color:var(--ink);font-weight:700}.weeks .on i{background:var(--ink)}
+.weeks .on b,.weeks .on em{color:var(--ink);font-weight:800}
+.loc{display:flex;align-items:baseline;gap:32px}.loc p b{font-weight:800;font-size:17px;margin-left:8px}
+</style>
+</head>
+<body>
+<nav class="rail" aria-label="Main">
+  <div class="logo" aria-label="RMS">RMS<i></i></div>
+  <div class="place">Marigold Kitchen</div>
+  <ul class="nav">
+    <li><a href="#"><svg viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5V21h-6v-6H9v6H3z"/></svg>Home</a></li>
+    <li><a href="#"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5zM9 9h6M9 13h6"/></svg>Menu</a></li>
+    <li><a href="#"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/></svg>Staff</a></li>
+    <li><a href="#"><svg viewBox="0 0 24 24"><path d="M12 21s7-6.2 7-11.5a7 7 0 0 0-14 0C5 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>Locations</a></li>
+    <li><a href="#" aria-current="page"><svg viewBox="0 0 24 24"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/></svg>Mini-apps</a></li>
+    <li><a href="#"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg>Settings</a></li>
+  </ul>
+  <div class="me"><span class="av">AV</span>Asha Verma</div>
+</nav>
+<main>
+  <div class="top">
+    <h1>Mini-apps</h1>
+    <button class="sel" aria-label="Location"><svg viewBox="0 0 24 24"><path d="M12 21s7-6.2 7-11.5a7 7 0 0 0-14 0C5 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>All locations<svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button>
+  </div>
+  <div class="tabs" role="tablist"><a role="tab" aria-selected="true">Build</a><a role="tab" aria-selected="false">Marketplace</a></div>
+  <div class="work">
+    <section class="panel" aria-label="Build conversation">
+      <div class="thread">
+        <p class="you">I want to see how much money I'm making</p>
+        <div class="qa">
+          <div>Which locations?<b><svg viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>Both</b></div>
+          <div>How often do you want to look?<b><svg viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>Every week</b></div>
+        </div>
+        <div class="plan">
+          <h2>Here's what I'll build</h2>
+          <ul><li>Money in, day by day</li><li>What food, drink and staff cost you</li><li>What's left each week</li><li>Prime cost, the number most owners watch</li></ul>
+        </div>
+        <div class="assumed">
+          <h3>What I assumed</h3>
+          <p>Your week runs <span class="dot" style="--c:var(--mon)"></span> Monday to <span class="dot" style="--c:var(--sun)"></span> Sunday.</p>
+          <p>A day ends at 4am, so late tables count for the night before.</p>
+          <button class="link">Change</button>
+        </div>
+        <ol class="steps">
+          <li><svg class="done" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="none"/><path d="m7.5 12.5 3 3 6-6.5"/></svg>Set up your sales days<span>Done</span></li>
+          <li><svg class="done" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="none"/><path d="m7.5 12.5 3 3 6-6.5"/></svg>Built your weekly screen<span>Done</span></li>
+          <li class="now"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke="#B4BEB8"/><path d="M12 3a9 9 0 0 1 9 9" stroke-width="2.75"/></svg>Checking the numbers add up<span>In progress</span></li>
+        </ol>
+      </div>
+      <form class="composer"><input type="text" placeholder="Tell me what to change" aria-label="Tell me what to change"><button class="btn pri" type="button">Send</button></form>
+    </section>
+    <section class="panel" aria-label="Preview">
+      <div class="phead">
+        <h2>Preview</h2><span class="tag">Sample numbers</span>
+        <button class="btn"><svg viewBox="0 0 24 24"><rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 17.5h2"/></svg>Try it on my phone</button>
+        <button class="btn pri">Publish</button>
+      </div>
+      <div class="app">
+        <section class="ahead">
+          <div class="label">Money</div>
+          <div class="wk"><button aria-label="Previous week"><svg viewBox="0 0 24 24"><path d="m14 7-5 5 5 5"/></svg></button><span>Nov 9 to Nov 15</span><button aria-label="Next week"><svg viewBox="0 0 24 24"><path d="m10 7 5 5-5 5"/></svg></button></div>
+        </section>
+        <section class="figs">
+          <div>
+            <div class="k">Prime cost</div>
+            <div class="big">61.3%</div>
+            <div class="tgt">Target 60%<span class="over"><svg viewBox="0 0 24 24"><path d="M12 19V6M6.5 11.5 12 6l5.5 5.5"/></svg>1.3 points over</span></div>
+          </div>
+          <table>
+            <tr><th scope="row">Net sales</th><td class="amt">$84,310</td><td class="sh"></td></tr>
+            <tr><th scope="row">Food and drink cost</th><td class="amt">$25,460</td><td class="sh">30.2% of sales</td></tr>
+            <tr><th scope="row">Staff cost</th><td class="amt">$26,220</td><td class="sh">31.1% of sales</td></tr>
+          </table>
+        </section>
+        <section>
+          <div class="shead"><h3>Day by day</h3><span>Net sales, Nov 9 to Nov 15</span></div>
+          <div class="cols days">
+            <div style="--c:var(--mon)"><b>$8,140</b><i style="height:38px"></i><span class="nm"><span class="dot"></span>Mon</span></div>
+            <div style="--c:var(--tue)"><b>$8,960</b><i style="height:42px"></i><span class="nm"><span class="dot"></span>Tue</span></div>
+            <div style="--c:var(--wed)"><b>$9,870</b><i style="height:46px"></i><span class="nm"><span class="dot"></span>Wed</span></div>
+            <div style="--c:var(--thu)"><b>$11,420</b><i style="height:53px"></i><span class="nm"><span class="dot"></span>Thu</span></div>
+            <div style="--c:var(--fri)"><b>$15,830</b><i style="height:74px"></i><span class="nm"><span class="dot"></span>Fri</span></div>
+            <div style="--c:var(--sat)"><b>$17,950</b><i style="height:84px"></i><span class="nm"><span class="dot"></span>Sat</span></div>
+            <div style="--c:var(--sun)"><b>$12,140</b><i style="height:57px"></i><span class="nm"><span class="dot"></span>Sun</span></div>
+          </div>
+        </section>
+        <section>
+          <div class="shead"><h3>Last eight weeks</h3><span>Net sales, by week starting</span></div>
+          <div class="cols weeks">
+            <div><b>$81,940</b><i style="height:77px"></i><em>Sep 21</em></div>
+            <div><b>$83,120</b><i style="height:78px"></i><em>Sep 28</em></div>
+            <div><b>$82,560</b><i style="height:78px"></i><em>Oct 5</em></div>
+            <div><b>$84,870</b><i style="height:80px"></i><em>Oct 12</em></div>
+            <div class="slow"><u>Slow week</u><b>$61,480</b><i style="height:58px"></i><em>Oct 19</em></div>
+            <div><b>$80,230</b><i style="height:76px"></i><em>Oct 26</em></div>
+            <div><b>$83,790</b><i style="height:79px"></i><em>Nov 2</em></div>
+            <div class="on"><b>$84,310</b><i style="height:79px"></i><em>Nov 9</em></div>
+          </div>
+        </section>
+        <section class="loc"><h3>By location</h3><p>Downtown<b>$51,870</b></p><p>Riverside<b>$32,440</b></p></section>
+      </div>
+    </section>
+  </div>
+</main>
+</body>
+</html>
