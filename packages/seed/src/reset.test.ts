@@ -6,7 +6,7 @@ import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type Sql, adminDb, closeAll } from "@rms/db";
 import { createDemoRestaurant, removeRestaurants } from "./demo.js";
-import { type DemoUserSpec, authAdminFromEnv, checkConnectionIsLocal, checkDemoPassword, checkResetAllowed, createDemoUsers, deleteAuthUsers, listAuthUsers, resetDemo } from "./reset.js";
+import { type DemoUserSpec, authAdminFromEnv, checkConnectionIsLocal, checkDemoPassword, checkResetAllowed, checkSameDatabase, createDemoUsers, deleteAuthUsers, listAuthUsers, resetDemo } from "./reset.js";
 import { loadTestEnv } from "@rms/db/testing";
 
 loadTestEnv();
@@ -109,6 +109,28 @@ describe("resetDemo refuses before touching anything", () => {
   });
   it("without a demo password", async () => {
     await expect(resetDemo(untouchable, LOCAL)).rejects.toThrow(/DEMO_PASSWORD is not set/);
+  });
+});
+
+describe("checkSameDatabase", () => {
+  // The numbers are loaded through the Data API's own connection. It must be the same database.
+  const admin = parsed(LOCAL.DATABASE_ADMIN_URL);
+  afterAll(() => admin.end({ timeout: 0 }));
+
+  it("allows the restaurant-facing login on the same server and database", () => {
+    expect(checkSameDatabase(admin, "postgresql://rms_api:y@127.0.0.1:54322/postgres").ok).toBe(true);
+  });
+  it.each([
+    ["no connection string", undefined],
+    ["another host", "postgresql://rms_api:y@db.example.com:54322/postgres"],
+    ["another port", "postgresql://rms_api:y@127.0.0.1:6543/postgres"],
+    ["another database", "postgresql://rms_api:y@127.0.0.1:54322/other"],
+    ["the '#' trick", "postgresql://rms_api:y@127.0.0.1:54322#@remote.example/postgres"],
+    ["a host override in the query", "postgresql://rms_api:y@127.0.0.1:54322/postgres?host=db.example.com"],
+  ])("refuses %s", (_name, url) => {
+    const check = checkSameDatabase(admin, url);
+    expect(check.ok).toBe(false);
+    if (!check.ok) expect(check.reason).toMatch(/do not point at the same database/);
   });
 });
 

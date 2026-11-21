@@ -10,15 +10,19 @@ import { connectionRoutes } from "./routes/connections.js";
 import { dataRoutes } from "./routes/data.js";
 import { demoPosRoutes } from "./routes/mcp-demo-pos.js";
 import { memoryRoutes } from "./routes/memory.js";
+import { parentRoutes } from "./routes/parent.js";
 
 const app = new Hono();
 
 app.get("/health", (c) => c.json({ ok: true }));
 app.route("/auth", authRoutes);
+// After authRoutes, so its cross-origin rule (the web app only, no wildcard) covers this too.
+app.route("/auth", parentRoutes);
 
 // The RMS shell makes Data API calls from the browser on behalf of a mini-app's frame (the
-// frame itself never holds a token: see frame.ts in @rms/contracts). So the web app's origin,
-// and only that origin, may call /data from a browser. No sandbox or mini-app origin ever may.
+// frame itself never holds a token: see frame.ts in @rms/contracts and ADR 0008). So the web
+// app's origin, and only that origin, may call /data from a browser. No sandbox or mini-app
+// origin ever may.
 app.use("/data/*", webCors());
 app.route("/data", dataRoutes);
 

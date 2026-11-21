@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "rms-api",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@rms/api", "dev"],
+      "port": 8787
+    },
+    {
+      "name": "rms-web",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@rms/web", "start"],
+      "port": 3000
+    },
+    {
+      "name": "rms-admin",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@rms/admin", "start"],
+      "port": 3001
+    }
+  ]
+}

@@ -5,7 +5,7 @@
 // Ids: orgs use the task G range (uuid suffix 90 to 9f, store prefix o_919191919xxx). Every other
 // row id is derived from a name, with a `9191` marker, so runs are repeatable and nothing collides.
 import { createHash } from "node:crypto";
-import { AppManifest, CustomModelDefinition, type FieldDef, NamedQueryDefinition, SYSTEM_COLUMNS, columnsForField, toPublicId } from "@rms/contracts";
+import { AppManifest, type FieldDef, ModelDefinition, NamedQueryDefinition, SYSTEM_COLUMNS, columnsForField, toPublicId } from "@rms/contracts";
 import { type Sql, type Tx, asMigrator, asParentSync, ident, provisionStore } from "@rms/db";
 
 export type OrgKey = "a" | "b";
@@ -120,21 +120,28 @@ export const PARENT_TABLES = [
 // ---------------------------------------------------------------- model fixtures (shaped by the storage contract)
 const text = (key: string, extra: Partial<FieldDef> = {}) => ({ key, label: key, type: "text", ...extra });
 
+/**
+ * The pack the fixture models claim. The Data API reads definitions through the model compiler,
+ * which accepts pack "custom" only for keys that start with `x_`. These fixtures have plain keys
+ * (and one is append-only), so they sit in a library pack.
+ */
+const PACK = "foundation" as const;
+
 export const MODELS = {
   /** Not location-scoped. */
-  sec_note: CustomModelDefinition.parse({
-    key: "sec_note", pack: "custom", version: 1, name: "Security note", description: "A plain note used by the isolation suite.",
+  sec_note: ModelDefinition.parse({
+    key: "sec_note", pack: PACK, version: 1, name: "Security note", description: "A plain note used by the isolation suite.",
     fields: [text("body")], locationScoped: false, defaultAccess: { owner: "write", staff: "read" },
   }),
   /** Location-scoped, with a payroll-tagged field only the owner may read. */
-  sec_visit: CustomModelDefinition.parse({
-    key: "sec_visit", pack: "custom", version: 1, name: "Security visit", description: "A location-scoped row used by the isolation suite.",
+  sec_visit: ModelDefinition.parse({
+    key: "sec_visit", pack: PACK, version: 1, name: "Security visit", description: "A location-scoped row used by the isolation suite.",
     fields: [text("body"), { key: "wage", label: "Wage", type: "money", sensitivity: "payroll", readableBy: ["owner"] }],
     locationScoped: true, defaultAccess: { owner: "write", staff: "write" },
   }),
   /** Append-only: no update or delete, ever. Staff have no access. */
-  sec_ledger: CustomModelDefinition.parse({
-    key: "sec_ledger", pack: "custom", version: 1, name: "Security ledger", description: "An append-only table used by the isolation suite.",
+  sec_ledger: ModelDefinition.parse({
+    key: "sec_ledger", pack: PACK, version: 1, name: "Security ledger", description: "An append-only table used by the isolation suite.",
     fields: [text("body")], locationScoped: false, appendOnly: true, softDelete: false, defaultAccess: { owner: "write", staff: "none" },
   }),
 } as const;
@@ -303,8 +310,10 @@ export const createWorld = async (admin: Sql, users: WorldUsers): Promise<void> 
       (${i.orgModelNote}, ${o.uuid}, 'sec_note', 'custom', ${admin.json({ ...MODELS.sec_note, description: `${MODELS.sec_note.description} ${c}` } as never)}, 'live'),
       (${i.orgModelVisit}, ${o.uuid}, 'sec_visit', 'custom', ${admin.json(MODELS.sec_visit as never)}, 'live'),
       (${i.orgModelLedger}, ${o.uuid}, 'sec_ledger', 'custom', ${admin.json(MODELS.sec_ledger as never)}, 'live')`;
-    await admin`insert into platform.org_model_changes (id, org_id, org_model_id, change, compiled_sql) values
-      (${i.orgModelChange}, ${o.uuid}, ${i.orgModelNote}, ${admin.json({ op: "create_custom_model" })}, ${`-- ${c}`})`;
+    // The change that made the notes table. It is already live, as the table is: the Data API
+    // takes changes that are NOT live yet back out of a model before a live request is checked.
+    await admin`insert into platform.org_model_changes (id, org_id, org_model_id, change, compiled_sql, applied_draft_at, applied_live_at) values
+      (${i.orgModelChange}, ${o.uuid}, ${i.orgModelNote}, ${admin.json({ op: "use_template", template: "sec_note" })}, ${`-- ${c}`}, now(), now())`;
 
     // Mini-apps, versions and everything hanging off them.
     await admin`insert into platform.apps (id, org_id, slug, number, name, status) values
@@ -382,6 +391,26 @@ export const orgScopedTables = async (admin: Sql): Promise<{ table: string; colu
     where n.nspname = 'platform' and c.relkind = 'r' and a.attname in ('org_id', 'publisher_org_id')
     order by c.relname`;
   return rows.map((r) => ({ table: r.table, column: r.column }));
+};
+
+/**
+ * Puts both restaurants' store tables back to exactly the rows `createWorld` planted. The Data
+ * API tests write through the real routes (and a removed row is only marked as removed), while
+ * the database tests that run after them expect an untouched world.
+ */
+export const restoreStoreRows = async (admin: Sql): Promise<void> => {
+  await asMigrator(admin, async (tx) => {
+    for (const k of ["a", "b"] as const) {
+      for (const env of ["live", "draft"] as const) {
+        const schema = env === "live" ? schemas(k).live : schemas(k).draft;
+        const rows = storeRows(k, env);
+        for (const key of MODEL_KEYS) {
+          const keep = rows[key].map((r) => r.id);
+          await tx`delete from ${tx(schema)}.${tx(key)} where id <> all(${keep}::uuid[])`;
+        }
+      }
+    }
+  });
 };
 
 /**

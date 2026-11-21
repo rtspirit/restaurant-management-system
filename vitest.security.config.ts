@@ -11,7 +11,7 @@
 // Settings (environment variables):
 //   RMS_ENV_FILE=<path>           settings file to load. Default: ./.env.local, then the main checkout's when run in a git worktree.
 //                                 `RMS_ENV_FILE=.env.hosted` gives hosted mode.
-//   RMS_REQUIRE_DATA_API=1        fail (instead of skipping loudly) when the Data API routes are still the empty stub.
+//   RMS_REQUIRE_DATA_API=0        skip loudly (instead of failing) if the Data API routes are ever an empty stub again.
 //   RMS_SECURITY_CLEAN_ONLY=1     remove anything an interrupted run left in the local database, run no tests.
 import { defineConfig } from "vitest/config";
 import { hostedMode, loadEnv } from "./tests/security/helpers/env";
