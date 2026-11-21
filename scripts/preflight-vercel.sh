@@ -15,7 +15,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 EXPECTED_ID="team_RM4toarAtl8vljERLdxRvfeh"
 EXPECTED_SLUG="rtspirits-projects"
-ALLOWED_PROJECTS="rms-web rms-admin rms-apps"
+ALLOWED_PROJECTS="rms-web rms-admin rms-apps rms-api"
 BANNED='tradeengage|te-team'
 
 stop() { echo "PREFLIGHT STOP: $*" >&2; exit 1; }
