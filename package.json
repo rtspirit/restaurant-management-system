@@ -12,9 +12,11 @@
     "test": "turbo run test",
     "test:security": "vitest run --config vitest.security.config.ts",
     "preflight:vercel": "scripts/preflight-vercel.sh",
-    "reset-demo": "pnpm --filter @rms/seed reset-demo"
+    "reset-demo": "pnpm --filter @rms/seed reset-demo",
+    "c1-walkthrough": "pnpm --filter @rms/seed exec tsx ../../scripts/c1-walkthrough.mts"
   },
   "devDependencies": {
+    "@playwright/test": "1.65.1",
     "@rms/auth": "workspace:*",
     "@rms/contracts": "workspace:*",
     "@rms/db": "workspace:*",
