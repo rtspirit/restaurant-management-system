@@ -1,0 +1,18 @@
+// The mini-app's screens, in the order they show in its navigation.
+// The generators add to this list (`rms gen ...`). Editable: reorder or rename here.
+import type { ComponentType } from "react";
+import { VendorsScreen } from "./vendors";
+import { SalesScreen } from "./sales";
+
+export type Screen = {
+  /** The screen's folder under src/screens/ and its address inside the mini-app. */
+  name: string;
+  /** What the navigation calls it. */
+  title: string;
+  component: ComponentType;
+};
+
+export const screens: Screen[] = [
+  { name: "vendors", title: "Suppliers", component: VendorsScreen },
+  { name: "sales", title: "Sales", component: SalesScreen },
+];

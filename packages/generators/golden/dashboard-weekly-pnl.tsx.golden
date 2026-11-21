@@ -1,0 +1,33 @@
+// Made by `rms gen dashboard` for the report weekly_pnl. Editable: change anything in this file.
+// The figures show the latest row of the report. The chart shows every row.
+import { addDays, dateFromToday, formatAs, formatDate, useNamedQuery, useRms } from "@rms/sdk";
+import { Card, Dashboard, Pager, Skeleton, StatLead } from "@rms/ui";
+import { useState } from "react";
+import { NoNumbers, Problem } from "../../rms/notices";
+
+const QUERY = "weekly_pnl";
+
+export function WeekScreen() {
+  const rms = useRms();
+  const [weekOf, setWeekOf] = useState(() => dateFromToday(-7));
+  const report = useNamedQuery(QUERY, { "week_of": weekOf });
+  const rows = report.rows;
+  const latest = rows[rows.length - 1];
+
+  return (
+    <Dashboard title="This week" controls={<Pager label={`Week of ${formatDate(weekOf, rms.locale)}`} previousLabel="Week before" nextLabel="Week after" onPrevious={() => setWeekOf((d) => addDays(d, -7))} onNext={() => setWeekOf((d) => addDays(d, 7))} />}>
+      <Problem error={report.error} />
+      {report.loading && report.data === null ? (
+        <Skeleton shape="block" label="Loading the numbers" />
+      ) : latest === undefined ? (
+        <NoNumbers what="numbers" />
+      ) : (
+        <>
+          <Card>
+            <StatLead label="Amount" value={formatAs(latest["amount"], "money", rms)} />
+          </Card>
+        </>
+      )}
+    </Dashboard>
+  );
+}
