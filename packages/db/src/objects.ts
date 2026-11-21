@@ -94,16 +94,23 @@ export const dbObjectStore = (db: Db): ObjectStore => {
       // The owner columns come from the key itself, never from the caller.
       const parsed = parseObjectKey(k);
       if (!parsed) throw new ObjectStoreError("bad_key");
-      const orgUuid = parsed.kind === "listing" ? null : toUuid(parsed.orgId);
-      const listingUuid = parsed.kind === "listing" ? toUuid(parsed.listingId) : null;
       const buf = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
       const sha256 = createHash("sha256").update(buf).digest("hex");
       return inTx(async (tx) => {
         await tx`delete from platform.objects where key = ${k}`;
-        const [row] = await tx<Row[]>`
-          insert into platform.objects (key, org_id, listing_id, bytes, content_type, sha256, size)
-          values (${k}, ${orgUuid}, ${listingUuid}, ${buf}, ${contentType}, ${sha256}, ${buf.byteLength})
-          returning key, content_type, sha256, size, created_at`;
+        // A key under orgs/ carries its restaurant. A listing's object is filed under the
+        // restaurant that shared it, read from the listing's own row (for our records and for
+        // clean-up only). A listing that does not exist has no restaurant, and the insert fails.
+        const [row] =
+          parsed.kind === "listing"
+            ? await tx<Row[]>`
+                insert into platform.objects (key, org_id, bytes, content_type, sha256, size)
+                values (${k}, (select publisher_org_id from platform.listings where id = ${toUuid(parsed.listingId)}), ${buf}, ${contentType}, ${sha256}, ${buf.byteLength})
+                returning key, content_type, sha256, size, created_at`
+            : await tx<Row[]>`
+                insert into platform.objects (key, org_id, bytes, content_type, sha256, size)
+                values (${k}, ${toUuid(parsed.orgId)}, ${buf}, ${contentType}, ${sha256}, ${buf.byteLength})
+                returning key, content_type, sha256, size, created_at`;
         if (!row) throw new Error("Object was not stored");
         return info(row);
       });

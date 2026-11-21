@@ -159,19 +159,18 @@ describe("the store refuses bad keys before it asks the database", () => {
 });
 
 describe("the database's own rules on objects", () => {
-  const insert = (key: string, org: string | null, bytes: string, extra: { sha?: string; size?: number; listing?: string | null } = {}) =>
+  const insert = (key: string, org: string | null, bytes: string, extra: { sha?: string; size?: number } = {}) =>
     adminDb()`
-      insert into platform.objects (key, org_id, listing_id, bytes, content_type, sha256, size)
-      select ${key}, ${org}::uuid, ${extra.listing ?? null}::uuid, b, 'text/plain', coalesce(${extra.sha ?? null}, encode(sha256(b), 'hex')), coalesce(${extra.size ?? null}::int, octet_length(b))
+      insert into platform.objects (key, org_id, bytes, content_type, sha256, size)
+      select ${key}, ${org}::uuid, b, 'text/plain', coalesce(${extra.sha ?? null}, encode(sha256(b), 'hex')), coalesce(${extra.size ?? null}::int, octet_length(b))
       from (select convert_to(${bytes}, 'UTF8') as b) s`;
 
-  it("a key must be one of the three forms, and its restaurant must be the row's restaurant", async () => {
+  it("a key must be one of the three forms, and a key under orgs/ must name the row's restaurant", async () => {
     expect(await code(insert(`orgs/${orgA}/apps/${appA}/secrets/1`, A, "x"))).toBe("23514");
     expect(await code(insert(`orgs/${orgA}/apps/${appA}/builds/9/screens/../../x`, A, "x"))).toBe("23514");
     expect(await code(insert(objectKeys.source(orgA, appA, 9), B, "x"))).toBe("23514");
-    expect(await code(insert(objectKeys.source(orgA, appA, 9), null, "x"))).toBe("23514");
-    expect(await code(insert(objectKeys.listing(listing, 9), A, "x"))).toBe("23514");
-    expect(await code(insert(objectKeys.listing(listing, 9), null, "x", { listing: id("9f") }))).toBe("23514");
+    expect(await code(insert(objectKeys.source(orgA, appA, 9), null, "x"))).toBe("23502");
+    expect(await code(insert(objectKeys.listing(listing, 9), null, "x"))).toBe("23502");
   });
 
   it("what is stored must match its hash and its size", async () => {
@@ -184,19 +183,16 @@ describe("the database's own rules on objects", () => {
     for (const pattern of Object.values(OBJECT_KEY_PATTERNS)) expect(row?.def, pattern).toContain(`'${pattern}'`);
   });
 
-  it("builds the same keys as the contract", async () => {
-    const [row] = await adminDb()<{ source: string; screens: string; listing: string }[]>`
-      select platform.source_key(${A}, ${APP_A}, 3) as source, platform.screens_prefix(${A}, ${APP_A}, 3) as screens, platform.listing_key(${LISTING}, 3) as listing`;
-    expect(row).toEqual({ source: objectKeys.source(orgA, appA, 3), screens: objectKeys.screensPrefix(orgA, appA, 3), listing: objectKeys.listing(listing, 3) });
+  it("a listing's object is filed under the restaurant that shared it, and a listing that does not exist cannot have one", async () => {
+    const [row] = await adminDb()<{ org_id: string }[]>`select org_id from platform.objects where key = ${objectKeys.listing(listing, 1)}`;
+    expect(row?.org_id).toBe(A);
+    expect(await code(saveListingSource(dbObjectStore(adminDb()), toPublicId("lst", id("9f")), 1, source))).toBe("23502");
   });
 
-  it("a listing's object goes when the listing goes", async () => {
-    const admin = adminDb();
-    const other = id("98");
-    await admin`insert into platform.listings (id, source_app_id, publisher_org_id, title, summary, category) values (${other}, ${APP_A}, ${A}, 'Gone', 'Soon', 'money')`;
-    await saveListingSource(dbObjectStore(admin), toPublicId("lst", other), 1, source);
-    await admin`delete from platform.listings where id = ${other}`;
-    expect(await loadListingSource(dbObjectStore(admin), toPublicId("lst", other), 1)).toBeNull();
+  it("the restaurant that shared a listing cannot read the listing's object through its own login", async () => {
+    expect(await asA((s) => loadListingSource(s, listing, 1))).toBeNull();
+    expect(await withOrg(apiDb(), A, (tx) => tx`select key from platform.objects where key like 'listings/%'`)).toHaveLength(0);
+    expect(await loadListingSource(dbObjectStore(adminDb()), listing, 1)).toEqual(source);
   });
 });
 

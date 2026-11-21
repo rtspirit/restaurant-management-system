@@ -69,17 +69,21 @@ run "cannot insert a maintainer notification" blocked "$DATABASE_URL" "$ORGA ins
 run "cannot create an app that is already published" blocked "$DATABASE_URL" "$ORGA insert into platform.apps (id, org_id, slug, number, name, status) values (gen_random_uuid(), '$A', 'x', 9, 'x', 'published'); commit"
 echo "--- rms_api: where mini-app code is kept, and held actions (Wave 3)"
 APPA=0193a3c0-0000-7000-8000-0000000000a6; APPB=0193a3c0-0000-7000-8000-0000000000b6
-# One object row: key expression, restaurant, then the bytes "x" with its real hash and size.
-obj() { printf "insert into platform.objects (key, org_id, bytes, content_type, sha256, size) select %s, %s, b, 'text/plain', encode(sha256(b), 'hex'), octet_length(b) from (select 'x'::bytea as b) s" "$1" "$2"; }
-q "$DATABASE_ADMIN_URL" "insert into platform.apps (id, org_id, slug, number, name, status, published_version_id) values ('$APPA', '$A', 'smoke-code', 2, 'Smoke code', 'published', '0193a3c0-0000-7000-8000-0000000000a8'); insert into platform.app_versions (id, app_id, org_id, number, manifest, status) values ('0193a3c0-0000-7000-8000-0000000000a8', '$APPA', '$A', 1, '{}', 'published'), ('0193a3c0-0000-7000-8000-0000000000a7', '$APPA', '$A', 2, '{}', 'draft'), ('0193a3c0-0000-7000-8000-0000000000b7', '$APPB', '$B', 1, '{}', 'draft'); $(obj "platform.source_key('$B','$APPB',1)" "'$B'"); $(obj "platform.screens_prefix('$A','$APPA',1) || 'index.html'" "'$A'")" >/dev/null
-run "can save the source of its own draft version" allowed "$DATABASE_URL" "$ORGA $(obj "platform.source_key('$A','$APPA',2)" "'$A'"); rollback"
-run "cannot write the source of a published version" blocked "$DATABASE_URL" "$ORGA $(obj "platform.source_key('$A','$APPA',1)" "'$A'"); commit"
-run "cannot write built files" blocked "$DATABASE_URL" "$ORGA $(obj "platform.screens_prefix('$A','$APPA',2) || 'index.html'" "'$A'"); commit"
-run "cannot write B's source as B" blocked "$DATABASE_URL" "$ORGA $(obj "platform.source_key('$B','$APPB',1) || 'x'" "'$B'"); commit"
-run "cannot file B's key under its own restaurant" blocked "$DATABASE_URL" "$ORGA $(obj "platform.source_key('$B','$APPB',1)" "'$A'"); commit"
-run "cannot write a listing's object" blocked "$DATABASE_URL" "$ORGA $(obj "platform.listing_key('$APPA',1)" "null"); commit"
+KA="orgs/org_${A//-/}/apps/app_${APPA//-/}"; KB="orgs/org_${B//-/}/apps/app_${APPB//-/}"
+# One object row: key, restaurant, then the bytes "x" with its real hash and size.
+obj() { printf "insert into platform.objects (key, org_id, bytes, content_type, sha256, size) select '%s', '%s', b, 'text/plain', encode(sha256(b), 'hex'), octet_length(b) from (select 'x'::bytea as b) s" "$1" "$2"; }
+q "$DATABASE_ADMIN_URL" "insert into platform.apps (id, org_id, slug, number, name, status, published_version_id) values ('$APPA', '$A', 'smoke-code', 2, 'Smoke code', 'published', '0193a3c0-0000-7000-8000-0000000000a8'); insert into platform.app_versions (id, app_id, org_id, number, manifest, status) values ('0193a3c0-0000-7000-8000-0000000000a8', '$APPA', '$A', 1, '{}', 'published'), ('0193a3c0-0000-7000-8000-0000000000a7', '$APPA', '$A', 2, '{}', 'draft'), ('0193a3c0-0000-7000-8000-0000000000b7', '$APPB', '$B', 1, '{}', 'draft'); $(obj "$KB/versions/1.bundle" "$B"); $(obj "$KA/builds/1/screens/index.html" "$A"); $(obj "listings/lst_${APPA//-/}/1.bundle" "$A")" >/dev/null
+run "can save the source of its own draft version" allowed "$DATABASE_URL" "$ORGA $(obj "$KA/versions/2.bundle" "$A"); rollback"
+run "cannot write the source of a published version" blocked "$DATABASE_URL" "$ORGA $(obj "$KA/versions/1.bundle" "$A"); commit"
+run "cannot write built files" blocked "$DATABASE_URL" "$ORGA $(obj "$KA/builds/2/screens/index.html" "$A"); commit"
+run "cannot write B's source as B" blocked "$DATABASE_URL" "$ORGA $(obj "$KB/versions/1.bundle" "$B"); commit"
+run "cannot file B's key under its own restaurant" blocked "$DATABASE_URL" "$ORGA $(obj "$KB/versions/2.bundle" "$A"); commit"
+run "cannot write a listing's object" blocked "$DATABASE_URL" "$ORGA $(obj "listings/lst_${APPA//-/}/2.bundle" "$A"); commit"
 run "cannot change an object in place" blocked "$DATABASE_URL" "$ORGA update platform.objects set content_type = 'text/html'; commit"
 run "platform login cannot change an object in place either" blocked "$DATABASE_ADMIN_URL" "update platform.objects set content_type = 'text/html' where org_id = '$A'"
+run "platform login cannot file A's key under B" blocked "$DATABASE_ADMIN_URL" "$(obj "$KA/versions/9.bundle" "$B")"
+expect "org A set: sees its own published file, and no listing object" "1" "$DATABASE_URL" "$ORGA
+select count(*) from platform.objects; commit"
 expect "org A set: sees none of B's objects" "0" "$DATABASE_URL" "$ORGA
 select count(*) from platform.objects where org_id = '$B' or key like '%' || replace('$B','-','') || '%'; commit"
 expect "org A set: deleting its published files touches 0 rows" "0" "$DATABASE_URL" "$ORGA

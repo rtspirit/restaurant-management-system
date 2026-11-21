@@ -106,6 +106,13 @@ const SAMPLES: Record<string, Sample> = {
   AppTokenClaims: { schema: c.AppTokenClaims, value: { iss: "rms", iat: 1, exp: 2, jti: "12345678", org: `org_${hex}`, sub: `usr_${hex}`, app: `app_${hex}`, ver: `ver_${hex}`, role: "owner", loc: "all", kind: "app", aud: "data", env: "live" }, allowed: ["org", "sub", "role", "loc", "env"] },
   RunTokenClaims: { schema: c.RunTokenClaims, value: { iss: "rms", iat: 1, exp: 2, jti: "12345678", org: `org_${hex}`, sub: `usr_${hex}`, app: `app_${hex}`, run: `run_${hex}`, role: "owner", loc: "all", kind: "run", aud: "data", env: "draft" }, allowed: ["org", "sub", "role", "loc", "env"] },
   ConnectionTokenClaims: { schema: c.ConnectionTokenClaims, value: { iss: "rms", iat: 1, exp: 2, jti: "12345678", org: `org_${hex}`, kind: "connection", aud: "mcp", connection: `con_${hex}` }, allowed: ["org"] },
+  // Wave 3: what an owner or a maintainer sends to publish, confirm, decide, share and install.
+  PublishRequest: { schema: c.PublishRequest, value: { confirm: true } },
+  RollbackRequest: { schema: c.RollbackRequest, value: { confirm: true } },
+  ConfirmChangeRequest: { schema: c.ConfirmChangeRequest, value: { confirm: true } },
+  DecideChangeRequest: { schema: c.DecideChangeRequest, value: { decision: "approve", note: "Looks fine." } },
+  ShareRequest: { schema: c.ShareRequest, value: { title: "Money at a glance", summary: "Shows sales, costs and what is left each week.", category: "money", confirm: true } },
+  InstallRequest: { schema: c.InstallRequest, value: { confirm: true } },
   PublicListing: { schema: c.PublicListing, value: { id: `lst_${hex}`, title: "t", summary: "s", category: "c", requiredModels: ["sec_note"], requiredConnections: [], installCount: 0 } },
 };
 

@@ -29,10 +29,11 @@ What is different from the target, said plainly:
 ## The rules that hold either way
 
 - **A key is built by the server** from ids it already trusts (`objectKeys`). No request, message or route carries a key or a prefix.
-- **The restaurant-facing login** can read its own restaurant's objects, and can write or delete only the source of its own DRAFT versions (the build flow saves source at the end of a run). The database enforces it.
+- **The restaurant-facing login** can read its own restaurant's objects (never a listing's), and can write or delete only the source of its own DRAFT versions (the build flow saves source at the end of a run). The database enforces it.
 - **Built files and listings are written by the platform login**, after the publish or share checks.
 - **Nobody updates an object.** It is written once, or deleted and written again. The database checks the stored bytes against their hash and size.
-- **The key's restaurant is the row's restaurant.** A check constraint compares them.
+- **The key's restaurant is the row's restaurant.** A check constraint compares them. A listing's key names no restaurant. Its row is filed under the restaurant that shared it, for our records and so a reset removes it, like `listings.publisher_org_id`. That restaurant's own login cannot read it, and nothing that serves another restaurant selects the column.
+- **The restaurant-facing login calls no new database function.** The rules are written out in the policies.
 - **The apps host never names a key.** It asks for one file by (mini-app, published version, path), through `platform.published_screen`, and gets nothing unless that version is the mini-app's published version at that moment.
 
 ## How to swap to a bucket later
@@ -46,4 +47,5 @@ What is different from the target, said plainly:
 ## Checked
 
 - `packages/db/src/objects.test.ts`: 35 tests against the local database (own draft source only, no cross-restaurant read, write, list or delete, no update for anyone, size and hash rules, the apps host's door).
-- `tests/security/db-walls.smoke.sh`: 17 new checks, `FAILS=0`.
+- `tests/security/db-walls.smoke.sh`: 19 new checks, `FAILS=0`.
+- `pnpm test:security`: the fixture now plants stored code for both restaurants, and the generated checks (fenced reads, cross-restaurant inserts, updates and deletes) cover `platform.objects`.

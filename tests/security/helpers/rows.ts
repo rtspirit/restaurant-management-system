@@ -1,7 +1,7 @@
 // One small, valid, brand-new row for each platform table a test may need to insert into.
 // Used by the cross-restaurant link tests and the row-security tests, so both attack with rows
 // that would be accepted if only the restaurant were right. That is what makes the refusal mean something.
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { Tx } from "@rms/db";
 import { ORG, type OrgKey, ids } from "./world.js";
 
@@ -44,6 +44,19 @@ export const TEMPLATES: Record<string, (k: OrgKey) => RowValues> = {
   audit_log: (k) => ({ id: randomUUID(), org_id: ORG[k].uuid, actor: "user:template", action: "data.insert", target_type: "template" }),
   outbox: (k) => ({ topic: "change_set.created", org_id: ORG[k].uuid }),
   usage_events: (k) => ({ id: randomUUID(), org_id: ORG[k].uuid, kind: "template", quantity: 1, unit: "token" }),
+  // Stored mini-app code (Wave 3). A well-formed source object for the restaurant's own mini-app.
+  objects: (k) => {
+    const bytes = Buffer.from("template");
+    const hex = (uuid: string) => uuid.replaceAll("-", "");
+    return {
+      key: `orgs/org_${hex(ORG[k].uuid)}/apps/app_${hex(ids(k).installedApp)}/versions/50.bundle`,
+      org_id: ORG[k].uuid,
+      bytes,
+      content_type: "text/plain",
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      size: bytes.byteLength,
+    };
+  },
 };
 
 /** The fixture row of restaurant `k` in each table other rows point at. */
@@ -66,8 +79,8 @@ export const PARENT_ROW: Record<string, (k: OrgKey) => string> = {
   parent_menu_items: (k) => ids(k).item,
 };
 
-/** Inserts one row into a platform table. Objects become JSON columns. */
+/** Inserts one row into a platform table. Objects become JSON columns. Bytes stay bytes. */
 export const insertRow = (tx: Tx, table: string, row: RowValues): Promise<unknown> => {
-  const values = Object.fromEntries(Object.entries(row).map(([key, v]) => [key, v !== null && typeof v === "object" && !Array.isArray(v) ? tx.json(v as never) : v]));
+  const values = Object.fromEntries(Object.entries(row).map(([key, v]) => [key, v !== null && typeof v === "object" && !Array.isArray(v) && !(v instanceof Uint8Array) ? tx.json(v as never) : v]));
   return tx`insert into platform.${tx(table)} ${tx(values as never)}`;
 };
