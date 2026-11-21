@@ -49,13 +49,28 @@ export const AppProfileDraft = AppProfile.omit({ updatedAt: true, appName: true 
 export type AppProfileDraft = z.infer<typeof AppProfileDraft>;
 
 /**
- * Cosine similarity between a new request and a profile, 0 to 1.
- *   same     at or above `same`, OR the request matches an earlier request word for word after
- *            `normaliseRequest` (so asking for exactly the same thing again always counts)
- *   similar  at or above `similar`
- * Starting values. Task M measures them on the seeded examples and reports any change to the lead.
+ * The duplicate check, in order (contracts 0.4.1):
+ *   1. Word for word: the request equals an earlier request after `normaliseRequest`: "same", no model call.
+ *   2. Shortlist: up to `maxMatches` of the restaurant's own mini-apps whose similarity (cosine,
+ *      0 to 1: whole profile or best single line) is at or above `shortlistFloor`, plus any the
+ *      word-overlap check finds when the embedding call fails.
+ *   3. Confirm: one short chat-model call (RMS_ASK_MODEL) judges each shortlisted mini-app as a
+ *      `DuplicateJudgement`, within `DUPLICATE_CONFIRM_TIMEOUT_MS`.
+ *   4. Fallback, when the confirm call fails, times out or answers off-schema: the embedding
+ *      score alone, "same" at or above `same`, "similar" at or above `similar` (conservative values).
+ * Measured with openai/text-embedding-3-small: see docs/briefs/wave2-task-m-notes.md.
  */
-export const DUPLICATE_THRESHOLDS = { same: 0.82, similar: 0.7, maxMatches: 3 } as const;
+export const DUPLICATE_THRESHOLDS = { shortlistFloor: 0.35, same: 0.65, similar: 0.45, maxMatches: 3 } as const;
+
+/** Most time the confirm call may take before the check falls back to the embedding score. */
+export const DUPLICATE_CONFIRM_TIMEOUT_MS = 5000;
+
+/** The model's judgement of one shortlisted mini-app: it already does this, it does part of it, or it is something else. */
+export const DuplicateJudgement = z.enum(["same", "overlaps", "different"]);
+export type DuplicateJudgement = z.infer<typeof DuplicateJudgement>;
+
+/** How a judgement shows in `DuplicateCheckResult`. "overlaps" is "similar": the owner is offered "add to it". */
+export const JUDGEMENT_VERDICT = { same: "same", overlaps: "similar", different: "none" } as const satisfies Record<DuplicateJudgement, "same" | "similar" | "none">;
 
 /** Lower case, letters and digits only, single spaces. Two requests that agree after this are the same request. */
 export const normaliseRequest = (text: string): string =>
