@@ -18,3 +18,15 @@ export {
   type DemoUserSpec,
 } from "./reset.js";
 export { checkLibraryTemplates, installPlatformLibrary, type TemplateProblem } from "./library.js";
+export {
+  type BooksApp,
+  type BooksClient,
+  type BooksRoute,
+  type LoadBooksOptions,
+  type LoadBooksResult,
+  type SeedBooksOptions,
+  booksManifest,
+  ensureBooksApp,
+  loadDemoBooks,
+  seedDemoBooks,
+} from "./books.js";
