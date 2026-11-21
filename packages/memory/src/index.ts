@@ -13,5 +13,16 @@
 // model only through `recallBlock`, which marks them as such.
 export { type DuplicateThresholds, checkDuplicate, checkDuplicateWithThresholds, saveAppProfile, similaritiesForMeasurement } from "./profiles.js";
 export { type Recalled, recall, recallBlock, summariseSession, transcriptLines } from "./summaries.js";
-export { type Embedder, type EmbedResult, type Summariser, type SummariseResult, SummaryDraft, useMemoryModels } from "./models.js";
+export {
+  defaultJudge,
+  type Embedder,
+  type EmbedResult,
+  type Judge,
+  JudgeAnswer,
+  type JudgeResult,
+  type Summariser,
+  type SummariseResult,
+  SummaryDraft,
+  useMemoryModels,
+} from "./models.js";
 export { WORD_OVERLAP_SIMILAR, contentWords, dataBlock, mergeRequests, profileText, reasonFor, wordOverlap } from "./text.js";

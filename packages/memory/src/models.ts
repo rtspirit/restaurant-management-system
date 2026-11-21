@@ -3,6 +3,7 @@
 // environment, the model names from RMS_EMBED_MODEL and RMS_BUILD_MODEL. Nothing here logs a
 // key, a prompt or a vector.
 import { chatModel, embeddingModel, modelId } from "@rms/agent";
+import { DUPLICATE_CONFIRM_TIMEOUT_MS, DUPLICATE_THRESHOLDS, DuplicateJudgement } from "@rms/contracts";
 import { Output, embedMany, generateText } from "ai";
 import { z } from "zod";
 import { checkedEmbedding } from "./text.js";
@@ -42,8 +43,55 @@ const realSummariser: Summariser = async ({ instructions, prompt }) => {
   };
 };
 
+/** What the confirm call must answer: one judgement per shortlisted mini-app, by its `ref`. */
+export const JudgeAnswer = z.strictObject({
+  verdicts: z
+    .array(z.strictObject({ ref: z.string().min(1).max(10), verdict: DuplicateJudgement, reason: z.string().min(1).max(200) }))
+    .min(1)
+    .max(DUPLICATE_THRESHOLDS.maxMatches),
+});
+export type JudgeAnswer = z.infer<typeof JudgeAnswer>;
+export type JudgeResult = { output: JudgeAnswer; inputTokens: number; outputTokens: number; costMicros: number; model: string };
+export type Judge = (input: { instructions: string; prompt: string; abortSignal: AbortSignal }) => Promise<JudgeResult>;
+
+const realJudge: Judge = async ({ instructions, prompt, abortSignal }) => {
+  const r = await generateText({ model: chatModel("ask"), instructions, prompt, output: Output.object({ schema: JudgeAnswer }), maxRetries: 0, abortSignal });
+  return {
+    output: JudgeAnswer.parse(r.output),
+    inputTokens: r.totalUsage.inputTokens ?? 0,
+    outputTokens: r.totalUsage.outputTokens ?? 0,
+    costMicros: costMicrosOf(r.providerMetadata),
+    model: modelId("ask"),
+  };
+};
+
 let embedder: Embedder = realEmbedder;
 let summariser: Summariser = realSummariser;
+let judge: Judge = realJudge;
+
+/** The real confirm call, for live tests that wrap it to record what it answered. */
+export const defaultJudge: Judge = realJudge;
+
+/**
+ * The confirm call, bounded by `DUPLICATE_CONFIRM_TIMEOUT_MS` whatever the judge does with its
+ * abort signal. Rejects on timeout, model error or an answer off the schema.
+ */
+export const judgeDuplicates = async (input: { instructions: string; prompt: string }): Promise<JudgeResult> => {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(new Error("Confirm call timed out"));
+    }, DUPLICATE_CONFIRM_TIMEOUT_MS);
+  });
+  try {
+    const r = await Promise.race([judge({ ...input, abortSignal: controller.signal }), timeout]);
+    return { ...r, output: JudgeAnswer.parse(r.output) };
+  } finally {
+    clearTimeout(timer);
+  }
+};
 
 export const embedTexts: Embedder = (values) => embedder(values);
 export const summarise: Summariser = (input) => summariser(input);
@@ -89,12 +137,14 @@ export const embedWithCache = async (request: string, lines: readonly string[]):
  * For tests only: replace the embedder and/or the summariser. Returns a function that puts the
  * real ones back. Production code never calls this.
  */
-export const useMemoryModels = (models: { embed?: Embedder; summarise?: Summariser }): (() => void) => {
+export const useMemoryModels = (models: { embed?: Embedder; summarise?: Summariser; judge?: Judge }): (() => void) => {
   if (models.embed) embedder = models.embed;
   if (models.summarise) summariser = models.summarise;
+  if (models.judge) judge = models.judge;
   lineCache.clear();
   return () => {
     lineCache.clear();
+    judge = realJudge;
     embedder = realEmbedder;
     summariser = realSummariser;
   };

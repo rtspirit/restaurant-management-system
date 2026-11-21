@@ -438,5 +438,5 @@ describe("memory and duplicates", () => {
 });
 
 describe("version", () => {
-  it("is bumped for Wave 2", () => expect(c.CONTRACTS_VERSION).toBe("0.4.0"));
+  it("is bumped for Wave 2", () => expect(c.CONTRACTS_VERSION).toBe("0.4.1"));
 });

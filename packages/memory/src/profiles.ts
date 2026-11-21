@@ -13,6 +13,7 @@ import {
   AppProfileDraft,
   DUPLICATE_THRESHOLDS,
   type DuplicateCheckResult,
+  JUDGEMENT_VERDICT,
   type TenantContext,
   USAGE,
   normaliseRequest,
@@ -20,8 +21,8 @@ import {
   toUuid,
 } from "@rms/contracts";
 import { type Tx, apiDb, newUuid, withOrg } from "@rms/db";
-import { type EmbedResult, embedTexts, embedWithCache } from "./models.js";
-import { WORD_OVERLAP_SIMILAR, checkedEmbedding, cosine, mergeRequests, profileText, reasonFor, vectorLiteral, wordOverlap } from "./text.js";
+import { type EmbedResult, type JudgeAnswer, type JudgeResult, embedTexts, embedWithCache, judgeDuplicates } from "./models.js";
+import { WORD_OVERLAP_SIMILAR, checkedEmbedding, cosine, dataBlock, mergeRequests, profileText, reasonFor, vectorLiteral, wordOverlap } from "./text.js";
 
 const orgUuidOf = (tenant: TenantContext): string => toUuid(tenant.orgId);
 
@@ -133,7 +134,7 @@ const fallbackMatches = (text: string, list: readonly Candidate[]): Candidate[] 
 const linesOf = (c: Candidate): string[] =>
   [...new Set([c.purpose, ...c.capabilities, ...c.requests].map((s) => s.trim()).filter((s) => s !== ""))];
 
-export type DuplicateThresholds = { readonly same: number; readonly similar: number; readonly maxMatches: number };
+export type DuplicateThresholds = { readonly shortlistFloor: number; readonly same: number; readonly similar: number; readonly maxMatches: number };
 type Scored = { c: Candidate; similarity: number };
 
 /**
@@ -171,6 +172,36 @@ const scoreProfiles = async (orgUuid: string, text: string, list: readonly Candi
     .sort((a, b) => b.similarity - a.similarity);
 };
 
+const JUDGE_INSTRUCTIONS = [
+  "You decide whether a restaurant owner's new request for a small app is already covered by mini-apps they already have.",
+  "For every mini-app in the data, answer with its `ref` and a `verdict`:",
+  "- `same`: it already does what the owner is asking for.",
+  "- `overlaps`: it does part of it, so the owner could add to it instead of building a new one.",
+  "- `different`: it is for something else.",
+  "Judge only by what the request asks for and what each mini-app's purpose and capabilities say it does.",
+  "Give `reason`: one short sentence in everyday words for the owner, about that mini-app, for example \"It already shows your weekly sales, costs and profit.\" No numbers, scores, code or table names.",
+].join("\n");
+
+/** A reason from the model is shown to the owner only if it is plain words. Otherwise the purpose speaks. */
+const ownerReason = (reason: string, purpose: string): string => {
+  const r = reason.trim().replace(/\s+/gu, " ");
+  return r === "" || r.length > 200 || /[\d%{}<>`$]|\bscore\b|\bsimilar(ity)?\b/iu.test(r) ? reasonFor(purpose) : r;
+};
+
+type Shortlisted = { c: Candidate; similarity: number | null };
+
+/** Embedding score alone, with the conservative fallback thresholds. A word-overlap pick is "similar" at most. */
+const byScore = (list: readonly Shortlisted[], t: DuplicateThresholds): DuplicateCheckResult => {
+  const over = list.filter((s) => s.similarity === null || s.similarity >= t.similar);
+  if (over.length === 0) return { verdict: "none", matches: [] };
+  const top = over[0]?.similarity;
+  return { verdict: top !== null && top !== undefined && top >= t.same ? "same" : "similar", matches: over.map((s) => toMatch(s.c)) };
+};
+
+const llmUsage = (tx: Tx, orgUuid: string, kind: string, unit: string, quantity: number, costMicros: number, model: string) =>
+  tx`insert into platform.usage_events (id, org_id, kind, quantity, unit, cost_micros, provider, model)
+     values (${newUuid()}, ${orgUuid}, ${kind}, ${Math.max(0, Math.round(quantity))}, ${unit}, ${costMicros}, 'openrouter', ${model})`;
+
 /** The check itself, with the thresholds given. `checkDuplicate` passes the contract's. */
 export const checkDuplicateWithThresholds = async (tenant: TenantContext, text: string, t: DuplicateThresholds): Promise<DuplicateCheckResult> => {
   const orgUuid = orgUuidOf(tenant);
@@ -178,29 +209,69 @@ export const checkDuplicateWithThresholds = async (tenant: TenantContext, text: 
   const list = await withOrg(apiDb(), orgUuid, candidates);
   if (list.length === 0 || wanted === "") return { verdict: "none", matches: [] };
 
+  // 1. Asked again word for word: no model call at all.
   const exact = list.filter((c) => c.requests.some((r) => normaliseRequest(r) === wanted));
   if (exact.length > 0) return { verdict: "same", matches: exact.slice(0, t.maxMatches).map(toMatch) };
 
-  let scored: Scored[];
+  // 2. Shortlist: embeddings above the floor, plus what the word check finds.
+  const words = fallbackMatches(text, list);
+  let shortlist: Shortlisted[];
   try {
-    scored = await scoreProfiles(orgUuid, text, list);
+    const scored = await scoreProfiles(orgUuid, text, list);
+    const picked = scored.filter((s) => s.similarity >= t.shortlistFloor || words.includes(s.c));
+    shortlist = picked.slice(0, t.maxMatches);
   } catch (e) {
     log({ event: "duplicate_embed_failed", error: errorName(e) });
-    const found = fallbackMatches(text, list).slice(0, t.maxMatches);
-    return found.length > 0 ? { verdict: "similar", matches: found.map(toMatch) } : { verdict: "none", matches: [] };
+    shortlist = words.slice(0, t.maxMatches).map((c) => ({ c, similarity: null }));
   }
-  const over = scored.filter((s) => s.similarity >= t.similar).slice(0, t.maxMatches);
-  if (over.length === 0) return { verdict: "none", matches: [] };
-  return { verdict: (over[0]?.similarity ?? 0) >= t.same ? "same" : "similar", matches: over.map((s) => toMatch(s.c)) };
+  if (shortlist.length === 0) return { verdict: "none", matches: [] };
+
+  // 3. Confirm with one short chat-model call. The request and the profiles are data.
+  const refs = shortlist.map((s, i) => ({ ref: `m${i + 1}`, s }));
+  let judged: JudgeResult;
+  try {
+    judged = await judgeDuplicates({
+      instructions: JUDGE_INSTRUCTIONS,
+      prompt: dataBlock("the owner's new request and the mini-apps they already have", {
+        ownerRequest: text,
+        miniApps: refs.map(({ ref, s }) => ({ ref, name: s.c.name, purpose: s.c.purpose, capabilities: s.c.capabilities })),
+      }),
+    });
+    const answered = new Map(judged.output.verdicts.map((v) => [v.ref, v]));
+    if (refs.some(({ ref }) => !answered.has(ref))) throw new Error("A shortlisted mini-app has no judgement");
+  } catch (e) {
+    // 4. Any failure: the embedding score alone, conservative thresholds. Never blocks the build.
+    log({ event: "duplicate_confirm_failed", error: errorName(e) });
+    return byScore(shortlist, t);
+  }
+  await withOrg(apiDb(), orgUuid, async (tx) => {
+    await llmUsage(tx, orgUuid, USAGE.llmInput.kind, USAGE.llmInput.unit, judged.inputTokens, judged.costMicros, judged.model);
+    await llmUsage(tx, orgUuid, USAGE.llmOutput.kind, USAGE.llmOutput.unit, judged.outputTokens, 0, judged.model);
+  }).catch((e: unknown) => log({ event: "duplicate_usage_failed", error: errorName(e) }));
+
+  const answered = new Map(judged.output.verdicts.map((v) => [v.ref, v]));
+  const rank = { same: 0, overlaps: 1, different: 2 } as const;
+  const kept = refs
+    .map(({ ref, s }, order) => ({ s, order, v: answered.get(ref) as JudgeAnswer["verdicts"][number] }))
+    .filter((x) => x.v.verdict !== "different")
+    .sort((a, b) => rank[a.v.verdict] - rank[b.v.verdict] || a.order - b.order);
+  if (kept.length === 0) return { verdict: "none", matches: [] };
+  return {
+    verdict: JUDGEMENT_VERDICT[kept[0]?.v.verdict ?? "different"],
+    matches: kept.map((x) => ({ ...toMatch(x.s.c), reason: ownerReason(x.v.reason, x.s.c.purpose) })),
+  };
 };
 
 /**
  * Does this restaurant already have a mini-app that does what `text` asks for?
  *   1. word for word: the request equals a stored request after `normaliseRequest`: "same", no model call
- *   2. otherwise similarity (see `scoreProfiles`), with `DUPLICATE_THRESHOLDS` from the contract
- *   3. if the embedding call fails, a cautious word-overlap check ("similar" at most), and the failure is logged
+ *   2. shortlist: up to three of its own mini-apps at or above `shortlistFloor` (see `scoreProfiles`),
+ *      plus word-overlap picks; word overlap alone if the embedding call fails
+ *   3. confirm: one chat-model call (RMS_ASK_MODEL) judges each as same / overlaps / different,
+ *      with the request and profiles passed as marked data; 5 second limit
+ *   4. if the confirm call fails in any way: the embedding score with the conservative thresholds
  * Compares only with this restaurant's own mini-apps that are not deleted and not `system`.
- * Never throws because of the model. Never returns a score.
+ * Never throws because of a model. Never returns a score.
  */
 export const checkDuplicate = (tenant: TenantContext, text: string): Promise<DuplicateCheckResult> =>
   checkDuplicateWithThresholds(tenant, text, DUPLICATE_THRESHOLDS);
