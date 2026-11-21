@@ -5,7 +5,9 @@
 // DUPLICATE_THRESHOLDS gains `shortlistFloor`; `same`/`similar` are now the embedding-only
 // fallback values; new DuplicateJudgement, JUDGEMENT_VERDICT, DUPLICATE_CONFIRM_TIMEOUT_MS.
 // Request and result shapes are unchanged.
-export const CONTRACTS_VERSION = "0.4.1";
+// 0.4.2 (task L, approved by the lead): `ToolsVersion`; `ConnectionView.toolsVersion`; it is
+// required in `ApproveToolsRequest`; `TOKEN_TTL.connection` is 60 seconds.
+export const CONTRACTS_VERSION = "0.4.2";
 
 export * from "./ids.js";
 export * from "./auth.js";
