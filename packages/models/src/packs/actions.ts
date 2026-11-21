@@ -41,7 +41,12 @@ type ReportSection = "sales" | "cost_of_goods" | "labour" | "controllable" | "oc
 
 export type DefaultAccount = { code: string; name: string; type: AccountType; reportSection: ReportSection };
 
-/** A restaurant chart of accounts in everyday words. Layout follows docs/plan/02 section 1.1. */
+/**
+ * A restaurant chart of accounts in everyday words. Layout follows docs/plan/02 section 1.1.
+ *
+ * 7500 is where what delivery apps keep (commission and fees) goes. It is a running cost in the
+ * controllable section, so it lowers net profit and never touches prime cost (ADR 0011).
+ */
 export const DEFAULT_CHART_OF_ACCOUNTS: DefaultAccount[] = [
   { code: "1000", name: "Cash on hand", type: "asset", reportSection: "balance_sheet" },
   { code: "1010", name: "Bank account", type: "asset", reportSection: "balance_sheet" },
@@ -437,7 +442,7 @@ const postVendorBill: NamedActionInput = {
   pack: "finance",
   name: "Post a vendor bill to the books",
   description:
-    "Turns one vendor bill into one balanced journal entry: each bill line to its cost account, and the total to bills owed to vendors. Refuses a void bill and a bill whose lines do not add up to its total. A result of 0 means the bill is already in the books. Posting the same bill again changes nothing.",
+    "Turns one vendor bill into one balanced journal entry: each bill line to its cost account, and the total to bills owed to vendors. Refuses a void bill and a bill whose lines do not add up to its total. Also used for a delivery app's statement of the commission and fees it kept. A result of 0 means the bill is already in the books. Posting the same bill again changes nothing.",
   reads: ["vendor_bill", "vendor_bill_line", "vendor", "posting_rule"],
   writes: ["journal_entry", "journal_line"],
   params: [{ key: "vendor_bill_id", type: "uuid" }],

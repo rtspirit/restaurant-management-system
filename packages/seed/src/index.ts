@@ -19,6 +19,7 @@ export {
   type DemoUserSpec,
   type ResetOptions,
 } from "./reset.js";
+export { DELIVERY_COMMISSIONS_ACCOUNT_CODE, deliveryStatements, type DeliveryStatement, type DeliveryStatementLine } from "./delivery.js";
 export { runResetCli } from "./reset-cli.js";
 export { checkLibraryTemplates, installPlatformLibrary, type TemplateProblem } from "./library.js";
 export {
