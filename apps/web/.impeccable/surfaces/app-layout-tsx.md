@@ -19,7 +19,7 @@ Chosen at checkpoint C0 by Rahul on the decision page: "Front of House". Approve
 
 THESIS: If it has colour, you can press it. Everything else stays calm. Refuses the category default of a grey sidebar, white card grid and blue everything, where colour decorates and nothing tells an owner what is safe to touch.
 
-OWN-WORLD: Warm tinted ground `#F4EEE6`, white cards, ink `#1E2420`, ONE action colour (basil `#12804A` by default, replaced by the restaurant's brand colour). Colour appears only on pressable things. Fully rounded = a button. 8 to 16px corners = something you read. States (over target, done, slow week) are words plus ink shapes, never colour. Nunito Sans, heavy for figures and headings, tabular figures. Comfortable density with a tighter mode for report rows and charts.
+OWN-WORLD: Slate ground `#DEE7F2` (the blue-grey of a menu board; changed from the sketch's cream `#F4EEE6` by Rahul's decision during the Wave 1 build, with hairlines `#CAD6E2`, bars `#A4B3C3` and secondary text `#4C5661` on ground, `#616C77` on card, all derived from the same hue), white cards, ink `#1E2420`, ONE action colour (basil `#12804A` by default, replaced by the restaurant's brand colour). Colour appears only on pressable things. Fully rounded = a button. 8 to 16px corners = something you read. States (over target, done, slow week) are words plus ink shapes, never colour. Nunito Sans, heavy for figures and headings, tabular figures. Comfortable density with a tighter mode for report rows and charts.
 
 STORY: The owner sees a calm screen, knows at a glance what can be pressed, says what they want, confirms a short plan, and watches a real tool appear with their own numbers. They believe it because the lead number is plain and its parts add up beside it. They publish.
 
@@ -39,3 +39,18 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 - "Ask" appeared twice on the phone sketch. Keep one entry point.
 - Chart labels were 13px in the sketch. Minimum is 14px in the build.
 - Still to design: Mini-apps home, Marketplace with "Recommended for you", maintainer change feed, the RMS logo.
+
+## Wave 1 build status (task E)
+
+Built in `packages/ui` and `apps/web`. Review at `/gallery`, `/gallery/build`, `/gallery/money`. Recorded in `DESIGN.md`. Finish review run once by a fresh reviewer; its seven fixes were applied.
+
+- Brand colour safety: closed. `themeFromBrand` in `packages/ui/src/theme.ts`, proven by `theme.test.ts`. Greys, black and white fall back to basil.
+- Cream ground: replaced. Rahul asked for a more distinct tint; the ground is now slate `#DEE7F2` with its neutrals derived from it. `/gallery` shows the old ground, slate and one alternative side by side.
+- Dense screens: closed. `data-density="compact"`, used by `ReportTable` and `Feed`.
+- "Ask" twice: closed. One way in on the Money screen (the button under the numbers). The bottom bar has no Ask.
+- Chart labels: closed. 14px minimum everywhere.
+- RMS logo: closed. Wordmark with a full stop that takes colour only when it can be pressed.
+- Mini-apps home: built (empty state in the shell, filled state in the gallery with seeded content).
+- Marketplace with "Recommended for you": empty state in the shell, listing card in the gallery with seeded content. Not wired to data.
+- Maintainer change feed: the compact `Feed` component is in the gallery. The console itself (task F) is unskinned.
+- Still open: Settings telling the owner their colour was darkened or replaced; skinning sign-in, onboarding and the console; an app icon.

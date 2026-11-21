@@ -1,0 +1,134 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-21T18:05:00.000Z",
+  "title": "Design System: RMS",
+  "extensions": {
+    "colorMeta": {
+      "ground": { "role": "neutral", "displayName": "Slate Ground" },
+      "card": { "role": "neutral", "displayName": "Card White" },
+      "ink": { "role": "neutral", "displayName": "Kitchen Ink" },
+      "line": { "role": "neutral", "displayName": "Line" },
+      "bar": { "role": "neutral", "displayName": "Bar" },
+      "field-line": { "role": "neutral", "displayName": "Field Line" },
+      "muted-on-card": { "role": "neutral", "displayName": "Muted on Card" },
+      "muted-on-ground": { "role": "neutral", "displayName": "Muted on Ground" },
+      "action": { "role": "primary", "displayName": "Action (basil by default, the restaurant's colour once themed)" },
+      "action-ink": { "role": "primary", "displayName": "Action Ink" },
+      "action-pressed": { "role": "primary", "displayName": "Action Pressed" },
+      "action-wash": { "role": "primary", "displayName": "Action Wash" },
+      "on-action": { "role": "primary", "displayName": "On Action" }
+    },
+    "typographyMeta": {
+      "hero": { "displayName": "Hero figure", "purpose": "The one lead figure on a screen. Once per screen." },
+      "page-title": { "displayName": "Page title", "purpose": "The h1 of a shell page." },
+      "app-title": { "displayName": "App title", "purpose": "A mini-app's name inside a preview." },
+      "stat": { "displayName": "Stat", "purpose": "A figure in a group." },
+      "section-title": { "displayName": "Section title", "purpose": "A titled part of a page. Also tabs and large buttons at this size." },
+      "card-title": { "displayName": "Card title", "purpose": "Names the one idea in a card." },
+      "body": { "displayName": "Body", "purpose": "Prose, capped at 32rem. Tabular figures." },
+      "label": { "displayName": "Label", "purpose": "Stat labels, table headers, hints, secondary words." },
+      "small": { "displayName": "Small", "purpose": "Chart labels, bottom-bar labels, compact tags. The smallest size allowed." }
+    },
+    "shadows": [
+      { "name": "card", "value": "0 1px 2px rgb(30 36 32 / 0.06)", "purpose": "Cards, the composer, the current rail item, RMS speech bubbles." },
+      { "name": "raised", "value": "0 16px 40px -12px rgb(30 36 32 / 0.28), 0 2px 6px rgb(30 36 32 / 0.08)", "purpose": "Dialogs and sheets only." }
+    ],
+    "motion": [
+      { "name": "press-in", "value": "90ms cubic-bezier(0.2, 0, 0, 1)", "purpose": "A coloured control shrinking to 0.965 when pressed." },
+      { "name": "press-out", "value": "420ms linear(0, 0.36 9%, 0.8 19%, 1.05 31%, 1.08 39%, 1.04 51%, 0.996 66%, 1)", "purpose": "The soft spring back on release. The signature motion." },
+      { "name": "fade", "value": "160ms cubic-bezier(0.16, 1, 0.3, 1)", "purpose": "Hover and state colour changes, dialog fade." }
+    ],
+    "breakpoints": [
+      { "name": "phone", "value": "640px" },
+      { "name": "rail", "value": "900px" },
+      { "name": "workbench", "value": "1024px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one filled action on a screen. Springs on press. Loses its colour when disabled.",
+      "html": "<button class=\"ds-btn-primary\">Publish</button> <button class=\"ds-btn-primary\" disabled>Publish</button>",
+      "css": ".ds-btn-primary { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 8px 20px; border: 1px solid var(--rms-action, #12804A); border-radius: 999px; background: var(--rms-action, #12804A); color: #fff; font: 800 16px/1.25 'Nunito Sans Variable', 'Nunito Sans', system-ui, sans-serif; cursor: pointer; transition: background-color 160ms, transform 420ms linear(0, 0.36 9%, 0.8 19%, 1.05 31%, 1.08 39%, 1.04 51%, 0.996 66%, 1); } .ds-btn-primary:hover { background: var(--rms-action-pressed, #006D3C); border-color: var(--rms-action-pressed, #006D3C); } .ds-btn-primary:active { transform: scale(0.965); transition: transform 90ms cubic-bezier(0.2, 0, 0, 1); } .ds-btn-primary:focus-visible { outline: 3px solid #1E2420; outline-offset: 2px; } .ds-btn-primary:disabled { background: #CAD6E2; border-color: #CAD6E2; color: #4C5661; cursor: not-allowed; transform: none; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "A white pill with coloured words, for everything that is not the main action.",
+      "html": "<button class=\"ds-btn-secondary\">Try it on my phone</button>",
+      "css": ".ds-btn-secondary { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 8px 20px; border: 1px solid #CAD6E2; border-radius: 999px; background: #fff; color: var(--rms-action-ink, #007742); font: 700 16px/1.25 'Nunito Sans Variable', 'Nunito Sans', system-ui, sans-serif; cursor: pointer; transition: background-color 160ms, transform 420ms linear(0, 0.36 9%, 0.8 19%, 1.05 31%, 1.08 39%, 1.04 51%, 0.996 66%, 1); } .ds-btn-secondary:hover { background: var(--rms-action-wash, #ECF5F1); } .ds-btn-secondary:active { transform: scale(0.965); transition: transform 90ms cubic-bezier(0.2, 0, 0, 1); } .ds-btn-secondary:focus-visible { outline: 3px solid #1E2420; outline-offset: 2px; }"
+    },
+    {
+      "name": "Text Field",
+      "kind": "input",
+      "refersTo": "text-field",
+      "description": "Label above, 48px box, 12px corners because you type in it rather than press it.",
+      "html": "<label class=\"ds-field\"><span class=\"ds-field-label\">Supplier</span><input class=\"ds-input\" placeholder=\"Who sent the bill\"></label>",
+      "css": ".ds-field { display: grid; gap: 6px; font-family: 'Nunito Sans Variable', 'Nunito Sans', system-ui, sans-serif; color: #1E2420; } .ds-field-label { font-weight: 700; line-height: 22px; } .ds-input { min-height: 48px; padding: 8px 16px; border: 1px solid #76828E; border-radius: 12px; background: #fff; color: #1E2420; font: 400 16px/1.5 inherit; font-family: inherit; } .ds-input::placeholder { color: #616C77; } .ds-input:hover { border-color: #1E2420; } .ds-input:focus-visible { outline: 3px solid #1E2420; outline-offset: 2px; }"
+    },
+    {
+      "name": "Tags",
+      "kind": "chip",
+      "refersTo": "tag-quiet",
+      "description": "Three weights of ink, no colour: a soft label, a note worth reading, something waiting on a person.",
+      "html": "<span class=\"ds-tag\">Sample numbers</span> <span class=\"ds-tag ds-tag-outline\">1.3 points over</span> <span class=\"ds-tag ds-tag-solid\">Needs approval</span>",
+      "css": ".ds-tag { display: inline-flex; align-items: center; padding: 8px 12px; border-radius: 8px; background: #CAD6E2; color: #1E2420; font: 700 15px/16px 'Nunito Sans Variable', 'Nunito Sans', system-ui, sans-serif; white-space: nowrap; } .ds-tag-outline { padding-block: 6.5px; border: 1.5px solid #1E2420; background: none; font-weight: 800; } .ds-tag-solid { background: #1E2420; color: #fff; font-weight: 800; }"
+    },
+    {
+      "name": "Stat Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "A white card holding the lead figure, with what it is measured against beside it.",
+      "html": "<div class=\"ds-card\"><div><p class=\"ds-stat-label\">Prime cost</p><p class=\"ds-stat-value\">61.3%</p></div><div class=\"ds-stat-aside\"><span>Target 60%</span><span class=\"ds-note\">1.3 points over</span></div></div>",
+      "css": ".ds-card { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 20px 24px; border-radius: 16px; background: #fff; color: #1E2420; box-shadow: 0 1px 2px rgb(30 36 32 / 0.06); font-family: 'Nunito Sans Variable', 'Nunito Sans', system-ui, sans-serif; font-variant-numeric: tabular-nums; } .ds-card p { margin: 0; } .ds-stat-label { color: #616C77; font-size: 15px; font-weight: 600; line-height: 20px; } .ds-stat-value { font-size: 44px; font-weight: 800; line-height: 48px; letter-spacing: -0.02em; } .ds-stat-aside { display: grid; justify-items: end; gap: 6px; font-weight: 600; } .ds-note { padding: 6.5px 12px; border: 1.5px solid #1E2420; border-radius: 8px; font-size: 15px; font-weight: 800; line-height: 16px; }"
+    },
+    {
+      "name": "Rail Item",
+      "kind": "nav",
+      "refersTo": "nav-item-current",
+      "description": "One line in the side rail. The current place is a white pill with coloured, heavier words.",
+      "html": "<nav class=\"ds-rail\"><a class=\"ds-nav\" href=\"#\">Home</a><a class=\"ds-nav\" href=\"#\" aria-current=\"page\">Mini-apps</a><a class=\"ds-nav\" href=\"#\">Settings</a></nav>",
+      "css": ".ds-rail { display: grid; gap: 4px; width: 208px; padding: 8px; background: #DEE7F2; font-family: 'Nunito Sans Variable', 'Nunito Sans', system-ui, sans-serif; } .ds-nav { display: flex; align-items: center; min-height: 48px; padding: 8px 16px; border-radius: 999px; color: #1E2420; font-weight: 600; text-decoration: none; transition: background-color 160ms; } .ds-nav:hover { background: rgb(255 255 255 / 0.6); } .ds-nav[aria-current=\"page\"] { background: #fff; color: var(--rms-action-ink, #007742); font-weight: 800; box-shadow: 0 1px 2px rgb(30 36 32 / 0.06); } .ds-nav:focus-visible { outline: 3px solid #1E2420; outline-offset: 2px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "Front of House",
+    "overview": "A restaurant owner looks at a calm screen and knows at a glance what is safe to touch. Colour is not decoration here. It is the one signal the whole system teaches: if it has colour, you can press it. Everything you only read is the slate ground, a white card, ink, or a hairline.",
+    "keyCharacteristics": [
+      "One action colour. It is the restaurant's own brand colour, made safe by code.",
+      "Shape carries meaning: fully rounded is a button, 8 to 16px corners are something you read.",
+      "States are words plus ink shapes (outline, solid, tick, ring). Never colour.",
+      "One family, Nunito Sans, heavy for figures and headings, tabular figures everywhere.",
+      "Two densities: comfortable for talking and deciding, compact for report rows, charts and feeds.",
+      "Motion is press feedback only."
+    ],
+    "rules": [
+      { "name": "The Press Rule", "body": "If it has colour, you can press it. Nothing coloured that cannot be pressed. A disabled action loses its colour entirely.", "section": "colors" },
+      { "name": "The Brand Safety Rule", "body": "A restaurant's colour never reaches the page directly. themeFromBrand(hex) keeps the hue and darkens only as far as it must so that white words on the fill and coloured words on card, ground and wash all pass WCAG AA. Black, white and greys are replaced by basil.", "section": "colors" },
+      { "name": "The Ink State Rule", "body": "Over target, slow week, done, in progress, needs approval: each is a word plus an ink shape.", "section": "colors" },
+      { "name": "The 14 Rule", "body": "Nothing is smaller than 14px.", "section": "typography" },
+      { "name": "The Lined-up Figures Rule", "body": "Tabular numerals on body. Money and counts are right-aligned in tables.", "section": "typography" },
+      { "name": "The Shape Rule", "body": "Fully rounded means you can press it. 8 to 16px corners mean you read it.", "section": "shapes" }
+    ],
+    "dos": [
+      "Do give colour only to things that can be pressed.",
+      "Do say every state in words, with an ink shape beside it.",
+      "Do pass the restaurant's colour through themeFromBrand or <Theme brand>. Never paint it directly.",
+      "Do put anything you read on a white card, and use --rms-muted for secondary words.",
+      "Do use compact density for report rows, charts and feeds, and comfortable for everything else.",
+      "Do write in everyday words. No code, table names, tier codes or raw error text on owner screens."
+    ],
+    "donts": [
+      "Don't colour a status, a tag, a chart series, a heading or an icon that cannot be pressed.",
+      "Don't use red, amber or green to mean bad, warning or good.",
+      "Don't round a label fully, or square off a button.",
+      "Don't set text below 14px.",
+      "Don't nest cards, add a second accent colour, or add entry animations.",
+      "Don't write CSS, class names or inline styles in an app or a mini-app.",
+      "Don't show a second way in to \"Ask\" on a screen that already has one."
+    ]
+  }
+}

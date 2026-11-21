@@ -1,1 +1,2378 @@
-/* @rms/ui tokens and base styles. Task E. */
+/*
+ * @rms/ui styles: "Front of House".
+ * The only stylesheet RMS and every mini-app load. Apps never write CSS: they compose the
+ * components in this package, and those components carry these class names.
+ *
+ * Rule: if it has colour, you can press it. States are words and ink shapes.
+ * Shape: fully rounded = press it. 8 to 16px corners = read it.
+ */
+
+@import "@fontsource-variable/nunito-sans/index.css";
+@import "./tokens.css";
+
+/* ---------------------------------------------------------------- base */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  scrollbar-color: var(--rms-bar) transparent;
+}
+
+body {
+  margin: 0;
+  background: var(--rms-ground);
+  color: var(--rms-ink);
+  font: var(--rms-weight-body) var(--rms-text-m) / 1.5 var(--rms-font);
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  accent-color: var(--rms-action);
+  caret-color: var(--rms-ink);
+}
+
+::selection {
+  background: var(--rms-ink);
+  color: var(--rms-card);
+}
+
+:focus-visible {
+  outline: 3px solid var(--rms-ink);
+  outline-offset: 2px;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+/* Plain pages written before they are skinned (sign-in, onboarding) still read in this voice. */
+h1,
+h2,
+h3,
+h4 {
+  font-weight: var(--rms-weight-heavy);
+  line-height: 1.25;
+  text-wrap: balance;
+}
+
+a {
+  color: var(--rms-action-ink);
+  font-weight: var(--rms-weight-heavy);
+  text-underline-offset: 0.18em;
+  text-decoration-thickness: 0.09em;
+}
+
+.rms-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.rms-theme {
+  display: contents;
+}
+
+/* Review pages only: a patch of another page ground, edged so it shows against the real one. */
+.rms-ground-sample {
+  display: grid;
+  align-content: start;
+  gap: var(--rms-space-3);
+  min-width: 0;
+  padding: var(--rms-space-5);
+  border: 1px solid var(--rms-field-line);
+  border-radius: var(--rms-radius-card);
+  background: var(--rms-ground);
+}
+
+/* ---------------------------------------------------------------- icon */
+
+.rms-icon {
+  flex: none;
+  width: 1.25rem;
+  height: 1.25rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.rms-icon--s {
+  width: 1rem;
+  height: 1rem;
+  stroke-width: 2.25;
+}
+
+.rms-icon--l {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+.rms-icon--go {
+  color: var(--rms-action-ink);
+}
+
+/* ---------------------------------------------------------------- text and layout helpers */
+
+.rms-heading {
+  margin: 0;
+  font-weight: var(--rms-weight-heavy);
+  text-wrap: balance;
+}
+
+.rms-heading--page {
+  font-size: var(--rms-text-3xl);
+  line-height: 3rem;
+  letter-spacing: -0.01em;
+}
+
+.rms-heading--app {
+  font-size: var(--rms-text-2xl);
+  line-height: 2.75rem;
+  letter-spacing: -0.01em;
+}
+
+.rms-heading--section {
+  font-size: var(--rms-text-xl);
+  line-height: 1.75rem;
+}
+
+.rms-heading--card {
+  font-size: var(--rms-text-l);
+  line-height: 1.5rem;
+}
+
+.rms-heading--small {
+  font-size: var(--rms-text-m);
+  line-height: 1.375rem;
+}
+
+/* 32rem holds about 70 characters of body text. (The ch unit runs narrow in this face.) */
+.rms-text {
+  margin: 0;
+  max-width: 32rem;
+  text-wrap: pretty;
+}
+
+.rms-text--muted {
+  color: var(--rms-muted);
+}
+
+.rms-text--small {
+  font-size: var(--rms-text-s);
+  line-height: 1.25rem;
+}
+
+.rms-text--strong {
+  font-weight: var(--rms-weight-strong);
+}
+
+.rms-bullets {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rms-bullets li {
+  position: relative;
+  padding: 0.1875rem 0 0.1875rem 1.25rem;
+  line-height: 1.5rem;
+  text-wrap: pretty;
+}
+
+.rms-bullets li::before {
+  content: "";
+  position: absolute;
+  left: 0.125rem;
+  top: 0.75rem;
+  width: 0.375rem;
+  height: 0.375rem;
+  border-radius: 50%;
+  background: var(--rms-ink);
+}
+
+.rms-stack {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: var(--rms-gap);
+}
+
+.rms-stack--xs {
+  gap: var(--rms-space-1);
+}
+
+.rms-stack--s {
+  gap: var(--rms-space-2);
+}
+
+.rms-stack--m {
+  gap: var(--rms-space-3);
+}
+
+.rms-stack--l {
+  gap: var(--rms-space-6);
+}
+
+.rms-stack--xl {
+  gap: var(--rms-space-10);
+}
+
+.rms-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  min-width: 0;
+  gap: var(--rms-space-3);
+}
+
+.rms-row--s {
+  gap: var(--rms-space-2);
+}
+
+.rms-row--between {
+  justify-content: space-between;
+}
+
+.rms-row--end {
+  justify-content: flex-end;
+}
+
+.rms-row--top {
+  align-items: flex-start;
+}
+
+.rms-row--nowrap {
+  flex-wrap: nowrap;
+}
+
+.rms-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 17.5rem), 1fr));
+  gap: var(--rms-space-3);
+  min-width: 0;
+}
+
+/* ---------------------------------------------------------------- logo */
+
+.rms-logo {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.115em;
+  color: var(--rms-ink);
+  font-size: 1.625rem;
+  font-weight: var(--rms-weight-logo);
+  line-height: 2rem;
+  letter-spacing: -0.03em;
+  text-decoration: none;
+  border-radius: var(--rms-radius-label);
+}
+
+.rms-logo--s {
+  font-size: 1.25rem;
+  line-height: 1.5rem;
+}
+
+/* As a link the mark is drawn the same size but answers to a 44px press. */
+a.rms-logo {
+  margin-block: -0.375rem;
+  padding-block: 0.375rem;
+}
+
+a.rms-logo--s {
+  margin-block: -0.625rem;
+  padding-block: 0.625rem;
+}
+
+.rms-logo__dot {
+  width: 0.31em;
+  height: 0.31em;
+  border-radius: 50%;
+  background: var(--rms-action);
+}
+
+/* The mark stands in a line of text or on its own: outside a link it is ink only. */
+.rms-logo:not(a) .rms-logo__dot {
+  background: var(--rms-ink);
+}
+
+/* Inside a button (the way back to RMS) it can be pressed again, so the colour returns. */
+.rms-button .rms-logo .rms-logo__dot {
+  background: var(--rms-action);
+}
+
+/* ---------------------------------------------------------------- press: everything coloured springs */
+
+.rms-button,
+.rms-icon-button,
+.rms-nav-item,
+.rms-bottom-bar__item,
+.rms-tab,
+.rms-chart__press,
+.rms-list__row {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.rms-button,
+.rms-icon-button {
+  transition:
+    background-color var(--rms-fade),
+    border-color var(--rms-fade),
+    color var(--rms-fade),
+    transform var(--rms-press-out);
+}
+
+.rms-button:active:not(:disabled, [aria-disabled="true"]),
+.rms-icon-button:active:not(:disabled, [aria-disabled="true"]) {
+  transform: scale(var(--rms-press-scale));
+  transition:
+    background-color var(--rms-fade),
+    transform var(--rms-press-in);
+}
+
+/* ---------------------------------------------------------------- button */
+
+.rms-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--rms-space-2);
+  min-height: var(--rms-target);
+  padding: var(--rms-space-2) var(--rms-space-5);
+  border: 1px solid var(--rms-line);
+  border-radius: var(--rms-radius-pill);
+  background: var(--rms-card);
+  color: var(--rms-action-ink);
+  font: var(--rms-weight-strong) var(--rms-text-m) / 1.25 var(--rms-font);
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+
+.rms-button:hover {
+  background: var(--rms-action-wash);
+}
+
+.rms-button--primary {
+  border-color: var(--rms-action);
+  background: var(--rms-action);
+  color: var(--rms-on-action);
+  font-weight: var(--rms-weight-heavy);
+}
+
+.rms-button--primary:hover {
+  border-color: var(--rms-action-pressed);
+  background: var(--rms-action-pressed);
+}
+
+.rms-button--quiet {
+  padding-inline: var(--rms-space-3);
+  border-color: transparent;
+  background: none;
+  font-weight: var(--rms-weight-heavy);
+}
+
+.rms-button--l {
+  min-height: var(--rms-target-large);
+  padding-inline: 1.75rem;
+  font-size: var(--rms-text-xl);
+  font-weight: var(--rms-weight-heavy);
+}
+
+/* Full width where a thumb needs it. From tablet width up the button returns to its own size. */
+@media (max-width: 40rem) {
+  .rms-button--block {
+    width: 100%;
+  }
+}
+
+/* An action that only makes sense with a bigger screen in front of you. */
+@media (max-width: 40rem) {
+  .rms-button--wide-only {
+    display: none;
+  }
+}
+
+/* A disabled action loses its colour entirely. */
+.rms-button:disabled,
+.rms-button[aria-disabled="true"] {
+  border-color: var(--rms-line);
+  background: var(--rms-line);
+  color: var(--rms-muted-on-ground);
+  cursor: not-allowed;
+}
+
+.rms-button--quiet:disabled,
+.rms-button--quiet[aria-disabled="true"] {
+  border-color: transparent;
+  background: none;
+}
+
+.rms-spinner {
+  flex: none;
+  width: 1.125rem;
+  height: 1.125rem;
+  border: 2.5px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: rms-spin 1.2s linear infinite;
+}
+
+@keyframes rms-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---------------------------------------------------------------- icon button */
+
+.rms-icon-button {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: var(--rms-target);
+  height: var(--rms-target);
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: none;
+  color: var(--rms-action-ink);
+  cursor: pointer;
+}
+
+.rms-icon-button:hover {
+  background: var(--rms-action-wash);
+}
+
+.rms-icon-button--outlined {
+  border-color: var(--rms-line);
+  background: var(--rms-card);
+}
+
+.rms-icon-button:disabled {
+  background: none;
+  color: var(--rms-field-line);
+  cursor: not-allowed;
+}
+
+/* ---------------------------------------------------------------- fields */
+
+.rms-field {
+  display: grid;
+  align-content: start;
+  gap: 0.375rem;
+  min-width: 0;
+}
+
+.rms-field__label {
+  font-weight: var(--rms-weight-strong);
+  line-height: 1.375rem;
+}
+
+.rms-field__hint {
+  color: var(--rms-muted);
+  font-size: var(--rms-text-s);
+  line-height: 1.25rem;
+}
+
+.rms-field__error {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.375rem;
+  font-size: var(--rms-text-s);
+  font-weight: var(--rms-weight-heavy);
+  line-height: 1.25rem;
+}
+
+.rms-field__error .rms-icon {
+  margin-top: 0.125rem;
+}
+
+.rms-input {
+  width: 100%;
+  min-height: var(--rms-target-nav);
+  padding: var(--rms-space-2) var(--rms-space-4);
+  border: 1px solid var(--rms-field-line);
+  border-radius: var(--rms-radius-field);
+  background: var(--rms-card);
+  color: var(--rms-ink);
+  font: var(--rms-weight-body) var(--rms-text-m) / 1.5 var(--rms-font);
+  font-variant-numeric: tabular-nums;
+}
+
+.rms-input::placeholder {
+  color: var(--rms-muted-on-card);
+  opacity: 1;
+}
+
+.rms-input:hover {
+  border-color: var(--rms-ink);
+}
+
+/* An error is a heavier ink edge and plain words, never a colour. */
+.rms-input[aria-invalid="true"] {
+  border-color: var(--rms-ink);
+  box-shadow: inset 0 0 0 1px var(--rms-ink);
+}
+
+.rms-input:disabled {
+  border-color: var(--rms-line);
+  background: var(--rms-ground);
+  color: var(--rms-muted-on-ground);
+  cursor: not-allowed;
+}
+
+.rms-input--money {
+  text-align: right;
+  font-weight: var(--rms-weight-strong);
+}
+
+/* Select: a pill, because you press it. Ink words, coloured chevron. */
+.rms-select {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+}
+
+.rms-select--block {
+  display: flex;
+  width: 100%;
+}
+
+.rms-select__control {
+  width: 100%;
+  min-height: var(--rms-target);
+  padding: var(--rms-space-2) 2.625rem var(--rms-space-2) var(--rms-space-4);
+  border: 1px solid var(--rms-line);
+  border-radius: var(--rms-radius-pill);
+  background: var(--rms-card);
+  color: var(--rms-ink);
+  font: var(--rms-weight-strong) var(--rms-text-s) / 1.25 var(--rms-font);
+  text-overflow: ellipsis;
+  appearance: none;
+  cursor: pointer;
+  transition: background-color var(--rms-fade);
+}
+
+.rms-select__control:hover {
+  background: var(--rms-action-wash);
+}
+
+.rms-select__control:disabled {
+  background: var(--rms-line);
+  color: var(--rms-muted-on-ground);
+  cursor: not-allowed;
+}
+
+/* In a form a select stands as tall as the text fields beside it. */
+.rms-field .rms-select__control {
+  min-height: var(--rms-target-nav);
+  font-size: var(--rms-text-m);
+}
+
+.rms-select__chevron {
+  display: flex;
+  position: absolute;
+  right: 0.875rem;
+  top: 50%;
+  translate: 0 -50%;
+  color: var(--rms-action-ink);
+  pointer-events: none;
+}
+
+.rms-select__control:disabled + .rms-select__chevron {
+  color: var(--rms-muted-on-ground);
+}
+
+/* ---------------------------------------------------------------- tabs */
+
+.rms-tabs {
+  display: flex;
+  gap: var(--rms-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rms-tab {
+  display: inline-grid;
+  align-items: center;
+  height: var(--rms-target-nav);
+  margin-bottom: -1px;
+  padding: var(--rms-space-2) var(--rms-space-3);
+  border: 0;
+  border-bottom: 3px solid transparent;
+  background: none;
+  color: var(--rms-ink);
+  font: var(--rms-weight-strong) var(--rms-text-xl) / 1.5 var(--rms-font);
+  text-align: center;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color var(--rms-fade);
+}
+
+/* Reserve the width of the heavy label so choosing a tab does not nudge its neighbours. */
+.rms-tab::after {
+  content: attr(data-label);
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  font-weight: var(--rms-weight-heavy);
+}
+
+.rms-tab:hover {
+  border-bottom-color: var(--rms-bar);
+}
+
+.rms-tab[aria-selected="true"],
+.rms-tab[aria-current="page"] {
+  border-bottom-color: var(--rms-action);
+  color: var(--rms-action-ink);
+  font-weight: var(--rms-weight-heavy);
+}
+
+.rms-tabs__bar {
+  border-bottom: 1px solid var(--rms-line);
+}
+
+.rms-tab-panel {
+  padding-top: var(--rms-space-4);
+}
+
+/* ---------------------------------------------------------------- card */
+
+.rms-card {
+  --rms-muted: var(--rms-muted-on-card);
+  --rms-surface: var(--rms-card);
+  display: block;
+  min-width: 0;
+  margin: 0;
+  padding: var(--rms-card-y) var(--rms-card-x);
+  border-radius: var(--rms-radius-card);
+  background: var(--rms-card);
+  box-shadow: var(--rms-shadow);
+}
+
+.rms-card--flush {
+  padding: var(--rms-space-2) var(--rms-card-x);
+}
+
+.rms-card__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--rms-space-3);
+  margin-bottom: var(--rms-space-2);
+}
+
+/* A quiet action in a card head keeps its 44px target without making the head taller. */
+.rms-card__head .rms-button--quiet {
+  margin-block: -0.625rem;
+  margin-right: calc(var(--rms-space-3) * -1);
+}
+
+/* ---------------------------------------------------------------- tag */
+
+.rms-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--rms-space-1);
+  padding: var(--rms-space-2) var(--rms-space-3);
+  border-radius: var(--rms-radius-label);
+  background: var(--rms-line);
+  color: var(--rms-ink);
+  font-size: var(--rms-text-s);
+  font-weight: var(--rms-weight-strong);
+  line-height: 1rem;
+  white-space: nowrap;
+}
+
+/* A note worth reading: an ink outline, often with an ink arrow. */
+.rms-tag--outline {
+  padding-block: calc(var(--rms-space-2) - 1.5px);
+  border: 1.5px solid var(--rms-ink);
+  background: none;
+  font-weight: var(--rms-weight-heavy);
+}
+
+/* The strongest state there is: solid ink. For things that are waiting on someone. */
+.rms-tag--solid {
+  background: var(--rms-ink);
+  color: var(--rms-card);
+  font-weight: var(--rms-weight-heavy);
+}
+
+.rms-tag:has(> .rms-icon) {
+  padding-left: var(--rms-space-2);
+}
+
+/* ---------------------------------------------------------------- stat */
+
+.rms-stat {
+  min-width: 0;
+}
+
+.rms-stat__label {
+  margin: 0;
+  color: var(--rms-muted);
+  font-size: var(--rms-text-s);
+  font-weight: var(--rms-weight-label);
+  line-height: 1.25rem;
+}
+
+.rms-stat__value {
+  margin: 0;
+  font-size: var(--rms-text-stat);
+  font-weight: var(--rms-weight-heavy);
+  line-height: 2.125rem;
+  letter-spacing: -0.01em;
+}
+
+.rms-stat__note {
+  margin: 0;
+  color: var(--rms-muted);
+  font-size: var(--rms-text-s);
+  line-height: 1.25rem;
+}
+
+.rms-stat--hero .rms-stat__value {
+  font-size: var(--rms-text-hero);
+  line-height: 3rem;
+  letter-spacing: -0.02em;
+}
+
+/* The lead figure with what it is measured against beside it. */
+.rms-stat-lead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--rms-space-4);
+}
+
+.rms-stat-lead__figure {
+  margin: 0;
+}
+
+.rms-stat-lead__aside {
+  display: grid;
+  justify-items: end;
+  gap: 0.375rem;
+  font-weight: var(--rms-weight-label);
+}
+
+.rms-stat-lead__aside p {
+  margin: 0;
+}
+
+.rms-stat-group-wrap {
+  container-type: inline-size;
+  min-width: 0;
+}
+
+.rms-stat-group {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  margin: 0;
+}
+
+.rms-stat-group > .rms-stat + .rms-stat {
+  padding-left: var(--rms-space-5);
+  border-left: 1px solid var(--rms-line);
+}
+
+/* Narrow: each figure becomes a row, words on the left, figure on the right. */
+@container (max-width: 28rem) {
+  .rms-stat-group {
+    grid-auto-flow: row;
+    margin-block: calc(var(--rms-space-3) * -1);
+  }
+
+  .rms-stat-group > .rms-stat {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-areas: "label value" "note value";
+    align-items: center;
+    column-gap: var(--rms-space-3);
+    min-height: var(--rms-target);
+    padding-block: 0.375rem;
+  }
+
+  .rms-stat-group > .rms-stat + .rms-stat {
+    padding-left: 0;
+    border-left: 0;
+    border-top: 1px solid var(--rms-line);
+  }
+
+  .rms-stat-group .rms-stat__label {
+    grid-area: label;
+    color: var(--rms-ink);
+    font-size: var(--rms-text-m);
+  }
+
+  .rms-stat-group .rms-stat__note {
+    grid-area: note;
+  }
+
+  .rms-stat-group .rms-stat__value {
+    grid-area: value;
+    font-size: 1.375rem;
+  }
+}
+
+/* ---------------------------------------------------------------- data table */
+
+.rms-table-wrap {
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.rms-table {
+  width: 100%;
+  /* Separate borders, so the pinned columns keep their rules while the rest scroll. */
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--rms-text-data);
+}
+
+.rms-table caption {
+  text-align: left;
+}
+
+.rms-table th,
+.rms-table td {
+  height: var(--rms-row);
+  padding: 0 var(--rms-cell-x);
+  border-bottom: 1px solid var(--rms-line);
+  text-align: left;
+  white-space: nowrap;
+}
+
+/* The row's name stays put when a wide table is scrolled sideways on a phone. */
+.rms-table th:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  padding-left: 0;
+  background: var(--rms-surface);
+}
+
+.rms-table th:last-child,
+.rms-table td:last-child {
+  padding-right: 0;
+}
+
+.rms-table thead th {
+  color: var(--rms-muted);
+  font-size: var(--rms-text-s);
+  font-weight: var(--rms-weight-strong);
+}
+
+.rms-table tbody th {
+  font-weight: var(--rms-weight-label);
+}
+
+.rms-table tbody tr:last-child > * {
+  border-bottom: 0;
+}
+
+.rms-table [data-align="end"] {
+  text-align: right;
+}
+
+.rms-table td[data-strong="true"] {
+  font-weight: var(--rms-weight-heavy);
+}
+
+/* The column that matters most stays in view too: on a phone the rest scroll between the two. */
+.rms-table [data-strong="true"] {
+  position: sticky;
+  right: 0;
+  z-index: 1;
+  background: var(--rms-surface);
+}
+
+@media (max-width: 40rem) {
+  .rms-table th:first-child {
+    box-shadow: 1px 0 0 var(--rms-line);
+  }
+
+  .rms-table [data-strong="true"] {
+    padding-left: var(--rms-cell-x);
+    box-shadow: -1px 0 0 var(--rms-line);
+  }
+}
+
+/* A total is a heavy ink rule and heavy figures. */
+.rms-table tfoot th,
+.rms-table tfoot td {
+  border-top: 2px solid var(--rms-ink);
+  border-bottom: 0;
+  font-weight: var(--rms-weight-heavy);
+}
+
+.rms-table__sort {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--rms-space-1);
+  min-height: var(--rms-row);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.rms-table__sort .rms-icon {
+  color: var(--rms-action-ink);
+}
+
+[data-align="end"] > .rms-table__sort {
+  flex-direction: row-reverse;
+}
+
+.rms-table__state {
+  display: inline-flex;
+  margin-left: var(--rms-space-2);
+  vertical-align: middle;
+}
+
+@media (pointer: coarse) {
+  .rms-table__sort {
+    min-height: var(--rms-target);
+  }
+}
+
+/* ---------------------------------------------------------------- bar chart */
+
+.rms-chart {
+  container-type: inline-size;
+  min-width: 0;
+}
+
+.rms-chart__list {
+  display: flex;
+  gap: var(--rms-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rms-chart__item {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.rms-chart__cell,
+.rms-chart__press {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto 6rem auto;
+  grid-auto-rows: 1.25rem;
+  justify-items: center;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: center;
+}
+
+.rms-chart__press {
+  border-radius: var(--rms-radius-label);
+  cursor: pointer;
+}
+
+.rms-chart__value {
+  font-size: var(--rms-text-xs);
+  font-weight: var(--rms-weight-strong);
+  line-height: 1.25rem;
+  white-space: nowrap;
+}
+
+.rms-chart__track {
+  display: flex;
+  align-items: flex-end;
+  width: 100%;
+  padding-block: 0.25rem 0.375rem;
+}
+
+.rms-chart__bar {
+  width: 100%;
+  height: calc(var(--rms-share) * 100%);
+  min-height: 0.25rem;
+  border-radius: var(--rms-radius-label) var(--rms-radius-label) var(--rms-radius-foot) var(--rms-radius-foot);
+  background: var(--rms-bar);
+}
+
+.rms-chart__label {
+  color: var(--rms-muted);
+  font-size: var(--rms-text-xs);
+  font-weight: var(--rms-weight-label);
+  line-height: 1.25rem;
+  white-space: nowrap;
+}
+
+.rms-chart__state {
+  font-size: var(--rms-text-xs);
+  font-weight: var(--rms-weight-heavy);
+  line-height: 1.25rem;
+  white-space: nowrap;
+}
+
+/* A marked bar (a slow week) is drawn as an ink outline and named in words. */
+.rms-chart__item[data-marked="true"] .rms-chart__bar {
+  border: 1.5px solid var(--rms-ink);
+}
+
+/* The current bar is solid ink when you only read the chart... */
+.rms-chart__item[data-current="true"] .rms-chart__bar {
+  background: var(--rms-ink);
+}
+
+.rms-chart__item[data-current="true"] :is(.rms-chart__value, .rms-chart__label) {
+  color: var(--rms-ink);
+  font-weight: var(--rms-weight-heavy);
+}
+
+/* ...and the action colour when the bars can be pressed to choose one. */
+.rms-chart__press[aria-pressed="true"] .rms-chart__bar {
+  background: var(--rms-action);
+}
+
+.rms-chart__press[aria-pressed="true"] :is(.rms-chart__value, .rms-chart__label) {
+  color: var(--rms-ink);
+  font-weight: var(--rms-weight-heavy);
+}
+
+.rms-chart__press:hover .rms-chart__bar {
+  background: var(--rms-action-pressed);
+}
+
+.rms-chart__press:active .rms-chart__bar {
+  transform: scaleY(0.97);
+  transform-origin: bottom;
+}
+
+.rms-chart__bar {
+  transition:
+    background-color var(--rms-fade),
+    transform var(--rms-press-out);
+}
+
+/* Horizontal bars: one row each, name, bar, figure. */
+.rms-chart--rows .rms-chart__list {
+  display: grid;
+  grid-template-columns: max-content 1fr max-content;
+  column-gap: var(--rms-space-3);
+  row-gap: 0;
+}
+
+.rms-chart--rows .rms-chart__item {
+  display: grid;
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
+}
+
+.rms-chart--rows :is(.rms-chart__cell, .rms-chart__press) {
+  grid-template-columns: subgrid;
+  grid-template-rows: auto;
+  grid-column: 1 / -1;
+  align-items: center;
+  justify-items: stretch;
+  min-height: var(--rms-bar-row);
+  text-align: left;
+}
+
+.rms-chart--rows .rms-chart__label {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 2.75rem;
+  color: var(--rms-ink);
+  font-size: var(--rms-text-s);
+}
+
+.rms-chart--rows .rms-chart__track {
+  grid-column: 2;
+  grid-row: 1;
+  align-items: center;
+  padding: 0;
+}
+
+.rms-chart--rows .rms-chart__bar {
+  width: calc(var(--rms-share) * 100%);
+  min-width: 0.25rem;
+  height: var(--rms-bar-thick);
+  border-radius: var(--rms-radius-pill);
+}
+
+.rms-chart--rows .rms-chart__value {
+  grid-column: 3;
+  grid-row: 1;
+  font-size: var(--rms-text-s);
+  font-weight: var(--rms-weight-heavy);
+  text-align: right;
+}
+
+.rms-chart--rows .rms-chart__state {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  padding-bottom: 0.25rem;
+}
+
+.rms-chart--rows .rms-chart__state:empty {
+  display: none;
+}
+
+.rms-chart--rows .rms-chart__press:active .rms-chart__bar {
+  transform: scaleX(0.97);
+  transform-origin: left;
+}
+
+/* Upright bars need room for their figures. In a narrow card they turn into rows. */
+@container (max-width: 30rem) {
+  .rms-chart--columns .rms-chart__list {
+    display: grid;
+    grid-template-columns: max-content 1fr max-content;
+    column-gap: var(--rms-space-3);
+  }
+
+  .rms-chart--columns .rms-chart__item {
+    display: grid;
+    grid-template-columns: subgrid;
+    grid-column: 1 / -1;
+  }
+
+  .rms-chart--columns :is(.rms-chart__cell, .rms-chart__press) {
+    grid-template-columns: subgrid;
+    grid-template-rows: auto;
+    grid-column: 1 / -1;
+    align-items: center;
+    justify-items: stretch;
+    min-height: var(--rms-bar-row);
+    text-align: left;
+  }
+
+  .rms-chart--columns .rms-chart__label {
+    grid-column: 1;
+    grid-row: 1;
+    color: var(--rms-ink);
+    font-size: var(--rms-text-s);
+  }
+
+  .rms-chart--columns .rms-chart__track {
+    grid-column: 2;
+    grid-row: 1;
+    align-items: center;
+    padding: 0;
+  }
+
+  .rms-chart--columns .rms-chart__bar {
+    width: calc(var(--rms-share) * 100%);
+    min-width: 0.25rem;
+    height: var(--rms-bar-thick);
+    border-radius: var(--rms-radius-pill);
+  }
+
+  .rms-chart--columns .rms-chart__value {
+    grid-column: 3;
+    grid-row: 1;
+    font-size: var(--rms-text-s);
+    font-weight: var(--rms-weight-heavy);
+    text-align: right;
+  }
+
+  .rms-chart--columns .rms-chart__state {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    padding-bottom: 0.25rem;
+  }
+
+  .rms-chart--columns .rms-chart__state:empty {
+    display: none;
+  }
+
+  .rms-chart--columns .rms-chart__press:active .rms-chart__bar {
+    transform: scaleX(0.97);
+    transform-origin: left;
+  }
+}
+
+@media (pointer: coarse) {
+  .rms-chart--rows .rms-chart__press {
+    min-height: var(--rms-target);
+  }
+}
+
+/* ---------------------------------------------------------------- stepper */
+
+.rms-stepper {
+  display: grid;
+  gap: var(--rms-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rms-step {
+  display: flex;
+  align-items: center;
+  gap: var(--rms-space-3);
+  line-height: 1.5rem;
+}
+
+.rms-step[data-state="now"] {
+  font-weight: var(--rms-weight-strong);
+}
+
+.rms-step[data-state="todo"] {
+  color: var(--rms-muted);
+}
+
+.rms-step__state {
+  margin-left: auto;
+  padding-left: var(--rms-space-3);
+  color: var(--rms-muted);
+  font-size: var(--rms-text-s);
+  font-weight: var(--rms-weight-body);
+  white-space: nowrap;
+}
+
+.rms-step__mark {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 1.375rem;
+  height: 1.375rem;
+  border-radius: 50%;
+}
+
+/* Done is a solid ink disc with a tick. */
+.rms-step[data-state="done"] .rms-step__mark {
+  background: var(--rms-ink);
+  color: var(--rms-card);
+}
+
+.rms-step__mark .rms-icon {
+  width: 0.875rem;
+  height: 0.875rem;
+  stroke-width: 2.75;
+}
+
+/* In progress is an open ring that turns. Still, it stays an open ring. */
+.rms-step[data-state="now"] .rms-step__mark {
+  border: 2.5px solid var(--rms-line);
+  border-top-color: var(--rms-ink);
+  animation: rms-spin 1.2s linear infinite;
+}
+
+/* Not started is a hollow ring. */
+.rms-step[data-state="todo"] .rms-step__mark {
+  border: 2px solid var(--rms-bar);
+}
+
+/* ---------------------------------------------------------------- conversation */
+
+.rms-conversation {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rms-space-4);
+  min-width: 0;
+}
+
+.rms-message {
+  min-width: 0;
+  margin: 0;
+}
+
+.rms-message--you {
+  align-self: flex-end;
+  max-width: min(85%, 34rem);
+  padding: var(--rms-space-3) var(--rms-space-5);
+  border-radius: var(--rms-radius-bubble) var(--rms-radius-bubble) var(--rms-radius-tail) var(--rms-radius-bubble);
+  background: var(--rms-line);
+  font-weight: var(--rms-weight-label);
+  overflow-wrap: anywhere;
+}
+
+.rms-message--rms {
+  align-self: stretch;
+}
+
+.rms-message--rms.rms-message--plain {
+  align-self: flex-start;
+  max-width: min(85%, 34rem);
+  padding: var(--rms-space-3) var(--rms-space-5);
+  border-radius: var(--rms-radius-bubble) var(--rms-radius-bubble) var(--rms-radius-bubble) var(--rms-radius-tail);
+  background: var(--rms-card);
+  box-shadow: var(--rms-shadow);
+}
+
+.rms-answers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--rms-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rms-answers li {
+  padding: calc(var(--rms-space-2) - 1px) var(--rms-space-3);
+  border: 1px solid var(--rms-line);
+  border-radius: var(--rms-radius-chip);
+  color: var(--rms-muted-on-ground);
+  font-size: var(--rms-text-s);
+  line-height: 1.375rem;
+}
+
+.rms-answers b {
+  margin-left: var(--rms-space-1);
+  color: var(--rms-ink);
+  font-weight: var(--rms-weight-heavy);
+}
+
+/* ---------------------------------------------------------------- composer */
+
+.rms-composer {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--rms-space-2);
+  min-height: 3.75rem;
+  padding: var(--rms-space-2) var(--rms-space-2) var(--rms-space-2) var(--rms-space-6);
+  border: 1px solid var(--rms-line);
+  border-radius: var(--rms-radius-composer);
+  background: var(--rms-card);
+  box-shadow: var(--rms-shadow);
+}
+
+.rms-composer:focus-within {
+  outline: 3px solid var(--rms-ink);
+  outline-offset: 2px;
+}
+
+.rms-composer__input {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--rms-target);
+  max-height: 9rem;
+  padding: 0.625rem 0;
+  border: 0;
+  outline: 0;
+  background: none;
+  line-height: 1.5rem;
+  resize: none;
+  field-sizing: content;
+}
+
+.rms-composer__input::placeholder {
+  color: var(--rms-muted-on-card);
+  opacity: 1;
+}
+
+.rms-composer .rms-button {
+  padding-inline: var(--rms-space-6);
+  font-size: var(--rms-text-xl);
+}
+
+/* ---------------------------------------------------------------- dialog */
+
+.rms-dialog {
+  --rms-muted: var(--rms-muted-on-card);
+  --rms-surface: var(--rms-card);
+  width: min(32rem, calc(100vw - 2rem));
+  max-height: calc(100dvh - 2rem);
+  margin: auto;
+  padding: 0;
+  border: 0;
+  border-radius: var(--rms-radius-card);
+  background: var(--rms-card);
+  color: var(--rms-ink);
+  box-shadow: var(--rms-shadow-raised);
+  overflow: auto;
+  opacity: 1;
+  transition:
+    opacity var(--rms-fade),
+    overlay var(--rms-fade) allow-discrete,
+    display var(--rms-fade) allow-discrete;
+}
+
+.rms-dialog:not([open]) {
+  opacity: 0;
+}
+
+@starting-style {
+  .rms-dialog[open] {
+    opacity: 0;
+  }
+}
+
+.rms-dialog__inner {
+  padding: var(--rms-space-6);
+  outline: 0;
+}
+
+.rms-dialog::backdrop {
+  background: var(--rms-scrim);
+}
+
+.rms-dialog__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--rms-space-3);
+  margin: calc(var(--rms-space-2) * -1) calc(var(--rms-space-2) * -1) var(--rms-space-2) 0;
+}
+
+.rms-dialog__body {
+  display: grid;
+  gap: var(--rms-space-3);
+}
+
+.rms-dialog__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--rms-space-3);
+  margin-top: var(--rms-space-6);
+}
+
+/* On a phone a dialog is a sheet that rises from the thumb. */
+@media (max-width: 40rem) {
+  .rms-dialog {
+    width: 100%;
+    max-width: none;
+    margin: auto 0 0;
+    border-radius: var(--rms-radius-card) var(--rms-radius-card) 0 0;
+  }
+
+  .rms-dialog__inner {
+    padding-bottom: calc(var(--rms-space-6) + env(safe-area-inset-bottom));
+  }
+
+  .rms-dialog__actions {
+    flex-direction: column-reverse;
+  }
+
+  .rms-dialog__actions .rms-button {
+    width: 100%;
+  }
+}
+
+/* ---------------------------------------------------------------- navigation */
+
+.rms-nav-list {
+  display: grid;
+  gap: var(--rms-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rms-nav-item {
+  display: flex;
+  align-items: center;
+  gap: var(--rms-space-3);
+  min-height: var(--rms-target-nav);
+  padding: var(--rms-space-2) var(--rms-space-4);
+  border-radius: var(--rms-radius-pill);
+  color: var(--rms-ink);
+  font-weight: var(--rms-weight-label);
+  text-decoration: none;
+  transition: background-color var(--rms-fade);
+}
+
+.rms-nav-item:hover {
+  background: color-mix(in srgb, var(--rms-card) 60%, transparent);
+}
+
+.rms-nav-item[aria-current="page"] {
+  background: var(--rms-card);
+  color: var(--rms-action-ink);
+  font-weight: var(--rms-weight-heavy);
+  box-shadow: var(--rms-shadow);
+}
+
+.rms-bottom-bar {
+  display: flex;
+  padding: 0 var(--rms-space-2) calc(var(--rms-space-1) + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--rms-line);
+  background: var(--rms-card);
+}
+
+.rms-bottom-bar__item {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.125rem;
+  min-width: 0;
+  height: 3.75rem;
+  padding: var(--rms-space-2) var(--rms-space-1);
+  border: 0;
+  background: none;
+  color: var(--rms-ink);
+  font: var(--rms-weight-strong) var(--rms-text-xs) / 1rem var(--rms-font);
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.rms-bottom-bar__item[aria-current="page"],
+.rms-bottom-bar__item[aria-expanded="true"] {
+  color: var(--rms-action-ink);
+  font-weight: var(--rms-weight-heavy);
+}
+
+.rms-bottom-bar__item[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  width: 2rem;
+  height: 3px;
+  border-radius: 0 0 var(--rms-radius-foot) var(--rms-radius-foot);
+  background: var(--rms-action);
+}
+
+.rms-avatar {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 50%;
+  background: var(--rms-line);
+  font-size: var(--rms-text-xs);
+  font-weight: var(--rms-weight-heavy);
+}
+
+.rms-account {
+  display: flex;
+  align-items: center;
+  gap: var(--rms-space-3);
+  min-width: 0;
+}
+
+.rms-account__name,
+.rms-account__role {
+  display: block;
+  line-height: 1.25rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rms-account__name {
+  font-weight: var(--rms-weight-strong);
+}
+
+.rms-account__role {
+  color: var(--rms-muted);
+  font-size: var(--rms-text-s);
+}
+
+/* Week, day or page stepper: a pill with two arrows. */
+.rms-pager {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--rms-target);
+  border: 1px solid var(--rms-line);
+  border-radius: var(--rms-radius-pill);
+  background: var(--rms-card);
+  white-space: nowrap;
+}
+
+.rms-pager__label {
+  padding: var(--rms-space-2) var(--rms-space-1);
+  font-weight: var(--rms-weight-strong);
+}
+
+.rms-pager .rms-icon-button {
+  margin: -1px;
+}
+
+/* ---------------------------------------------------------------- skeleton and empty */
+
+.rms-skeleton {
+  display: block;
+  height: 1rem;
+  border-radius: var(--rms-radius-label);
+  background: var(--rms-line);
+  animation: rms-wait 1.1s ease-in-out infinite alternate;
+}
+
+.rms-skeleton--figure {
+  width: 9rem;
+  height: 2.5rem;
+}
+
+.rms-skeleton--block {
+  height: 6rem;
+  border-radius: var(--rms-radius-card);
+}
+
+.rms-skeleton--s {
+  width: 30%;
+}
+
+.rms-skeleton--m {
+  width: 55%;
+}
+
+.rms-skeleton--l {
+  width: 80%;
+}
+
+@keyframes rms-wait {
+  to {
+    opacity: 0.5;
+  }
+}
+
+.rms-empty {
+  display: grid;
+  justify-items: start;
+  gap: var(--rms-space-2);
+  padding: var(--rms-space-6);
+  border: 1.5px dashed var(--rms-bar);
+  border-radius: var(--rms-radius-card);
+}
+
+.rms-empty__action {
+  margin-top: var(--rms-space-2);
+}
+
+/* ---------------------------------------------------------------- app shell */
+
+.rms-shell {
+  display: grid;
+  grid-template-columns: var(--rms-rail) minmax(0, 1fr);
+  min-height: 100dvh;
+}
+
+.rms-shell__skip {
+  position: absolute;
+  left: var(--rms-space-4);
+  top: var(--rms-space-4);
+  z-index: 10;
+}
+
+.rms-shell__skip:not(:focus-visible) {
+  width: 1px;
+  height: 1px;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  border: 0;
+}
+
+.rms-shell__top,
+.rms-shell__bottom {
+  display: none;
+}
+
+.rms-rail {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  padding: var(--rms-space-6) var(--rms-space-4);
+  overflow-y: auto;
+}
+
+.rms-rail__logo {
+  align-self: flex-start;
+  margin-left: var(--rms-space-4);
+}
+
+.rms-rail__place {
+  display: grid;
+  gap: var(--rms-space-2);
+  margin: 1.75rem 0 var(--rms-space-6);
+}
+
+.rms-place-name {
+  display: block;
+  margin: 0;
+  font-weight: var(--rms-weight-heavy);
+  line-height: 1.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rms-rail__place .rms-place-name {
+  margin-left: var(--rms-space-4);
+}
+
+.rms-rail__foot {
+  margin-top: auto;
+  padding: var(--rms-space-6) 0 0 var(--rms-space-4);
+}
+
+.rms-shell__main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: var(--rms-page-y) var(--rms-page-x);
+}
+
+.rms-top-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--rms-space-3);
+  padding: var(--rms-space-3) var(--rms-page-x) 0;
+}
+
+.rms-top-bar__start {
+  display: grid;
+  min-width: 0;
+}
+
+.rms-top-bar__start .rms-place-name {
+  color: var(--rms-muted-on-ground);
+  font-size: var(--rms-text-s);
+  font-weight: var(--rms-weight-strong);
+  line-height: 1.25rem;
+}
+
+.rms-top-bar__end {
+  flex: none;
+  max-width: 55%;
+}
+
+/* Phones and upright tablets: the rail becomes a top strip and a thumb-reach bottom bar. */
+@media (max-width: 56.24rem) {
+  .rms-shell {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .rms-shell__rail {
+    display: none;
+  }
+
+  .rms-shell__top {
+    display: block;
+  }
+
+  .rms-shell__bottom {
+    display: block;
+    position: sticky;
+    bottom: 0;
+    z-index: 5;
+    margin-top: auto;
+  }
+
+  .rms-shell__main {
+    flex: 1;
+    padding-bottom: var(--rms-space-6);
+  }
+}
+
+/* ---------------------------------------------------------------- page */
+
+.rms-page {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.rms-page__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  column-gap: var(--rms-space-10);
+  border-bottom: 1px solid var(--rms-line);
+}
+
+.rms-page__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--rms-space-3);
+  margin-left: auto;
+  padding-bottom: var(--rms-space-1);
+}
+
+.rms-page__body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: var(--rms-space-6);
+  min-width: 0;
+  padding-top: var(--rms-space-6);
+}
+
+.rms-page__body--narrow {
+  max-width: 45rem;
+}
+
+.rms-page__body--flush {
+  padding-top: 0;
+}
+
+/* A comfortable reading and typing width inside a wide page. */
+.rms-narrow {
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 auto;
+  gap: var(--rms-space-6);
+  width: 100%;
+  max-width: 45rem;
+  min-width: 0;
+}
+
+/* When it holds a docked composer it takes the rest of the page, so the dock reaches the bottom. */
+.rms-narrow:has(> .rms-dock) {
+  flex: 1;
+}
+
+/* A plain page with no navigation: sign-in, onboarding, the gallery. */
+.rms-canvas {
+  width: 100%;
+  max-width: 72rem;
+  margin-inline: auto;
+  padding: var(--rms-space-8) var(--rms-page-x) var(--rms-space-10);
+}
+
+.rms-canvas--narrow {
+  max-width: 30rem;
+}
+
+.rms-section {
+  display: grid;
+  gap: var(--rms-space-3);
+  min-width: 0;
+}
+
+/* Something that stays within thumb reach at the bottom of a page (the composer). */
+.rms-dock {
+  position: sticky;
+  bottom: var(--rms-space-4);
+  z-index: 2;
+  margin-top: auto;
+  padding-top: var(--rms-space-4);
+}
+
+@media (max-width: 56.24rem) {
+  .rms-dock {
+    bottom: calc(var(--rms-bottom-bar) + env(safe-area-inset-bottom) + var(--rms-space-3));
+  }
+}
+
+/* ---------------------------------------------------------------- pattern: workbench (conversation beside a preview) */
+
+.rms-workbench {
+  display: grid;
+  grid-template-columns: minmax(0, 35rem) minmax(0, 1fr);
+  grid-template-rows: 1fr auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.rms-workbench__side,
+.rms-workbench__main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  padding-top: var(--rms-space-4);
+}
+
+.rms-workbench__side {
+  grid-row: 1 / span 2;
+  gap: var(--rms-space-4);
+  padding-right: var(--rms-space-6);
+  border-right: 1px solid var(--rms-line);
+}
+
+/* The composer is the last thing in the conversation and rests at the bottom. */
+.rms-workbench__side > .rms-composer:last-child {
+  margin-top: auto;
+}
+
+.rms-workbench__main {
+  gap: var(--rms-space-3);
+  padding-left: var(--rms-space-6);
+}
+
+.rms-workbench__foot {
+  grid-column: 2;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--rms-space-3);
+  padding: var(--rms-space-3) 0 0 var(--rms-space-6);
+}
+
+.rms-workbench__scroll {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rms-space-3);
+  min-width: 0;
+}
+
+/*
+ * With room for both sides, the build screen fills the window and stays put: the
+ * conversation and the preview each scroll on their own, and the composer and the
+ * main actions never leave the bottom edge.
+ */
+@media (min-width: 64rem) {
+  .rms-shell__main:has(.rms-workbench) {
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  .rms-shell__main:has(.rms-workbench) :is(.rms-page, .rms-page__body) {
+    min-height: 0;
+  }
+
+  .rms-workbench {
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+
+  .rms-workbench__side > .rms-conversation,
+  .rms-workbench__scroll {
+    flex: 1;
+    min-height: 0;
+    margin: -0.25rem;
+    padding: 0.25rem;
+    overflow-y: auto;
+    scrollbar-width: thin;
+  }
+}
+
+/* A tablet on its side keeps both, with the conversation as the narrower column. */
+@media (min-width: 64rem) and (max-width: 74.99rem) {
+  .rms-workbench {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  }
+
+  .rms-workbench__side {
+    padding-right: var(--rms-space-4);
+  }
+
+  .rms-workbench__main,
+  .rms-workbench__foot {
+    padding-left: var(--rms-space-4);
+  }
+}
+
+@media (max-width: 63.99rem) {
+  .rms-workbench {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto;
+    row-gap: var(--rms-space-6);
+  }
+
+  .rms-workbench__side {
+    grid-row: auto;
+    padding-right: 0;
+    padding-bottom: var(--rms-space-6);
+    border-right: 0;
+    border-bottom: 1px solid var(--rms-line);
+  }
+
+  .rms-workbench__main {
+    padding-left: 0;
+    padding-top: 0;
+  }
+
+  /* Stacked, the main actions stay in reach at the bottom while the page scrolls under them. */
+  .rms-workbench__foot {
+    grid-column: auto;
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    margin-inline: calc(var(--rms-page-x) * -1);
+    padding: var(--rms-space-3) var(--rms-page-x);
+    border-top: 1px solid var(--rms-line);
+    background: var(--rms-ground);
+  }
+
+  .rms-workbench__foot .rms-button {
+    flex: 1;
+  }
+}
+
+/* On a phone the bottom bar is underneath, so the actions rest on top of it. */
+@media (max-width: 56.24rem) {
+  .rms-workbench__foot {
+    bottom: calc(var(--rms-bottom-bar) + env(safe-area-inset-bottom));
+  }
+}
+
+/* ---------------------------------------------------------------- pattern: dashboard */
+
+.rms-dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rms-space-3);
+  width: 100%;
+  max-width: 56rem;
+  min-width: 0;
+}
+
+.rms-dashboard__head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--rms-space-2) var(--rms-space-3);
+}
+
+.rms-dashboard__foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--rms-space-3);
+  padding-top: var(--rms-space-1);
+}
+
+/* ---------------------------------------------------------------- pattern: list with detail */
+
+.rms-list-detail {
+  display: grid;
+  grid-template-columns: minmax(0, 22rem) minmax(0, 1fr);
+  align-items: start;
+  gap: var(--rms-space-4);
+  min-width: 0;
+}
+
+.rms-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rms-list__item + .rms-list__item {
+  border-top: 1px solid var(--rms-line);
+}
+
+.rms-list__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  column-gap: var(--rms-space-3);
+  width: calc(100% + var(--rms-space-6));
+  min-height: 3.75rem;
+  margin: 1px calc(var(--rms-space-3) * -1);
+  padding: var(--rms-space-2) var(--rms-space-3);
+  border: 0;
+  border-radius: var(--rms-radius-label);
+  background: none;
+  color: var(--rms-ink);
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.rms-list__title {
+  display: block;
+  font-weight: var(--rms-weight-strong);
+  line-height: 1.375rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rms-list__sub {
+  display: block;
+  color: var(--rms-muted);
+  font-size: var(--rms-text-s);
+  font-weight: var(--rms-weight-body);
+  line-height: 1.25rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rms-list__meta {
+  font-weight: var(--rms-weight-heavy);
+  white-space: nowrap;
+}
+
+.rms-list__row .rms-icon {
+  color: var(--rms-action-ink);
+  transition: translate var(--rms-fade);
+}
+
+.rms-list__row:hover .rms-icon {
+  translate: 0.125rem 0;
+}
+
+/* Hovered and chosen rows sit on a tint, so their second line takes the darker grey. */
+.rms-list__row:hover {
+  --rms-muted: var(--rms-muted-on-ground);
+  background: var(--rms-action-wash);
+}
+
+/* The chosen row rests on the ground colour, is named in heavy ink, and its arrow thickens. */
+.rms-list__row[aria-current="true"] {
+  --rms-muted: var(--rms-muted-on-ground);
+  background: var(--rms-ground);
+}
+
+.rms-list__row[aria-current="true"] .rms-list__title {
+  font-weight: var(--rms-weight-heavy);
+}
+
+.rms-list__row[aria-current="true"] .rms-icon {
+  stroke-width: 3;
+}
+
+.rms-list-detail__back {
+  display: none;
+}
+
+@media (max-width: 56.24rem) {
+  .rms-list-detail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .rms-list-detail[data-view="detail"] > .rms-list-detail__list,
+  .rms-list-detail[data-view="list"] > .rms-list-detail__detail {
+    display: none;
+  }
+
+  .rms-list-detail__back {
+    display: block;
+    margin: 0 0 var(--rms-space-2) calc(var(--rms-space-3) * -1);
+  }
+}
+
+.rms-detail-list {
+  display: grid;
+  margin: 0;
+}
+
+.rms-detail-list > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--rms-space-4);
+  min-height: var(--rms-row);
+  padding-block: var(--rms-space-2);
+  align-items: center;
+}
+
+.rms-detail-list > div + div {
+  border-top: 1px solid var(--rms-line);
+}
+
+.rms-detail-list dt {
+  color: var(--rms-muted);
+}
+
+.rms-detail-list dd {
+  margin: 0;
+  font-weight: var(--rms-weight-strong);
+  text-align: right;
+}
+
+/* ---------------------------------------------------------------- pattern: form */
+
+.rms-form {
+  display: grid;
+  gap: var(--rms-space-5);
+  max-width: 36rem;
+  min-width: 0;
+}
+
+.rms-form__fields {
+  display: grid;
+  gap: var(--rms-space-5);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.rms-form__pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  gap: 0 var(--rms-space-4);
+  /* Each label carries the space above it, so a field that wraps under its partner keeps its distance. */
+  margin-top: calc(var(--rms-space-5) * -1);
+}
+
+/* Fields in a pair share rows (label, hint, box, error), so the boxes always line up. */
+.rms-form__pair > .rms-field {
+  grid-row: span 4;
+  grid-template-rows: subgrid;
+  row-gap: 0;
+}
+
+.rms-form__pair .rms-field__label {
+  grid-row: 1;
+  padding-top: var(--rms-space-5);
+}
+
+.rms-form__pair .rms-field__hint {
+  grid-row: 2;
+}
+
+.rms-form__pair :is(.rms-input, .rms-select) {
+  grid-row: 3;
+  margin-top: 0.375rem;
+}
+
+.rms-form__pair .rms-field__error {
+  grid-row: 4;
+  margin-top: 0.375rem;
+}
+
+.rms-form__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--rms-space-3);
+  padding-top: var(--rms-space-1);
+}
+
+@media (max-width: 40rem) {
+  .rms-form__actions {
+    flex-direction: column-reverse;
+  }
+
+  .rms-form__actions .rms-button {
+    width: 100%;
+  }
+}
+
+/* ---------------------------------------------------------------- pattern: report table */
+
+.rms-report__head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--rms-space-2) var(--rms-space-3);
+  margin-bottom: var(--rms-space-2);
+}
+
+.rms-report__source {
+  max-width: 32rem;
+  margin: var(--rms-space-3) 0 0;
+  text-wrap: pretty;
+  color: var(--rms-muted);
+  font-size: var(--rms-text-s);
+  line-height: 1.25rem;
+}
+
+/* ---------------------------------------------------------------- feed (compact rows of changes) */
+
+.rms-feed {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rms-feed__item {
+  display: grid;
+  grid-template-columns: 8.5rem minmax(0, 1fr) auto;
+  align-items: center;
+  justify-items: start;
+  column-gap: var(--rms-space-3);
+  min-height: var(--rms-row);
+  padding-block: 0.375rem;
+  font-size: var(--rms-text-data);
+}
+
+/* Compact rows carry a smaller label so a row stays near 36px. */
+[data-density="compact"] .rms-tag {
+  padding: var(--rms-space-1) var(--rms-space-2);
+  font-size: var(--rms-text-xs);
+}
+
+[data-density="compact"] .rms-tag--outline {
+  padding-block: calc(var(--rms-space-1) - 1.5px);
+}
+
+@media (max-width: 40rem) {
+  .rms-feed__item {
+    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: var(--rms-space-1);
+  }
+
+  .rms-feed__what {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
+
+.rms-feed__item + .rms-feed__item {
+  border-top: 1px solid var(--rms-line);
+}
+
+.rms-feed__what {
+  min-width: 0;
+}
+
+.rms-feed__what b {
+  font-weight: var(--rms-weight-strong);
+}
+
+.rms-feed__when {
+  color: var(--rms-muted);
+  font-size: var(--rms-text-s);
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------- reduced motion */
+
+@media (prefers-reduced-motion: reduce) {
+  .rms-button,
+  .rms-icon-button,
+  .rms-chart__bar,
+  .rms-dialog,
+  .rms-list__row .rms-icon {
+    transition: none;
+  }
+
+  .rms-button:active,
+  .rms-icon-button:active,
+  .rms-chart__press:active .rms-chart__bar {
+    transform: none;
+  }
+
+  .rms-list__row:hover .rms-icon {
+    translate: none;
+  }
+
+  .rms-step[data-state="now"] .rms-step__mark,
+  .rms-spinner,
+  .rms-skeleton {
+    animation: none;
+  }
+}
