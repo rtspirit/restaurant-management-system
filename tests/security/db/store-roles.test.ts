@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { DENIED, type Row, type StoreOpts, asPlatform, outcome, platform, refusal, storeSql } from "../helpers/actors.js";
 import { PARENT_ATTACKS } from "../helpers/attacks.js";
-import { CANARY, MODEL_KEYS, type OrgKey, PARENT_TABLES, ids, roles, schemas } from "../helpers/world.js";
+import { CANARY, CUSTOM_MODEL_KEY, MODEL_KEYS, type OrgKey, PARENT_TABLES, ids, roles, schemas } from "../helpers/world.js";
 
 const A = schemas("a");
 const B = schemas("b");
@@ -51,6 +51,8 @@ describe("exactly what each restaurant role holds, across the whole database", (
       [`${A.live}.sec_note`]: "rawd",
       [`${A.live}.sec_visit`]: "rawd",
       [`${A.live}.sec_ledger`]: "ra",
+      // The custom model, whose table and grants the model compiler made.
+      [`${A.live}.${CUSTOM_MODEL_KEY}`]: "rawd",
     });
   });
 
@@ -62,12 +64,13 @@ describe("exactly what each restaurant role holds, across the whole database", (
       [`${A.draft}.sec_note`]: "rawd",
       [`${A.draft}.sec_visit`]: "rawd",
       [`${A.draft}.sec_ledger`]: "ra",
+      [`${A.draft}.${CUSTOM_MODEL_KEY}`]: "rawd",
     });
   });
 
   it("the Ask role: read on parent and live, and not one write anywhere", async () => {
     const held = await holdings(roles("a").ask);
-    expect(held).toEqual({ ...EVERYONE, ...parentRead("a"), [`${A.live}.sec_note`]: "r", [`${A.live}.sec_visit`]: "r", [`${A.live}.sec_ledger`]: "r" });
+    expect(held).toEqual({ ...EVERYONE, ...parentRead("a"), [`${A.live}.sec_note`]: "r", [`${A.live}.sec_visit`]: "r", [`${A.live}.sec_ledger`]: "r", [`${A.live}.${CUSTOM_MODEL_KEY}`]: "r" });
     expect(Object.values(held).every((v) => v === "r")).toBe(true);
   });
 

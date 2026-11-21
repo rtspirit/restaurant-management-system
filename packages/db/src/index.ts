@@ -39,7 +39,10 @@ let api: Sql | undefined;
 let admin: Sql | undefined;
 
 /** Restaurant-facing connection (login `rms_api`). Sees platform rows only through `withOrg`. */
-export const apiDb = (): Sql => (api ??= open(need("DATABASE_URL")));
+// Sized above the Data API's cap on requests in flight per restaurant (8 by default,
+// RMS_DATA_MAX_INFLIGHT): one restaurant at its cap must leave connections for the others.
+// Ten is also the most a pool may hold here (tests/security checks it): the pooler is shared.
+export const apiDb = (): Sql => (api ??= open(need("DATABASE_URL"), 10));
 
 /** Sign-up, provisioning, jobs, seed, maintainer console (login `rms_admin`). */
 // Sized so a handful of sign-ups at once cannot starve it: onboarding holds one connection for

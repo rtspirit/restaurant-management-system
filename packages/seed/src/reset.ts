@@ -2,7 +2,7 @@
 // restaurants and their users again. Destructive, so it refuses to run anywhere but a local stack
 // unless RMS_ALLOW_RESET=1 is set.
 import { createClient } from "@supabase/supabase-js";
-import { type Sql, newUuid } from "@rms/db";
+import { type Sql, apiDb, newUuid } from "@rms/db";
 import { drainOutbox, recordChange } from "@rms/governance";
 import { LIBRARY } from "@rms/models";
 import { seedDemoBooks } from "./books.js";
@@ -61,20 +61,30 @@ export const checkConnectionIsLocal = (adminSql: Pick<Sql, "options">): Check =>
 };
 
 /**
- * The restaurant-facing connection string must name the same server and database as the admin
+ * The restaurant-facing connection must go to the same server and database as the admin
  * connection the reset is using. Otherwise the reset would rebuild one database and try to load
- * numbers into another.
+ * numbers into another. This compares what the two drivers will REALLY connect to (their parsed
+ * options), not the text of a connection string: a `?port=` or `?host=` in the text changes
+ * where the driver goes without changing what the text appears to say.
  */
-export const checkSameDatabase = (adminSql: Pick<Sql, "options">, apiUrl: string | undefined): Check => {
-  const refuse: Check = { ok: false, reason: "Refusing to reset: DATABASE_URL and DATABASE_ADMIN_URL do not point at the same database." };
-  const host = hostOf(apiUrl);
-  if (!apiUrl || !host) return refuse;
-  const u = new URL(apiUrl);
-  const o = adminSql.options;
-  const adminHost = Array.isArray(o.host) && o.host.length === 1 ? String(o.host[0]).toLowerCase() : null;
-  const adminPort = Array.isArray(o.port) && o.port.length === 1 ? Number(o.port[0]) : null;
-  const same = adminHost === host && adminPort === Number(u.port || 5432) && o.database === decodeURIComponent(u.pathname.slice(1)) && !o.path;
-  return same ? { ok: true } : refuse;
+export const checkSameDatabase = (adminSql: Pick<Sql, "options">, apiSql: Pick<Sql, "options">): Check => {
+  const where = (sql: Pick<Sql, "options">): string | null => {
+    const o = sql.options;
+    const hosts = Array.isArray(o.host) ? o.host.map((h) => String(h).toLowerCase()) : [];
+    const ports = Array.isArray(o.port) ? o.port.map(Number) : [];
+    // The driver sends its extra connection settings AFTER the database name when it connects, so
+    // a `?database=` in a connection string wins over the name in the path. Read it the same way.
+    const override = (o.connection as Record<string, unknown> | undefined)?.database;
+    const database = override ?? o.database;
+    // One host, one port, a named database, no socket path. Anything else is not compared, it is refused.
+    if (hosts.length !== 1 || ports.length !== 1 || !Number.isInteger(ports[0]) || typeof database !== "string" || database === "" || o.path) return null;
+    return JSON.stringify([hosts[0], ports[0], database]);
+  };
+  const admin = where(adminSql);
+  const api = where(apiSql);
+  return admin !== null && admin === api
+    ? { ok: true }
+    : { ok: false, reason: "Refusing to reset: DATABASE_URL and DATABASE_ADMIN_URL do not point at the same database." };
 };
 
 /** Pure. Demo passwords come from DEMO_PASSWORD and must be at least 10 characters. */
@@ -214,7 +224,13 @@ export const resetDemo = async (adminSql: Sql, env: Env = process.env, opts: Res
   // The numbers are loaded through the Data API, which opens its own connection from
   // DATABASE_URL. It must be the same database the reset is about to rebuild.
   if (withSales) {
-    const same = checkSameDatabase(adminSql, process.env.DATABASE_URL);
+    let same: Check;
+    try {
+      // `apiDb()` is the very connection the Data API will use.
+      same = checkSameDatabase(adminSql, apiDb());
+    } catch {
+      same = { ok: false, reason: "Refusing to reset: DATABASE_URL is not set, so the numbers have nowhere to go." };
+    }
     if (!same.ok) throw new Error(same.reason);
   }
 
@@ -234,7 +250,7 @@ export const resetDemo = async (adminSql: Sql, env: Env = process.env, opts: Res
     const [owner] = await adminSql<{ user_id: string }[]>`
       select user_id from platform.members where org_id = ${r.orgUuid} and role = 'owner' order by created_at limit 1`;
     if (!owner) throw new Error(`${r.name} has no owner to record its numbers under`);
-    const loaded = await seedDemoBooks(adminSql, { orgUuid: r.orgUuid, template, ownerUserId: owner.user_id, withSales });
+    const { books: loaded } = await seedDemoBooks(adminSql, { orgUuid: r.orgUuid, template, ownerUserId: owner.user_id, withSales });
     // Giving a restaurant its tables is a change like any other, so it goes on the record:
     // one change set per restaurant, which the maintainer console's feed then shows.
     await adminSql.begin((tx) =>
@@ -248,7 +264,7 @@ export const resetDemo = async (adminSql: Sql, env: Env = process.env, opts: Res
       }),
     );
     if (!loaded) {
-      books.push(`  ${r.name}: tables ready, no numbers loaded.`);
+      books.push(`  ${r.name}: tables, chart of accounts and fiscal calendar ready. No numbers loaded.`);
       continue;
     }
     const posted = loaded.posted.salesDays + loaded.posted.vendorBills + loaded.posted.labourDays + loaded.posted.stockCounts;

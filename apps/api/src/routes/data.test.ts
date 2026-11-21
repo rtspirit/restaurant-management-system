@@ -5,7 +5,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { mintAppToken, mintRunToken } from "@rms/auth";
 import { DATA_ERROR_STATUS, DATA_ROUTES, type DataErrorCode, toPublicId } from "@rms/contracts";
-import { readOnlyStore, run } from "@rms/data";
+import { maxInFlight, readOnlyStore, run } from "@rms/data";
 import { ACTION_KEYS, CANARY_A, CANARY_B, QUERY_KEYS, RUNS, T, type Who, cleanupData, setupData, tenantFor } from "@rms/data/testing";
 import { adminDb, closeAll, newUuid, withStore } from "@rms/db";
 import { requireTestEnv } from "@rms/db/testing";
@@ -902,7 +902,7 @@ describe("Data API", () => {
 
   describe("one restaurant cannot stall the others", () => {
     it("caps requests in flight per restaurant, and B still answers quickly while A is at the cap", async () => {
-      const cap = Number(process.env.RMS_DATA_MAX_INFLIGHT ?? 4);
+      const cap = maxInFlight();
       const target = await insertPool(ownerA, "Held row", 1, { location_id: T.locA1, business_date: "2026-11-07" });
       // Hold a lock on one row, so A's updates to it wait.
       let release!: () => void;

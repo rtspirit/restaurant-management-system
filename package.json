@@ -20,6 +20,7 @@
     "@rms/auth": "workspace:*",
     "@rms/contracts": "workspace:*",
     "@rms/db": "workspace:*",
+    "@rms/models": "workspace:*",
     "@types/node": "26.6.6",
     "hono": "4.13.19",
     "supabase": "3.2.0",

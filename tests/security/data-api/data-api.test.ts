@@ -8,7 +8,7 @@ import { DATA_ERROR_STATUS, DATA_ROUTES, type DataErrorCode, toPublicId } from "
 import api from "../../../apps/api/src/index.js";
 import { holds, platform, sweep } from "../helpers/actors.js";
 import { type ClaimOpts, appToken, bearer, hmacToken, realSecret, runToken, stamped, appClaims } from "../helpers/tokens.js";
-import { CANARY, NAMED_QUERY_KEY, ORG, type OrgKey, ids, orgPublicId, restoreStoreRows } from "../helpers/world.js";
+import { CANARY, CUSTOM_MODEL_KEY, NAMED_QUERY_KEY, ORG, type OrgKey, ids, orgPublicId, restoreStoreRows } from "../helpers/world.js";
 
 const probe = await api.request(DATA_ROUTES.catalog, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
 const STUB = probe.status === 404;
@@ -119,7 +119,7 @@ describe.skipIf(STUB)("Data API: control, the happy path works and returns the c
     const r = await call("a", "catalog", await tok("a"), {});
     expect(r.status).toBe(200);
     const refs = ((r.json.models as { ref: string }[]) ?? []).map((m) => m.ref).sort();
-    expect(refs).toEqual(["parent.jobs", "parent.staff", "sec_note", "sec_visit"]);
+    expect(refs).toEqual(["parent.jobs", "parent.staff", "sec_note", "sec_visit", CUSTOM_MODEL_KEY]);
     expect(r.text).not.toMatch(/\{\{|select |insert /i);
     expect(r.text).not.toContain(ORG.a.prefix);
   });
@@ -213,6 +213,92 @@ describe.skipIf(STUB)("Data API: the restaurant comes from the token only", () =
     } finally {
       await platform()`update platform.app_versions set status = 'published' where id = ${A.readOnlyAppVersion}`;
     }
+  });
+});
+
+// The models above are hand-made stand-ins. This one is the real thing: a model a restaurant
+// designed for itself (`x_` key, pack "custom"), with tables made by the model compiler through
+// `applyChange`. Every wall has to hold for it too.
+describe.skipIf(STUB)("Data API: a model the restaurant designed for itself is fenced like any other", () => {
+  const memo = CUSTOM_MODEL_KEY;
+
+  it("control: each restaurant reads its own memo, and it really is a custom model made by the compiler", async () => {
+    for (const k of ["a", "b"] as const) {
+      const r = await call(k, "query", await tok(k), { model: memo, fields: ["body"] });
+      expect(r.status).toBe(200);
+      expect(r.json.rows).toEqual([{ body: `memo ${CANARY[k]} live` }]);
+    }
+    const rows = await platform()`
+      select m.org_id, m.kind, m.status, m.definition->>'pack' as pack,
+             (select count(*)::int from platform.org_model_changes c where c.org_model_id = m.id and c.change->>'op' = 'create_custom_model' and c.applied_live_at is not null) as made
+      from platform.org_models m where m.key = ${memo} and m.org_id = any(${[ORG.a.uuid, ORG.b.uuid]}) order by m.org_id`;
+    expect(rows.map((r) => [r.kind, r.status, r.pack, r.made])).toEqual([["custom", "live", "custom", 1], ["custom", "live", "custom", 1]]);
+  });
+
+  it("A's token finds nothing when it asks for B's memo by id, and cannot change or remove it", async () => {
+    const token = await tok("a");
+    const r = await call("a", "query", token, { model: memo, where: { field: "id", op: "eq", value: B.memoRow } });
+    expect(r.status).toBe(200);
+    expect(r.json.rows).toEqual([]);
+    expectRefused(await call("a", "batch", token, { ops: [{ op: "update", model: memo, id: B.memoRow, values: { body: "taken over" } }] }), ["not_found"]);
+    expectRefused(await call("a", "batch", token, { ops: [{ op: "delete", model: memo, id: B.memoRow }] }), ["not_found"]);
+    const b = await call("b", "query", await tok("b"), { model: memo, fields: ["body"] });
+    expect(b.json.rows).toEqual([{ body: `memo ${CANARY.b} live` }]);
+  });
+
+  it("B's table cannot be named, with or without its store in front", async () => {
+    const token = await tok("a");
+    for (const model of [`${ORG.b.prefix}.${memo}`, `${ORG.b.prefix}_draft.${memo}`, `"${ORG.b.prefix}"."${memo}"`]) {
+      expectRefused(await call("a", "query", token, { model }), ["invalid_request", "forbidden_model", "not_found"]);
+      expectRefused(await call("a", "batch", token, { ops: [{ op: "insert", model, values: { body: "x" } }] }), ["invalid_request", "forbidden_model", "not_found"]);
+    }
+  });
+
+  it("live and draft stay apart: a mini-app token reads the live memo, a build token the draft one", async () => {
+    expect((await call("a", "query", await tok("a"), { model: memo, fields: ["body"] })).json.rows).toEqual([{ body: `memo ${CANARY.a} live` }]);
+    const build = await runToken("a");
+    expect((await call("a", "query", build, { model: memo, fields: ["body"] })).json.rows).toEqual([{ body: `memo ${CANARY.a} draft` }]);
+    const w = await call("a", "batch", build, { ops: [{ op: "insert", model: memo, values: { body: "written by a build" } }] });
+    expect(w.status).toBe(200);
+    expect((await call("a", "query", await tok("a"), { model: memo, fields: ["body"] })).json.rows).toEqual([{ body: `memo ${CANARY.a} live` }]);
+  });
+
+  it("the manifest and the role decide: a mini-app that does not list it, and staff who may only read it", async () => {
+    const reader = await appToken("a", { app: A.readOnlyApp, ver: A.readOnlyAppVersion });
+    expectRefused(await call("a", "query", reader, { model: memo }), ["forbidden_model"]);
+    expectRefused(await call("a", "batch", reader, { ops: [{ op: "insert", model: memo, values: { body: "x" } }] }), ["forbidden_model"]);
+    const staff = await tok("a", { role: "staff", loc: [A.loc1] });
+    expect((await call("a", "query", staff, { model: memo, fields: ["body"] })).json.rows).toEqual([{ body: `memo ${CANARY.a} live` }]);
+    for (const op of [{ op: "insert", model: memo, values: { body: "x" } }, { op: "update", model: memo, id: A.memoRow, values: { body: "x" } }, { op: "delete", model: memo, id: A.memoRow }]) {
+      expectRefused(await call("a", "batch", staff, { ops: [op] }), ["forbidden_role"]);
+    }
+  });
+
+  it("values are data: SQL in a filter finds nothing, and SQL in a written value is stored as text", async () => {
+    const token = await tok("a");
+    for (const value of ["' or '1'='1", `x' union select body from ${ORG.b.prefix}.${memo} --`, `'; drop table ${memo}; --`]) {
+      const r = await call("a", "query", token, { model: memo, where: { field: "body", op: "eq", value } });
+      expect(r.status).toBe(200);
+      expect(r.json.rows).toEqual([]);
+    }
+    const body = `'); drop table ${memo}; --`;
+    const w = await call("a", "batch", token, { ops: [{ op: "insert", model: memo, values: { body } }] });
+    expect(w.status).toBe(200);
+    const id = (w.json.results as { id: string }[])[0]?.id as string;
+    const r = await call("a", "query", token, { model: memo, where: { field: "id", op: "eq", value: id }, fields: ["body"] });
+    expect(r.json.rows).toEqual([{ body }]);
+    await call("a", "batch", token, { ops: [{ op: "delete", model: memo, id }] });
+    // Still there, still B's own.
+    expect((await call("b", "query", await tok("b"), { model: memo, fields: ["body"] })).json.rows).toEqual([{ body: `memo ${CANARY.b} live` }]);
+  });
+
+  it("an identity name or a server-owned field is not a way in", async () => {
+    const token = await tok("a");
+    for (const key of ["org_id", "org", "schema", "role", "env"]) {
+      expectRefused(await call("a", "query", token, { model: memo, [key]: ORG.b.uuid }), ["invalid_request"]);
+      expectRefused(await call("a", "batch", token, { ops: [{ op: "insert", model: memo, values: { body: "x", [key]: ORG.b.uuid } }] }), ["invalid_request", "forbidden_field"]);
+    }
+    expectRefused(await call("a", "batch", token, { ops: [{ op: "insert", model: memo, values: { body: "x", created_by: "user:someone-else" } }] }), ["invalid_request"]);
   });
 });
 

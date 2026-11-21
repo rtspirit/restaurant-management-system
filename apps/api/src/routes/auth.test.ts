@@ -328,7 +328,11 @@ describe("sign-up and onboarding", () => {
   it("at the restaurant cap: 503 and nothing is created", async () => {
     const h = await signUp();
     const [{ n }] = (await adminDb()`select platform.restaurant_count() as n`) as unknown as [{ n: number }];
-    env.RMS_MAX_RESTAURANTS = String(n);
+    // Other test files make and remove restaurants in this same database while this runs, so
+    // "exactly the count right now" is a moving target (it made this test fail now and then).
+    // The restaurants this file made earlier are still here, so a cap of one is already reached.
+    expect(n).toBeGreaterThanOrEqual(1);
+    env.RMS_MAX_RESTAURANTS = "1";
     const before = stubCalls.length;
     const res = await onboard(h.token);
     expect(res.status).toBe(503);
