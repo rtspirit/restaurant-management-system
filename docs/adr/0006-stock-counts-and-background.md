@@ -19,3 +19,5 @@ This widens today's scope past the three packs in `03-demo-build.md` section 3. 
 The approved Front of House sketch used a warm off-white ground (`#F4EEE6`), which the design check flags as the default look of AI-made screens. Rahul chose to move it to a more distinct tint. Everything else about Front of House stays. The designer picks the hue, shows a comparison on the gallery page, and Rahul confirms it at C1.
 
 The C0 sketch files keep the old ground as a record of what was picked from.
+
+**Decided 2026-11-21:** Rahul picked **slate `#DEE7F2`** (the blue-grey of a menu board) over the alternative, fig `#EFE5EF`. Neutrals derived from it: line `#CAD6E2`, bar `#A4B3C3`, field edge `#76828E`, secondary text `#4C5661` on the ground and `#616C77` on cards.
