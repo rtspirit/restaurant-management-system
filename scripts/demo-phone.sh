@@ -26,6 +26,10 @@ APPS_DIR="$ROOT/apps/apps-host"
 
 say() { printf '%s\n' "$*"; }
 die() { printf 'Phone mode: %s\n' "$*" >&2; exit 1; }
+# After start has written its state: keep the logs and state, and say how to put things back.
+fail() { printf 'Phone mode: %s\nNothing was cleaned up. Run: scripts/demo-phone.sh stop\n' "$*" >&2; exit 1; }
+# Every setting phone mode exports. "stop" rebuilds with all of them removed.
+PHONE_VARS="RMS_LOCAL_DEMO WEB_URL APPS_URL RMS_LOCAL_DEMO_ORIGINS WEB_EXTRA_ORIGINS NEXT_PUBLIC_API_URL NEXT_PUBLIC_SUPABASE_URL API_HOST ADMIN_URL PORT HOSTNAME"
 # Reads one NON-secret setting from .env.local. Never used for keys or passwords.
 local_setting() { [ -f "$ENV_LOCAL" ] && sed -n "s/^$1=//p" "$ENV_LOCAL" | tail -1 || true; }
 host_of() { printf '%s' "$1" | sed -E 's#^https?://\[?([^]/:]+)\]?.*#\1#'; }
@@ -75,27 +79,45 @@ kill_tree() {
   kill "$pid" 2>/dev/null || true
 }
 
+started_at() { ps -o lstart= -p "$1" 2>/dev/null | sed 's/  */ /g; s/^ //; s/ $//' || true; }
+
+# True only for a process this script started: the recorded pid still has the recorded start
+# time (so it is not a recycled pid) and runs from a folder inside this checkout.
+is_ours() { # pidfile
+  local f="$1" pid want got dir
+  pid="$(cat "$f" 2>/dev/null || true)"; want="$(cat "${f%.pid}.started" 2>/dev/null || true)"
+  [ -n "$pid" ] && [ -n "$want" ] || return 1
+  got="$(started_at "$pid")"
+  [ -n "$got" ] && [ "$got" = "$want" ] || return 1
+  dir="$(folder_of "$pid")"
+  case "$dir" in "$ROOT"|"$ROOT"/*) return 0 ;; esac
+  return 1
+}
+
 stop_all() {
-  [ -d "$STATE" ] || { rm -f "$ENV_PHONE"; say "Phone mode is not running."; return 0; }
-  local f pid port
+  if [ ! -d "$STATE" ] && [ ! -f "$ENV_PHONE" ]; then say "Phone mode is not running."; return 0; fi
+  local f name
   for f in "$STATE"/*.pid; do
     [ -f "$f" ] || continue
-    pid="$(cat "$f")"; kill_tree "$pid"
-    port="$(cat "${f%.pid}.port" 2>/dev/null || true)"
-    if [ -n "$port" ]; then pid="$(listener "$port")"; [ -n "$pid" ] && kill_tree "$pid"; fi
+    name="$(basename "${f%.pid}")"
+    # Never by port: only a process this script started, checked by pid, start time and folder.
+    if is_ours "$f"; then kill_tree "$(cat "$f")"; else say "  $name: already gone (or not ours), left alone."; fi
   done
   rm -rf "$STATE" "$ENV_PHONE"
-  say "Phone mode stopped. Nothing from this laptop is open to the Wi-Fi any more (Supabase is left as it was)."
+  say "Phone mode stopped. The phone can no longer reach RMS (Supabase is left as it was)."
   if [ "${NO_REBUILD:-}" != 1 ]; then
     say "Rebuilding the normal (laptop-only) web app and console, about a minute..."
-    (cd "$ROOT" && pnpm --filter @rms/web build >/dev/null 2>&1 && pnpm --filter @rms/admin build >/dev/null 2>&1) || die "the normal rebuild failed: run pnpm build"
+    local unset_args="" v
+    for v in $PHONE_VARS; do unset_args="$unset_args -u $v"; done
+    # shellcheck disable=SC2086
+    (cd "$ROOT" && env $unset_args pnpm --filter @rms/web build >/dev/null 2>&1 && env $unset_args pnpm --filter @rms/admin build >/dev/null 2>&1) || die "the normal rebuild failed: run pnpm build"
     say "Done. Start the normal servers again as usual."
   fi
 }
 
 status() {
   if [ ! -f "$ENV_PHONE" ]; then say "Phone mode is not running."; return 0; fi
-  say "Phone mode settings:"; sed -n 's/^\(WEB_URL\|APPS_URL\)=/  \1=/p' "$ENV_PHONE"
+  say "Phone mode settings:"; sed -nE 's/^(WEB_URL|APPS_URL)=/  \1=/p' "$ENV_PHONE"
   local f
   for f in "$STATE"/*.port; do [ -f "$f" ] || continue; local p; p="$(cat "$f")"; say "  $(basename "${f%.port}"): port $p $([ -n "$(listener "$p")" ] && echo up || echo DOWN)"; done
 }
@@ -110,6 +132,7 @@ start_bg() { # name port dir cmd... (environment comes from the caller)
     echo $! >"$STATE/$name.pid"
   )
   echo "$port" >"$STATE/$name.port"
+  started_at "$(cat "$STATE/$name.pid")" >"$STATE/$name.started"
 }
 
 start() {
@@ -173,16 +196,16 @@ start() {
 
   # 5. Build. The web app bakes the phone addresses in; the console stays laptop-only.
   say "Building the web app for the phone (about a minute)..."
-  (cd "$ROOT" && pnpm turbo run build --filter='@rms/web^...' --filter='@rms/admin^...' --output-logs=errors-only >"$STATE/build.log" 2>&1) || die "building the packages failed. See .phone-mode/build.log"
-  (cd "$ROOT" && pnpm --filter @rms/web build >>"$STATE/build.log" 2>&1) || die "building the web app failed. See .phone-mode/build.log"
+  (cd "$ROOT" && pnpm turbo run build --filter='@rms/web^...' --filter='@rms/admin^...' --output-logs=errors-only >"$STATE/build.log" 2>&1) || fail "building the packages failed. See .phone-mode/build.log"
+  (cd "$ROOT" && pnpm --filter @rms/web build >>"$STATE/build.log" 2>&1) || fail "building the web app failed. See .phone-mode/build.log"
   if [ "$CONSOLE_PORT" != off ]; then
-    (cd "$ROOT" && NEXT_PUBLIC_API_URL="http://127.0.0.1:$API_PORT" NEXT_PUBLIC_SUPABASE_URL="$sb_local" pnpm --filter @rms/admin build >>"$STATE/build.log" 2>&1) || die "building the console failed. See .phone-mode/build.log"
+    (cd "$ROOT" && NEXT_PUBLIC_API_URL="http://127.0.0.1:$API_PORT" NEXT_PUBLIC_SUPABASE_URL="$sb_local" pnpm --filter @rms/admin build >>"$STATE/build.log" 2>&1) || fail "building the console failed. See .phone-mode/build.log"
   fi
 
   # 6. Start. API and web listen on every address; the console on this laptop only.
   # The API keeps WEB_URL on the laptop address: the build preview (ADR 0008) takes its shell
   # origin from it and stays on this laptop. The phone address reaches the API as an extra origin.
-  WEB_URL="http://$laptop_host:$WEB_PORT" WEB_EXTRA_ORIGINS="$web_origin" ADMIN_URL="http://$console_host:$CONSOLE_PORT" API_PORT="$API_PORT" \
+  WEB_URL="http://$laptop_host:$WEB_PORT" WEB_EXTRA_ORIGINS="$web_origin" ADMIN_URL="http://$console_host:$CONSOLE_PORT" API_PORT="$API_PORT" API_HOST=0.0.0.0 \
     start_bg api "$API_PORT" "$ROOT/apps/api" "$ROOT/apps/api/node_modules/.bin/tsx" --env-file=../../.env.local src/dev.ts
   start_bg web "$WEB_PORT" "$ROOT/apps/web" "$ROOT/apps/web/node_modules/.bin/next" start --port "$WEB_PORT" --hostname 0.0.0.0
   if [ "$CONSOLE_PORT" != off ]; then
@@ -195,8 +218,8 @@ start() {
     PORT="$APPS_PORT" HOSTNAME=0.0.0.0 start_bg apps "$APPS_PORT" "$APPS_DIR" pnpm start
   fi
 
-  wait_for "$api_url/health" 60 || { stop_all >/dev/null 2>&1 || true; die "the API did not start. See .phone-mode/api.log"; }
-  wait_for "$web_origin/sign-in" 60 || { NO_REBUILD=1 stop_all >/dev/null 2>&1 || true; die "the web app did not start. See .phone-mode/web.log"; }
+  wait_for "$api_url/health" "${START_WAIT:-60}" || fail "the API did not start. See .phone-mode/api.log"
+  wait_for "$web_origin/sign-in" "${START_WAIT:-60}" || fail "the web app did not start. See .phone-mode/web.log"
 
   say ""
   say "On the phone (same Wi-Fi), open:  $web_origin"
