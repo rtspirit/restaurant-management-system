@@ -21,7 +21,7 @@ Restaurant management system with agent-built mini-apps. Personal project of Rah
 - **Never create, delete or rename a Vercel or Supabase project** unless Rahul said yes in this session.
 - **No secrets in the repo.** Keys live in `.env.local` (git-ignored) and in Vercel and Supabase settings. Never print a secret in logs, tests or chat.
 - **No real restaurant data.** Everything is seeded and fictional.
-- **OpenAI only for in-product agents.** Model names come from `RMS_BUILD_MODEL`, `RMS_ASK_MODEL`, `RMS_EMBED_MODEL`. Never hard-code a model name.
+- **In-product agents call models through OpenRouter** (Rahul's decision, ADR 0007), with one key, `OPENROUTER_API_KEY`, and the base address in `RMS_LLM_BASE_URL`. Model names come from `RMS_BUILD_MODEL`, `RMS_ASK_MODEL`, `RMS_EMBED_MODEL`. Never hard-code a model name or a provider address. The key never enters a sandbox, a mini-app or a browser.
 - **Security is by construction** (plan 4.11):
   - The restaurant comes from the signed token. Never from a request body, query, path or header.
   - Mini-app code never gets database access, credentials or raw SQL.
