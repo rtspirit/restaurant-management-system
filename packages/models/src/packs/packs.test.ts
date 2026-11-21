@@ -71,11 +71,20 @@ describe("every definition parses with its schema", () => {
         ...["unit", "tax_rate", "fiscal_calendar", "fiscal_period", "fiscal_week", "day_part", "revenue_centre", "sales_category", "payment_type", "reason_code"],
         ...["sales_day", "sales_category_day", "payment_day", "adjustment_day", "gift_card_activity", "delivery_payout", "delivery_payout_line", "cash_count", "paid_in_out", "deposit"],
         ...["account", "journal_entry", "journal_line", "posting_rule", "budget"],
-        ...["vendor", "vendor_bill", "vendor_bill_line", "labour_day"],
+        ...["vendor", "vendor_bill", "vendor_bill_line", "item", "stock_count", "stock_count_line", "labour_day"],
       ].sort(),
     );
-    expect(namedQueries.map((q) => q.key).sort()).toEqual(["daily_sales_summary", "delivery_payout_reconciliation", "prime_cost_by_week", "sales_by_day", "sales_by_location", "weekly_pnl"]);
-    expect(namedActions.map((a) => a.key).sort()).toEqual(["post_labour_day", "post_sales_day", "post_vendor_bill", "seed_chart_of_accounts"]);
+    expect(namedQueries.map((q) => q.key).sort()).toEqual([
+      "cost_of_goods_by_week",
+      "daily_sales_summary",
+      "delivery_payout_reconciliation",
+      "prime_cost_by_week",
+      "sales_by_day",
+      "sales_by_location",
+      "stock_on_hand",
+      "weekly_pnl",
+    ]);
+    expect(namedActions.map((a) => a.key).sort()).toEqual(["post_labour_day", "post_sales_day", "post_stock_count", "post_vendor_bill", "seed_chart_of_accounts", "seed_fiscal_calendar"]);
   });
 
   it.each(models.map((m) => [m.key, m] as const))("model %s parses and is already in its parsed form", (_key, m) => {
@@ -120,7 +129,7 @@ describe("keys and packs", () => {
 
   it("each model is in the pack the brief names", () => {
     const packOf = (key: string) => model(key).pack;
-    for (const key of ["vendor", "vendor_bill", "vendor_bill_line"]) expect(packOf(key)).toBe("inventory");
+    for (const key of ["vendor", "vendor_bill", "vendor_bill_line", "item", "stock_count", "stock_count_line"]) expect(packOf(key)).toBe("inventory");
     expect(packOf("labour_day")).toBe("labour");
     for (const key of ["account", "journal_entry", "journal_line", "posting_rule", "budget"]) expect(packOf(key)).toBe("finance");
     for (const key of ["sales_day", "sales_category_day", "payment_day", "adjustment_day", "gift_card_activity", "delivery_payout", "delivery_payout_line", "cash_count", "paid_in_out", "deposit"]) expect(packOf(key)).toBe("sales");
@@ -162,7 +171,7 @@ describe("plain words, because the agent picks models by meaning", () => {
 
   it("every model another model points at has a label field", () => {
     const targets = new Set(models.flatMap((m) => m.fields.flatMap((f) => (f.type === "ref" ? [f.model] : []))));
-    const needNone = new Set(["sales_day", "delivery_payout", "vendor_bill"]);
+    const needNone = new Set(["sales_day", "delivery_payout", "vendor_bill", "stock_count"]);
     for (const key of targets) if (!needNone.has(key)) expect(model(key).labelField, key).toBeDefined();
   });
 });

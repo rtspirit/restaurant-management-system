@@ -19,6 +19,10 @@ const EXPENSE_SECTIONS = ["cost_of_goods", "labour", "controllable", "occupancy"
 
 export const JOB_GROUPS = ["front_of_house", "back_of_house", "management"];
 
+/** What stock is grouped by. Food, beverage and alcohol are "food and drink cost". Supplies are not. */
+export const COST_GROUPS = ["food", "beverage", "alcohol", "supplies"];
+export const FOOD_AND_DRINK_GROUPS = ["food", "beverage", "alcohol"];
+
 /**
  * The pieces of the daily numbers that posting rules map to accounts.
  *   net_sales            credit, chosen by sales category or its broad group
@@ -30,8 +34,11 @@ export const JOB_GROUPS = ["front_of_house", "back_of_house", "management"];
  *   vendor_bill_payable  credit, what is owed to vendors
  *   labour_cost          debit, chosen by job group
  *   labour_payable       credit, wages owed
+ *   stock_on_hand        the stock account: debit when a count shows more stock, credit when less
+ *   stock_cost           the cost account for a cost group: the other side of a stock change
+ *   stock_opening        credit, the value of the very first stock count (an opening balance)
  */
-export const POSTING_PARTS = ["net_sales", "sales_tax", "tips", "gift_cards", "service_charges", "payment", "vendor_bill_payable", "labour_cost", "labour_payable"];
+export const POSTING_PARTS = ["net_sales", "sales_tax", "tips", "gift_cards", "service_charges", "payment", "vendor_bill_payable", "labour_cost", "labour_payable", "stock_on_hand", "stock_cost", "stock_opening"];
 
 /** Domain rule 4: these can only ever be posted to a liability account. Never revenue. */
 export const LIABILITY_ONLY_PARTS = ["sales_tax", "tips", "gift_cards"];
@@ -42,8 +49,9 @@ const account: ModelInput = {
   version: 1,
   name: "Account",
   description:
-    "One line of the restaurant's chart of accounts, such as Food sales, Food cost, Front of house wages, Sales tax owed or Rent. Its type and report section decide where it shows on the profit and loss report and whether it counts toward prime cost.",
+    "One line of the restaurant's chart of accounts, such as Food sales, Food cost, Front of house wages, Sales tax owed or Rent. Its type and report section decide where it shows on the profit and loss report and whether it counts toward prime cost. Retire one by marking it not in use: it is never removed.",
   locationScoped: false,
+  softDelete: false,
   defaultAccess: ACCESS.ownerWritesStaffReads,
   labelField: "name",
   unique: [["code"]],
@@ -57,7 +65,7 @@ const account: ModelInput = {
     }),
     oneOf("report_section", "Report section", REPORT_SECTIONS, {
       required: true,
-      description: "Where the account shows on the profit and loss report. Prime cost is cost_of_goods plus labour. Asset, liability and equity accounts are balance_sheet.",
+      description: "Where the account shows on the profit and loss report. cost_of_goods is food and drink cost. Prime cost is cost_of_goods plus labour. Asset, liability and equity accounts are balance_sheet.",
     }),
     text("description", "What it is for", { maxLength: 280 }),
     boolean("active", "In use", { required: true }),
@@ -92,11 +100,11 @@ const journalEntry: ModelInput = {
   fields: [
     businessDate("The restaurant day the entry counts in. Its week and period come from the fiscal calendar. Nothing can be dated in a closed period."),
     text("memo", "What it is", { required: true, maxLength: 200 }),
-    oneOf("origin", "Made from", ["manual", "sales_day", "vendor_bill", "labour_day", "reversal", "opening_balance", "other"], {
+    oneOf("origin", "Made from", ["manual", "sales_day", "vendor_bill", "labour_day", "stock_count", "reversal", "opening_balance", "other"], {
       required: true,
-      description: "What the entry records. Entries made by posting a day of sales, a bill or a day of staff cost say so here.",
+      description: "What the entry records. Entries made by posting a day of sales, a bill, a day of staff cost or a stock count say so here.",
     }),
-    text("origin_id", "Made from record", { maxLength: 64, description: "The id of the daily sales, vendor bill or staff cost row this entry was posted from." }),
+    text("origin_id", "Made from record", { maxLength: 64, description: "The id of the daily sales, vendor bill, staff cost or stock count row this entry was posted from." }),
     ref("reverses", "Reverses entry", "journal_entry", { description: "The earlier entry this one cancels. Each entry can be reversed once." }),
   ],
   rules: [
@@ -156,20 +164,22 @@ const postingRule: ModelInput = {
   version: 1,
   name: "Posting rule",
   description:
-    "Says which account each part of the daily numbers goes to: net sales by category, sales tax, tips, gift cards, service charges, each kind of payment, vendor bills and staff cost. Sales tax, tips and gift cards can only go to accounts for money owed, never to sales.",
+    "Says which account each part of the daily numbers goes to: net sales by category, sales tax, tips, gift cards, service charges, each kind of payment, vendor bills, staff cost and stock counts. Sales tax, tips and gift cards can only go to accounts for money owed, never to sales. Retire one by marking it not in use: it is never removed.",
   locationScoped: false,
+  softDelete: false,
   defaultAccess: ACCESS.ownerOnly,
   indexes: [["part"]],
   fields: [
     oneOf("part", "What is being posted", POSTING_PARTS, {
       required: true,
-      description: "net_sales, sales_tax, tips, gift_cards, service_charges and the payable parts are credits. payment and labour_cost are debits. gift_cards is a credit when sold and a debit when redeemed.",
+      description: "net_sales, sales_tax, tips, service_charges and the payable parts are credits. payment and labour_cost are debits. gift_cards is a credit when sold, a debit when redeemed. The stock parts are used when a stock count is posted.",
     }),
     ref("sales_category", "Only for this sales category", "sales_category", { description: "For net_sales. A rule for one category wins over a rule for its broad group." }),
     oneOf("sales_group", "Only for this broad sales group", SALES_GROUPS, { description: "For net_sales. Leave both this and the category empty for the catch-all rule." }),
     ref("payment_type", "Only for this payment type", "payment_type", { description: "For payment. A rule for one payment type wins over a rule for its kind." }),
     oneOf("payment_kind", "Only for this kind of payment", PAYMENT_KINDS, { description: "For payment. Leave both this and the payment type empty for the catch-all rule." }),
     oneOf("job_group", "Only for this job group", JOB_GROUPS, { description: "For labour_cost. Leave empty for the catch-all rule." }),
+    oneOf("cost_group", "Only for this stock group", COST_GROUPS, { description: "For stock_cost. Leave empty for the catch-all rule." }),
     ref("account", "Account", "account", { required: true }),
     boolean("active", "In use", { required: true }),
     text("note", "Note", { maxLength: 280 }),
@@ -178,6 +188,7 @@ const postingRule: ModelInput = {
     check("posting_rule_sales_selectors", onlyFor("net_sales", "sales_category", "sales_group"), "A sales category or sales group can only be set on a net sales rule."),
     check("posting_rule_payment_selectors", onlyFor("payment", "payment_type", "payment_kind"), "A payment type or kind can only be set on a payment rule."),
     check("posting_rule_job_selector", onlyFor("labour_cost", "job_group"), "A job group can only be set on a staff cost rule."),
+    check("posting_rule_stock_selector", onlyFor("stock_cost", "cost_group"), "A stock group can only be set on a stock cost rule."),
     // Domain rule 4. Tips, sales tax and unredeemed gift cards are money owed. Never revenue.
     accountTypeFor("posting_rule_owed_money_is_liability", LIABILITY_ONLY_PARTS, ["liability"], "Sales tax, tips and gift cards are money the restaurant owes. They can only be posted to a liability account, never to sales."),
     accountTypeFor("posting_rule_net_sales_is_revenue", ["net_sales"], ["revenue"], "Net sales must be posted to a revenue account."),
@@ -185,6 +196,9 @@ const postingRule: ModelInput = {
     accountTypeFor("posting_rule_payment_is_asset", ["payment"], ["asset"], "Payments must be posted to an asset account such as cash or card payments in transit."),
     accountTypeFor("posting_rule_payables_are_liabilities", ["vendor_bill_payable", "labour_payable"], ["liability"], "Bills and wages owed must be posted to a liability account."),
     accountTypeFor("posting_rule_labour_is_expense", ["labour_cost"], ["expense"], "Staff cost must be posted to an expense account."),
+    accountTypeFor("posting_rule_stock_is_asset", ["stock_on_hand"], ["asset"], "Stock on hand must be posted to an asset account."),
+    accountTypeFor("posting_rule_stock_cost_is_expense", ["stock_cost"], ["expense"], "A change in stock must be posted to a cost account."),
+    accountTypeFor("posting_rule_stock_opening_is_equity", ["stock_opening"], ["equity"], "Opening stock must be posted to an equity account."),
   ],
 };
 

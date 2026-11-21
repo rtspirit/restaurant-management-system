@@ -1,11 +1,16 @@
 import { ACCESS, boolean, businessDate, check, date, decimal, f, gte, integer, lit, money, oneOf, quantity, ref, text } from "./helpers.js";
 import type { ModelInput } from "./helpers.js";
-import { JOB_GROUPS } from "./finance.js";
+import { COST_GROUPS, JOB_GROUPS } from "./finance.js";
 
 /**
- * The cost side the accounts mini-app needs today (ADR 0002): vendors and their bills from the
- * Inventory pack, and daily staff cost from the Labour pack. The rest of those packs comes later
- * and will reuse these models.
+ * The cost side the accounts mini-app needs today (ADR 0002): vendors, their bills, stock items
+ * and stock counts from the Inventory pack, and daily staff cost from the Labour pack. The rest of
+ * those packs comes later and will reuse these models.
+ *
+ * Food and drink cost is what was USED, not what was bought (docs/plan/02 section 1.7):
+ *   used = opening stock + purchases - closing stock
+ * Bills post purchases to the cost accounts. Each final stock count then posts the change in
+ * stock value, which moves the difference between the cost accounts and the stock account.
  */
 
 const vendor: ModelInput = {
@@ -13,8 +18,9 @@ const vendor: ModelInput = {
   pack: "inventory",
   version: 1,
   name: "Vendor",
-  description: "A company the restaurant buys from, such as a produce supplier, a meat supplier, a drinks distributor or a linen service, with its contact details and how many days the restaurant has to pay.",
+  description: "A company the restaurant buys from, such as a produce supplier, a meat supplier, a drinks distributor or a linen service, with its contact details and how many days the restaurant has to pay. Retire one by marking it not in use: it is never removed.",
   locationScoped: false,
+  softDelete: false,
   defaultAccess: ACCESS.ownerWritesStaffReads,
   labelField: "name",
   unique: [["name"]],
@@ -67,6 +73,7 @@ const vendorBillLine: ModelInput = {
     integer("line_number", "Line"),
     text("description", "What was bought", { required: true, maxLength: 200 }),
     ref("account", "Cost account", "account", { required: true, description: "The cost category this line is coded to." }),
+    oneOf("cost_group", "Stock group", COST_GROUPS, { description: "Which kind of stock this purchase is: food, beverage, alcohol or supplies. For the record: reports split purchases by the cost account." }),
     quantity("quantity", "Quantity", { description: "How much was bought, with its unit, for example 12 case or 40 kg." }),
     money("amount", "Amount", { required: true, description: "The cost of this line. Negative for a credit." }),
   ],
@@ -79,6 +86,77 @@ const vendorBillLine: ModelInput = {
       allowed: ["expense", "asset"],
       message: "A bill line must be coded to a cost account or a stock account.",
     },
+  ],
+};
+
+const item: ModelInput = {
+  key: "item",
+  pack: "inventory",
+  version: 1,
+  name: "Stock item",
+  description:
+    "Anything the restaurant keeps in stock and counts: an ingredient, a drink, a bottle of wine, a box of gloves. Each has a stock group (food, beverage, alcohol or supplies), the unit it is counted in and what one unit costs now. Retire one by marking it not in use: it is never removed.",
+  locationScoped: false,
+  softDelete: false,
+  defaultAccess: ACCESS.ownerWritesStaffReads,
+  labelField: "name",
+  unique: [["name"]],
+  indexes: [["cost_group"]],
+  fields: [
+    text("name", "Name", { required: true, maxLength: 120 }),
+    oneOf("cost_group", "Stock group", COST_GROUPS, { required: true, description: "food, beverage and alcohol make up food and drink cost. supplies are things like gloves and cleaning products." }),
+    ref("base_unit", "Counted in", "unit", { required: true, description: "The unit this item is counted and costed in, for example kg, bottle or case." }),
+    money("unit_cost", "Cost per unit", { required: true, description: "What one unit costs now. A stock count keeps its own copy, so changing this never changes a past count." }),
+    boolean("active", "In use", { required: true }),
+  ],
+  rules: [check("item_unit_cost_not_negative", gte(f("unit_cost"), lit(0)), "The cost per unit cannot be negative.")],
+};
+
+const stockCount: ModelInput = {
+  key: "stock_count",
+  pack: "inventory",
+  version: 1,
+  name: "Stock count",
+  description:
+    "One physical count of the stock at one location, taken at the close of a business date. A count is a draft until it is marked final. Only final counts are used: the change in stock value between two final counts turns purchases into what was really used.",
+  locationScoped: true,
+  defaultAccess: ACCESS.everyoneWrites,
+  unique: [["location_id", "counted_on"]],
+  indexes: [["counted_on"], ["status"]],
+  fields: [
+    {
+      type: "business_date",
+      key: "counted_on",
+      label: "Counted on",
+      required: true,
+      description: "The restaurant day the count was taken at the close of. A count at Sunday close is the closing stock of that week and the opening stock of the next.",
+    },
+    oneOf("status", "Status", ["draft", "final"], { required: true, description: "draft: still being counted. final: finished. Only final counts reach reports and the books." }),
+    text("note", "Note", { maxLength: 500 }),
+  ],
+};
+
+const stockCountLine: ModelInput = {
+  key: "stock_count_line",
+  pack: "inventory",
+  version: 1,
+  name: "Stock count line",
+  description: "One item on a stock count: how much of it was counted, with its unit, what one unit cost at the time, and what that stock is worth. The lines of a count add up to the value of the stock on hand.",
+  locationScoped: true,
+  defaultAccess: ACCESS.everyoneWrites,
+  unique: [["stock_count", "item"]],
+  indexes: [["item"]],
+  fields: [
+    ref("stock_count", "Stock count", "stock_count", { required: true, description: "The count this line belongs to. The business date comes from it." }),
+    ref("item", "Item", "item", { required: true }),
+    quantity("quantity", "Quantity counted", { required: true, description: "How much was counted, in the unit the item is counted in." }),
+    money("unit_cost", "Cost per unit", { required: true, description: "What one unit cost when the count was taken. Kept here so later price changes do not change this count." }),
+    money("value", "Value", { required: true, description: "Quantity counted times cost per unit, in whole cents. Stored, so the count's value never moves." }),
+  ],
+  rules: [
+    check("stock_count_line_value_not_negative", gte(f("value"), lit(0)), "The value of counted stock cannot be negative."),
+    check("stock_count_line_quantity_not_negative", gte(f("quantity"), lit(0)), "The quantity counted cannot be negative."),
+    check("stock_count_line_unit_cost_not_negative", gte(f("unit_cost"), lit(0)), "The cost per unit cannot be negative."),
   ],
 };
 
@@ -107,4 +185,4 @@ const labourDay: ModelInput = {
   ],
 };
 
-export const costs: ModelInput[] = [vendor, vendorBill, vendorBillLine, labourDay];
+export const costs: ModelInput[] = [vendor, vendorBill, vendorBillLine, item, stockCount, stockCountLine, labourDay];

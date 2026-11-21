@@ -7,6 +7,13 @@ import type { ModelInput } from "./helpers.js";
  * The day must add up:
  *   net sales + sales tax + tips + service charges + gift cards sold
  *     = payments by type + gift cards redeemed
+ * "Sales tax" here is only the tax the restaurant itself must pay over. Tax a delivery platform
+ * collects and remits itself is on neither side: it is not in `sales_tax` and not in any payment
+ * amount (domain rule 6). It is kept in `tax_remitted_by_platform` for the record.
+ *
+ * A day is recorded either as one `all` row or as rows per channel, never both. The format
+ * cannot express that as a rule, so `post_sales_day` refuses a day that has both and the sales
+ * reports count only the `all` row of such a day.
  * `post_sales_day` turns exactly these rows into one balanced journal entry, so a day that does
  * not add up cannot be posted.
  */
@@ -38,7 +45,7 @@ const salesDay: ModelInput = {
     businessDate("The restaurant day these sales belong to. A day runs until the location's closing cutoff, not midnight."),
     oneOf("channel", "Channel", SALES_CHANNELS, {
       required: true,
-      description: "How the orders came in. Use all when the till gives one total for the day. Never record both an all row and split rows for the same day.",
+      description: "How the orders came in. Use all when the till gives one total for the day. Record a day either as one all row or as rows per channel, never both: a day with both cannot be posted, and reports count only its all row.",
     }),
     money("gross_sales", "Gross sales", { required: true, description: "Sales before discounts and comps. Voided items are not in this number: a void was never a sale." }),
     money("discounts", "Discounts", { required: true, description: "Price reductions. The reasons are in the daily adjustments." }),
@@ -47,7 +54,7 @@ const salesDay: ModelInput = {
     money("net_sales", "Net sales", { required: true, description: "Gross sales minus discounts and comps. This is the restaurant's revenue for the day." }),
     money("sales_tax", "Sales tax collected", { required: true, description: "Tax collected that the restaurant itself must pay over. Held for the government, never revenue." }),
     money("tax_remitted_by_platform", "Tax paid over by delivery platforms", {
-      description: "Tax a delivery platform collected and pays to the government itself. Recorded only. Never added to what the restaurant owes and never posted to the books.",
+      description: "Tax a delivery platform collected and pays to the government itself. Recorded only: it is not in sales tax collected, not in any payment amount, never added to what the restaurant owes and never posted to the books.",
     }),
     money("tips", "Tips", { required: true, description: "Tips collected for staff through the till. Owed to staff, never revenue." }),
     money("service_charges", "Service charges", { description: "Automatic gratuity or fees added to checks. Whether this is revenue or owed to staff is a posting rule." }),
@@ -96,7 +103,7 @@ const paymentDay: ModelInput = {
   pack: "sales",
   version: 1,
   name: "Daily payments by type",
-  description: "What was collected on one day by one payment type: cash, each card type, house accounts and each delivery platform. The amount includes the tax and tips paid that way. Gift card redemptions are not here: they are gift card activity.",
+  description: "What was collected on one day by one payment type: cash, each card type, house accounts and each delivery platform. The amount includes tips and the sales tax the restaurant must pay over, but never tax a delivery platform pays over itself. Gift card redemptions are not here: they are gift card activity.",
   locationScoped: true,
   defaultAccess: ACCESS.ownerWritesStaffReads,
   unique: [["sales_day", "payment_type"]],
@@ -104,7 +111,10 @@ const paymentDay: ModelInput = {
   fields: [
     ref("sales_day", "Daily sales", "sales_day", { required: true, description: "The day this was collected on. The business date comes from it." }),
     ref("payment_type", "Payment type", "payment_type", { required: true }),
-    money("amount", "Amount collected", { required: true, description: "Everything paid this way that day, including tax and tips." }),
+    money("amount", "Amount collected", {
+      required: true,
+      description: "Everything paid this way that day: sales, tips and the sales tax the restaurant itself must pay over. For a delivery platform, leave out tax the platform collects and pays over itself: that tax is recorded on the day and is never owed to the restaurant.",
+    }),
     money("tips", "Tips included", { description: "The part of the amount that is tips. For the record only: it is already inside the amount." }),
     integer("payment_count", "Number of payments"),
   ],
