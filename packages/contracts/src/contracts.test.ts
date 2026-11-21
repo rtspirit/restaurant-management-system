@@ -85,6 +85,12 @@ describe("request shapes are bounded", () => {
     no(c.QueryRequest.safeParse({ model: "sales_day", where: { field: "a", op: "eq" } }));
     ok(c.QueryRequest.safeParse({ model: "sales_day", where: { field: "a", op: "between", value: ["2026-11-09", "2026-11-15"] } }));
   });
+  it("rejects a write value nested thousands deep without overflowing the stack", () => {
+    let deep: unknown = "x";
+    for (let i = 0; i < 5000; i++) deep = [deep];
+    no(c.BatchRequest.safeParse({ ops: [{ op: "insert", model: "vendor", values: { notes: deep } }] }));
+    ok(c.BatchRequest.safeParse({ ops: [{ op: "insert", model: "vendor", values: { notes: { a: [{ b: 1 }] } } }] }));
+  });
   it("does not let a caller set server-owned fields", () => {
     for (const k of ["id", "source", "source_id", "created_by", "created_at", "updated_by", "updated_at", "deleted_at"]) {
       no(c.BatchRequest.safeParse({ ops: [{ op: "insert", model: "vendor", values: { [k]: "x" } }] }));
