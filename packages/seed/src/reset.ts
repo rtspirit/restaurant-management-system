@@ -3,7 +3,9 @@
 // unless RMS_ALLOW_RESET=1 is set.
 import { createClient } from "@supabase/supabase-js";
 import { type Sql, newUuid } from "@rms/db";
+import { seedDemoBooks } from "./books.js";
 import { type CreatedRestaurant, createDemoRestaurant, removeRestaurants } from "./demo.js";
+import { installPlatformLibrary } from "./library.js";
 import type { DemoTemplate } from "./templates.js";
 
 type Env = Record<string, string | undefined>;
@@ -54,6 +56,23 @@ export const checkConnectionIsLocal = (adminSql: Pick<Sql, "options">): Check =>
     return { ok: false, reason: "Refusing to reset: the database connection is not to this computer (127.0.0.1 or localhost). Set RMS_ALLOW_RESET=1 if you really mean it." };
   }
   return { ok: true };
+};
+
+/**
+ * The restaurant-facing connection string must name the same server and database as the admin
+ * connection the reset is using. Otherwise the reset would rebuild one database and try to load
+ * numbers into another.
+ */
+export const checkSameDatabase = (adminSql: Pick<Sql, "options">, apiUrl: string | undefined): Check => {
+  const refuse: Check = { ok: false, reason: "Refusing to reset: DATABASE_URL and DATABASE_ADMIN_URL do not point at the same database." };
+  const host = hostOf(apiUrl);
+  if (!apiUrl || !host) return refuse;
+  const u = new URL(apiUrl);
+  const o = adminSql.options;
+  const adminHost = Array.isArray(o.host) && o.host.length === 1 ? String(o.host[0]).toLowerCase() : null;
+  const adminPort = Array.isArray(o.port) && o.port.length === 1 ? Number(o.port[0]) : null;
+  const same = adminHost === host && adminPort === Number(u.port || 5432) && o.database === decodeURIComponent(u.pathname.slice(1)) && !o.path;
+  return same ? { ok: true } : refuse;
 };
 
 /** Pure. Demo passwords come from DEMO_PASSWORD and must be at least 10 characters. */
@@ -157,11 +176,23 @@ export const createDemoUsers = async (
   return summary;
 };
 
+export type ResetOptions = {
+  /**
+   * Load eight weeks of sales, bills, staff cost and stock counts into each restaurant and post
+   * them to the books, so the demo starts with numbers. Default true. Once the Demo POS
+   * connection exists (Wave 2) it becomes the thing that loads them, and the reset passes false.
+   */
+  withSales?: boolean;
+};
+
 /**
  * The full reset. Checks first, then: drop every store, delete every restaurant's platform rows,
- * delete every sign-in user, create both demo restaurants and their users.
+ * delete every sign-in user, create both demo restaurants and their users, install the model
+ * library (every template checked first), make each restaurant's library tables and, with
+ * `withSales`, load and post its numbers.
  */
-export const resetDemo = async (adminSql: Sql, env: Env = process.env): Promise<string[]> => {
+export const resetDemo = async (adminSql: Sql, env: Env = process.env, opts: ResetOptions = {}): Promise<string[]> => {
+  const withSales = opts.withSales ?? true;
   const allowAnywhere = env.RMS_ALLOW_RESET === "1";
   const checks: (() => Check)[] = [
     () => checkResetAllowed(env),
@@ -178,6 +209,13 @@ export const resetDemo = async (adminSql: Sql, env: Env = process.env): Promise<
     throw new Error("Refusing to reset: the sign-in service is not on this computer. Set RMS_ALLOW_RESET=1 if you really mean it.");
   }
 
+  // The numbers are loaded through the Data API, which opens its own connection from
+  // DATABASE_URL. It must be the same database the reset is about to rebuild.
+  if (withSales) {
+    const same = checkSameDatabase(adminSql, process.env.DATABASE_URL);
+    if (!same.ok) throw new Error(same.reason);
+  }
+
   const orgs = await adminSql<{ id: string }[]>`select id from platform.organizations`;
   await removeRestaurants(adminSql, orgs.map((o) => o.id));
   const removedUsers = await deleteUsers(auth, () => true);
@@ -186,10 +224,33 @@ export const resetDemo = async (adminSql: Sql, env: Env = process.env): Promise<
   const sliceYard = await createDemoRestaurant(adminSql, { template: "slice_yard" });
   const users = await createDemoUsers(adminSql, auth, { marigold, slice_yard: sliceYard }, password);
 
+  // The library: every template is checked, then all of it is installed, or none of it.
+  const library = await installPlatformLibrary(adminSql);
+
+  const books: string[] = [];
+  for (const [template, r] of [["marigold", marigold], ["slice_yard", sliceYard]] as const) {
+    const [owner] = await adminSql<{ user_id: string }[]>`
+      select user_id from platform.members where org_id = ${r.orgUuid} and role = 'owner' order by created_at limit 1`;
+    if (!owner) throw new Error(`${r.name} has no owner to record its numbers under`);
+    const loaded = await seedDemoBooks(adminSql, { orgUuid: r.orgUuid, template, ownerUserId: owner.user_id, withSales });
+    if (!loaded) {
+      books.push(`  ${r.name}: tables ready, no numbers loaded.`);
+      continue;
+    }
+    const posted = loaded.posted.salesDays + loaded.posted.vendorBills + loaded.posted.labourDays + loaded.posted.stockCounts;
+    const net = (loaded.lastWeek.netSalesMinor / 100).toLocaleString("en-US", { minimumFractionDigits: 2 });
+    books.push(
+      `  ${r.name}: ${loaded.rows.sales_day ?? 0} days of sales from ${loaded.startsOn} to ${loaded.endsOn}, ${posted} entries posted to the books. ` +
+        `Week of ${loaded.lastWeek.weekStart}: net sales $${net}, prime cost ${loaded.lastWeek.primeCostPct}%${loaded.lastWeek.stockCounted ? "" : " (no stock count yet)"}.`,
+    );
+  }
+
   return [
     `Removed ${orgs.length} restaurant(s) and ${removedUsers} sign-in user(s).`,
     `Created ${marigold.name} and ${sliceYard.name}.`,
     ...users.map((u) => `  ${u.email}  ${u.kind}${u.restaurant ? ` at ${u.restaurant}` : ""}`),
+    `Installed the model library: ${library.models} models, ${library.namedQueries} reports, ${library.namedActions} actions.`,
+    ...books,
     "Passwords are the value of DEMO_PASSWORD.",
   ];
 };

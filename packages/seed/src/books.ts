@@ -316,12 +316,15 @@ export type SeedBooksOptions = GenerateSalesOptions & {
   withSales: boolean;
 };
 
+/** What was loaded, and the last week as the prime cost report now shows it. */
+export type SeededBooks = LoadBooksResult & { lastWeek: { weekStart: string; netSalesMinor: number; primeCostPct: string; stockCounted: boolean } };
+
 /**
  * What the reset does for one restaurant after it exists: make its library tables, and, with
  * `withSales`, load and post the demo numbers. The library must be installed first
  * (`installPlatformLibrary`). Admin connection only, and only for seeded demo restaurants.
  */
-export const seedDemoBooks = async (adminSql: Sql, opts: SeedBooksOptions): Promise<LoadBooksResult | null> => {
+export const seedDemoBooks = async (adminSql: Sql, opts: SeedBooksOptions): Promise<SeededBooks | null> => {
   const { orgUuid, template, ownerUserId, withSales, ...range } = opts;
   await ensureModels(adminSql, orgUuid, LIBRARY.models.map((m) => m.key));
   if (!withSales) return null;
@@ -348,5 +351,13 @@ export const seedDemoBooks = async (adminSql: Sql, opts: SeedBooksOptions): Prom
     }
     return reply.body;
   };
-  return loadDemoBooks(client, { template, ...range });
+  const loaded = await loadDemoBooks(client, { template, ...range });
+
+  // Read the last week back through the prime cost report, so the reset can show that the
+  // reports work on what it just loaded.
+  const weekStart = addDays(loaded.endsOn, -6);
+  const report = (await client("named", { query: "prime_cost_by_week", params: { from_date: weekStart, to_date: loaded.endsOn } })) as { rows: Record<string, unknown>[] };
+  const all = report.rows.find((r) => r.scope === "all_locations" && r.week_start === weekStart);
+  if (!all) throw new Error("Loading the demo numbers: the prime cost report has no row for the last week");
+  return { ...loaded, lastWeek: { weekStart, netSalesMinor: Number(all.net_sales), primeCostPct: String(all.prime_cost_pct), stockCounted: all.stock_counted === true } };
 };
