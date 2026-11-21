@@ -56,20 +56,40 @@ export const checkTarget = (target: CompileTarget): { schema: string; grantees: 
   };
 };
 
-/** Parses a definition again with the contract's schema. The compiler never trusts its caller. */
+/** Every model a restaurant's agent designs has a key that starts with this. No library model does. */
+export const CUSTOM_KEY_PREFIX = "x_";
+
+/**
+ * Parses a definition again with the contract's schema. The compiler never trusts its caller.
+ * It also enforces the custom-model rules itself:
+ *   - a custom model has only `check` rules (never a ledger rule, which would get a trigger function),
+ *   - a custom model's key starts with `x_`, and no other model's key does. So an agent-designed
+ *     model can never take the name of a library model or of an index, trigger or function that
+ *     belongs to one.
+ */
 export const parseModel = (def: unknown): ModelDefinition => {
   const parsed = ModelDefinition.safeParse(def);
   if (!parsed.success) {
     const why = parsed.error.issues.slice(0, 3).map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
     throw new CompileError(`Model definition is not valid (${why})`);
   }
-  return parsed.data;
+  const model = parsed.data;
+  if (model.pack === "custom") {
+    if (!model.key.startsWith(CUSTOM_KEY_PREFIX)) throw new CompileError(`A custom model's key must start with "${CUSTOM_KEY_PREFIX}"`);
+    if (model.rules.some((r) => r.kind !== "check")) throw new CompileError("A custom model can only have check rules");
+  } else if (model.key.startsWith(CUSTOM_KEY_PREFIX)) {
+    throw new CompileError(`Only a custom model's key may start with "${CUSTOM_KEY_PREFIX}"`);
+  }
+  return model;
 };
 
 export const hasSoftDelete = (def: ModelDefinition): boolean => def.softDelete && !def.appendOnly;
 export const hasMoney = (def: ModelDefinition): boolean => def.fields.some((f) => f.type === "money");
 
 export type Column = { name: string; type: string; nullable: boolean };
+
+/** Columns every Postgres table already has. A field may not take one of these names. */
+const POSTGRES_SYSTEM_COLUMNS = new Set(["xmin", "xmax", "cmin", "cmax", "ctid", "tableoid"]);
 
 export const systemColumnsFor = (def: ModelDefinition): Column[] =>
   SYSTEM_COLUMNS.filter(
@@ -88,6 +108,7 @@ export const tableColumns = (def: ModelDefinition): Column[] => {
   const seen = new Set<string>();
   for (const c of columns) {
     if (!isPlainName(c.name)) throw new CompileError("A column name is not a plain name");
+    if (POSTGRES_SYSTEM_COLUMNS.has(c.name)) throw new CompileError(`"${c.name}" is a name the database keeps for itself`);
     if (seen.has(c.name)) throw new CompileError(`Two columns would be called "${c.name}"`);
     seen.add(c.name);
   }

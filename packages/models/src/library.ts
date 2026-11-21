@@ -2,7 +2,7 @@
 // This file does NOT import ./packs. The lead wires `LIBRARY = buildLibrary(packs)`.
 import { ModelDefinition, NamedActionDefinition, NamedQueryDefinition, isParentRef } from "@rms/contracts";
 import type { Sql } from "@rms/db";
-import { compileModel, modelDependencies, targetsFor } from "./compiler/index.js";
+import { CUSTOM_KEY_PREFIX, compileModel, modelDependencies, targetsFor } from "./compiler/index.js";
 
 /** What `src/packs/index.ts` exports. Taken as unknown and parsed here, so a bad pack fails loudly. */
 export type PackExports = {
@@ -39,6 +39,8 @@ export const buildLibrary = (packs: PackExports): Library => {
   const keys = new Set(models.map((m) => m.key));
   for (const m of models) {
     if (m.pack === "custom") throw new Error(`Library model "${m.key}" cannot be in the custom pack`);
+    // Keys that start with x_ belong to the models restaurants design for themselves.
+    if (m.key.startsWith(CUSTOM_KEY_PREFIX)) throw new Error(`Library model "${m.key}" cannot have a key that starts with "${CUSTOM_KEY_PREFIX}"`);
     for (const dep of modelDependencies(m)) if (!keys.has(dep)) throw new Error(`Library model "${m.key}" needs "${dep}", which is not in the library`);
   }
   const known = (ref: string) => isParentRef(ref) || keys.has(ref);
@@ -58,9 +60,18 @@ export const buildLibrary = (packs: PackExports): Library => {
   return Object.freeze({ models, namedQueries, namedActions });
 };
 
+/** JSON with object keys in a fixed order, so two values can be compared whatever order they were stored in. */
+const canonical = (value: unknown): string =>
+  JSON.stringify(value, (_key, v: unknown) =>
+    v !== null && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.entries(v as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) : v,
+  );
+
 /**
  * Writes the library into platform.model_templates, model_template_versions, named_queries and
- * named_actions. Admin connection only. Safe to run again: rows are updated in place.
+ * named_actions. Admin connection only. Safe to run again with the same library.
+ * A model version is never changed in place: if a definition differs from the one stored under
+ * the same key and version, this stops and asks for a new version number. Named queries and
+ * actions have no versions and are replaced.
  */
 export const installLibrary = async (adminSql: Sql, library: Library): Promise<{ models: number; namedQueries: number; namedActions: number }> => {
   const lib = buildLibrary(library);
@@ -71,10 +82,14 @@ export const installLibrary = async (adminSql: Sql, library: Library): Promise<{
         values (${m.key}, ${m.pack}, ${m.name}, ${m.description}, ${m.version})
         on conflict (key) do update set pack = excluded.pack, name = excluded.name, description = excluded.description,
           current_version = greatest(platform.model_templates.current_version, excluded.current_version), status = 'active'`;
-      await tx`
-        insert into platform.model_template_versions (template_key, version, definition)
-        values (${m.key}, ${m.version}, ${JSON.stringify(m)}::text::jsonb)
-        on conflict (template_key, version) do update set definition = excluded.definition`;
+      const [stored] = await tx<{ definition: unknown }[]>`
+        select definition from platform.model_template_versions where template_key = ${m.key} and version = ${m.version} for update`;
+      if (stored && canonical(stored.definition) !== canonical(m)) {
+        throw new Error(`Library model "${m.key}" changed but is still version ${m.version}. Give it a new version number`);
+      }
+      if (!stored) {
+        await tx`insert into platform.model_template_versions (template_key, version, definition) values (${m.key}, ${m.version}, ${JSON.stringify(m)}::text::jsonb)`;
+      }
     }
     for (const q of lib.namedQueries) {
       await tx`

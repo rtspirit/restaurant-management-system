@@ -41,6 +41,10 @@ export const compileExpr = (expr: Expr, resolve: FieldResolver): string => {
     if (Object.hasOwn(BINARY, op)) {
       onlyKeys(node, ["op", "args"]);
       if (!Array.isArray(node.args) || node.args.length !== 2) throw new CompileError("Expression needs two parts");
+      // "= null" is never true in SQL, so such a rule would silently check nothing.
+      if ((op === "eq" || op === "ne") && node.args.some((a) => isObject(a) && Object.hasOwn(a, "lit") && a.lit === null)) {
+        throw new CompileError('A value cannot be compared with nothing. Use "is_null" to test for an empty value');
+      }
       return `(${walk(node.args[0], depth + 1)} ${BINARY[op]} ${walk(node.args[1], depth + 1)})`;
     }
     if (op === "and" || op === "or") {

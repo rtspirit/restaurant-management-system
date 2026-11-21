@@ -4,10 +4,13 @@
 export * from "./compiler/index.js";
 export { type Library, type PackExports, buildLibrary, installLibrary } from "./library.js";
 export {
+  type ApplyOptions,
   type ApplyResult,
   type EnsureResult,
   type StoreOptions,
+  STORE_LIMITS,
   applyChange,
+  discardPendingChange,
   effectiveDefinition,
   ensureModels,
   publishModelChanges,

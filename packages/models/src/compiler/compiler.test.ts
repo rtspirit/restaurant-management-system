@@ -7,7 +7,11 @@ import { fixtureModel, fixtureModels, fixturePack } from "./__fixtures__/pack.js
 import {
   CompileError,
   FISCAL_PERIOD,
+  checkQuery,
+  checkStatement,
   compileChange,
+  compileDiscard,
+  compileDrop,
   compileExpr,
   compileModel,
   modelDependencies,
@@ -111,7 +115,7 @@ const strings = (statements: string[]): string[] =>
 
 const custom = (over: Record<string, unknown>): ModelDefinition =>
   ({
-    key: "note",
+    key: "x_note",
     version: 1,
     pack: "custom",
     name: "Note",
@@ -120,6 +124,9 @@ const custom = (over: Record<string, unknown>): ModelDefinition =>
     defaultAccess: { owner: "write", staff: "read" },
     ...over,
   }) as unknown as ModelDefinition;
+
+/** A library model (not custom) to hang ledger rules on. */
+const lib = (over: Record<string, unknown>): ModelDefinition => custom({ key: "note", pack: "finance", appendOnly: true, ...over });
 
 // ---------------------------------------------------------------- the quoting functions
 
@@ -289,22 +296,38 @@ describe("compileModel on the fixture pack", () => {
 
   it("gives every trigger function an empty search path, no public right to call it, and definer rights only where rows can be hidden", () => {
     const fns = fixtureModels.flatMap((m) => compileModel(m, T.live, ctx).link.filter((s) => s.startsWith("create function")));
-    expect(fns.length).toBe(6);
+    expect(fns.length).toBe(7);
     for (const f of fns) expect(f).toContain("language plpgsql");
     for (const f of fns) expect(f).toMatch(/ set search_path = '' as \$rms\$/);
     const definer = fns.filter((f) => f.includes("security definer")).map((f) => /"\."([a-z0-9_]+)"\(\)/.exec(f)?.[1]);
     // The ledger balance check (journal lines are location-scoped) and the target side of paid_out's
     // rule (paid_out rows are location-scoped). posting_rule is for all locations, so both of its
     // functions run as the caller. So does every open-period check and every forward link check.
-    expect(definer.sort()).toEqual([objectName("fn", "journal_entry", "entry_balances"), objectName("fnr", "paid_out", "paid_from_an_expense")].sort());
+    expect(definer.sort()).toEqual([objectName("fn", "journal_entry", "entry_balances"), objectName("fnh", "journal_entry", "entry_balances"), objectName("fnr", "paid_out", "paid_from_an_expense")].sort());
     const all = fixtureModels.flatMap((m) => compileModel(m, T.live, ctx).link);
     const revoked = all.filter((s) => s.startsWith("revoke all on function"));
     expect(revoked.length).toBe(fns.length);
   });
 
-  it("checks the ledger at commit, on the line table", () => {
+  it("checks the ledger at commit: on the line table, and on the header for an entry with no lines", () => {
     const link = compileModel(fixtureModel("journal_entry"), T.live, ctx).link;
     expect(link.some((s) => /^create constraint trigger "[a-z0-9_]+" after insert or update or delete on "o_c1c1c1c1c101"\."journal_line" deferrable initially deferred for each row/.test(s))).toBe(true);
+    expect(link.some((s) => /^create constraint trigger "[a-z0-9_]+" after insert on "o_c1c1c1c1c101"\."journal_entry" deferrable initially deferred for each row/.test(s))).toBe(true);
+    const lineFn = link.find((s) => s.startsWith("create function") && s.includes("v_made_in")) ?? "";
+    // Lines only in the transaction that wrote the header, and the header's period rule again for each line.
+    expect(lineFn).toContain("pg_catalog.pg_xact_status(v_made_in::text::xid8) is distinct from 'in progress'");
+    expect(lineFn).toContain(`p."status" = E'closed'`);
+  });
+
+  it("makes a unique rule ignore deleted rows on a soft-delete model, and keeps the source index plain", () => {
+    const account = compileModel(fixtureModel("account"), T.live, ctx);
+    expect(account.create[0]).not.toContain(" unique (");
+    expect(account.create.some((s) => /^create unique index "[a-z0-9_]+" on "o_c1c1c1c1c101"\."account" \("code"\) where "deleted_at" is null$/.test(s))).toBe(true);
+    expect(account.create.some((s) => /^create unique index "[a-z0-9_]+" on "o_c1c1c1c1c101"\."account" \("source", "source_id"\) where "source_id" is not null$/.test(s))).toBe(true);
+    // An append-only model has no deleted rows, so its rule stays a plain constraint.
+    const entry = compileModel(fixtureModel("journal_entry"), T.live, ctx);
+    expect(entry.create[0]).toMatch(/constraint "[a-z0-9_]+" unique \("reverses"\)/);
+    expect(entry.create.filter((s) => s.startsWith("create unique index"))).toHaveLength(1);
   });
 
   it("adds no foreign key for a parent link, and adds a self-reference after the table exists", () => {
@@ -343,12 +366,12 @@ describe("hostile definitions", () => {
       refused(custom({ labelField: h }));
       refused(custom({ rules: [{ kind: "check", name: h, expr: { lit: true }, message: "m" }] }));
       refused(custom({ rules: [{ kind: "check", name: "ok", expr: { field: h }, message: "m" }] }));
-      refused(custom({ pack: "finance", rules: [{ kind: "balanced", name: "b", lineModel: h, lineRef: "entry", debit: "debit", credit: "credit" }] }));
-      refused(custom({ pack: "finance", rules: [{ kind: "balanced", name: "b", lineModel: "journal_line", lineRef: h, debit: "debit", credit: "credit" }] }));
-      refused(custom({ pack: "finance", rules: [{ kind: "balanced", name: "b", lineModel: "journal_line", lineRef: "entry", debit: h, credit: "credit" }] }));
-      refused(custom({ pack: "finance", fields: [{ key: "day", label: "x", type: "date" }], rules: [{ kind: "open_period_only", name: "o", dateField: h }] }));
-      refused(custom({ pack: "finance", fields: [{ key: "account", label: "x", type: "ref", model: "account" }], rules: [{ kind: "ref_value_in", name: "r", field: "account", refField: h, allowed: ["liability"], message: "m" }] }));
-      refused(custom({ pack: "finance", fields: [{ key: "account", label: "x", type: "ref", model: "account" }], rules: [{ kind: "ref_value_in", name: "r", field: "account", refField: "type", allowed: [h], message: "m" }] }));
+      refused(lib({ rules: [{ kind: "balanced", name: "b", lineModel: h, lineRef: "entry", debit: "debit", credit: "credit" }] }));
+      refused(lib({ rules: [{ kind: "balanced", name: "b", lineModel: "journal_line", lineRef: h, debit: "debit", credit: "credit" }] }));
+      refused(lib({ rules: [{ kind: "balanced", name: "b", lineModel: "journal_line", lineRef: "entry", debit: h, credit: "credit" }] }));
+      refused(lib({ fields: [{ key: "day", label: "x", type: "date" }], rules: [{ kind: "open_period_only", name: "o", dateField: h }] }));
+      refused(lib({ fields: [{ key: "account", label: "x", type: "ref", model: "account" }], rules: [{ kind: "ref_value_in", name: "r", field: "account", refField: h, allowed: ["liability"], message: "m" }] }));
+      refused(lib({ fields: [{ key: "account", label: "x", type: "ref", model: "account" }], rules: [{ kind: "ref_value_in", name: "r", field: "account", refField: "type", allowed: [h], message: "m" }] }));
     }
   });
 
@@ -375,7 +398,14 @@ describe("hostile definitions", () => {
     refused(custom({ fields: [{ key: "job", label: "x", type: "parent_ref", parentModel: "jobs" }, { key: "job_label", label: "y", type: "text" }] }));
     refused(custom({ rules: [{ kind: "check", name: "same", expr: { lit: true }, message: "m" }, { kind: "check", name: "same", expr: { lit: true }, message: "m" }] }));
 
-    const finance = (over: Record<string, unknown>) => custom({ pack: "finance", ...over });
+    const finance = lib;
+    // These two are fine, so the refusals below are for the reason each one names.
+    const entryFields = [{ key: "day", label: "x", type: "date", required: true }];
+    expect(() => compileModel(finance({ key: "journal_entry", fields: entryFields, rules: [{ kind: "balanced", name: "b", lineModel: "journal_line", lineRef: "entry", debit: "debit", credit: "credit" }] }), T.live, ctx)).not.toThrow();
+    expect(() => compileModel(finance({ fields: entryFields, rules: [{ kind: "open_period_only", name: "o", dateField: "day" }] }), T.live, ctx)).not.toThrow();
+    // A ledger must be append-only on both sides.
+    refused(finance({ key: "journal_entry", appendOnly: false, rules: [{ kind: "balanced", name: "b", lineModel: "journal_line", lineRef: "entry", debit: "debit", credit: "credit" }] }));
+    refused(finance({ key: "journal_entry", rules: [{ kind: "balanced", name: "b", lineModel: "journal_line", lineRef: "entry", debit: "debit", credit: "credit" }] }), fixtureModels.map((m) => (m.key === "journal_line" ? { ...m, appendOnly: false } : m)));
     // balanced: the line model must point back at this model with a required link and two money fields.
     refused(finance({ rules: [{ kind: "balanced", name: "b", lineModel: "journal_line", lineRef: "entry", debit: "debit", credit: "credit" }] }));
     refused(finance({ key: "journal_entry", rules: [{ kind: "balanced", name: "b", lineModel: "journal_line", lineRef: "account", debit: "debit", credit: "credit" }] }));
@@ -423,7 +453,7 @@ describe("hostile definitions", () => {
   it("keeps very long names under the database limit and apart from each other", () => {
     const k = (c: string) => c.repeat(48);
     const def = custom({
-      key: k("m"),
+      key: `x_${"m".repeat(46)}`,
       fields: [
         { key: k("a"), label: "a", type: "enum", values: [k("v"), "w"] },
         { key: `${"a".repeat(47)}b`, label: "b", type: "quantity" },
@@ -440,7 +470,7 @@ describe("hostile definitions", () => {
     const made = c.statements.flatMap((s) => /^(?:create (?:unique )?index|create policy|create trigger) "([^"]+)"/.exec(s)?.[1] ?? []);
     const constraints = [...(c.create[0] ?? "").matchAll(/constraint "([^"]+)"/g)].map((m) => m[1]);
     expect(new Set([...made, ...constraints]).size).toBe(made.length + constraints.length);
-    expect(ruleConstraintName(k("m"), k("r"))).toHaveLength(63);
+    expect(ruleConstraintName(`x_${"m".repeat(46)}`, k("r"))).toHaveLength(63);
   });
 
   it("refuses any target that is not one restaurant's own schema and roles", () => {
@@ -488,15 +518,47 @@ describe("compileChange", () => {
 
     const u = compileChange({ op: "add_unique", model: "vendor", fields: ["name"] }, vendor, T.live, ctx);
     expect(u.statements).toHaveLength(1);
-    expect(u.statements[0]).toMatch(/^alter table "o_c1c1c1c1c101"\."vendor" add constraint "[a-z0-9_]+" unique \("name"\)$/);
+    expect(u.statements[0]).toMatch(/^create unique index "[a-z0-9_]+" on "o_c1c1c1c1c101"\."vendor" \("name"\) where "deleted_at" is null$/);
     expect(u.definition.unique).toEqual([["name"]]);
+    // First it looks for rows that already break the rule. The question returns no data.
+    expect(u.checks).toEqual([
+      { sql: 'select 1 as found from "o_c1c1c1c1c101"."vendor" where "name" is not null and "deleted_at" is null group by "name" having pg_catalog.count(*) > 1 limit 1', message: expect.stringMatching(/already share the same values/) },
+    ]);
+    expect(checkQuery(u.checks[0]?.sql ?? "")).toBeTruthy();
+    const hard = compileChange({ op: "add_unique", model: "journal_entry", fields: ["memo", "entry_date"] }, fixtureModel("journal_entry"), T.live, ctx);
+    expect(hard.statements[0]).toMatch(/^alter table "o_c1c1c1c1c101"\."journal_entry" add constraint "[a-z0-9_]+" unique \("memo", "entry_date"\)$/);
 
     const i = compileChange({ op: "add_index", model: "vendor", fields: ["name", "deleted_at"] }, vendor, T.live, ctx);
     expect(i.statements[0]).toMatch(/^create index "[a-z0-9_]+" on "o_c1c1c1c1c101"\."vendor" \("name", "deleted_at"\)$/);
   });
 
+  it("takes a change back out, and drops a model with the functions its rules made", () => {
+    const changes: ModelChange[] = [
+      { op: "add_field", model: "vendor", field: { key: "min_order", label: "Minimum order", type: "quantity", required: false } },
+      { op: "add_unique", model: "vendor", fields: ["name"] },
+      { op: "add_index", model: "vendor", fields: ["name"] },
+    ];
+    for (const change of changes) {
+      const made = compileChange(change, vendor, T.draft, ctx);
+      const undone = compileDiscard(change, made.definition, T.draft);
+      expect(undone.definition).toEqual(vendor);
+      for (const s of undone.statements) expect(checkStatement(s)).toBe(s);
+    }
+    expect(compileDiscard(changes[0] as ModelChange, compileChange(changes[0] as ModelChange, vendor, T.draft, ctx).definition, T.draft).statements).toEqual([
+      'alter table "o_c1c1c1c1c101_draft"."vendor" drop column "min_order"',
+      'alter table "o_c1c1c1c1c101_draft"."vendor" drop column "min_order_unit"',
+    ]);
+    expect(() => compileDiscard(changes[1] as ModelChange, vendor, T.draft)).toThrow(CompileError);
+    const drop = compileDrop(fixtureModel("posting_rule"), T.draft);
+    expect(drop).toHaveLength(3);
+    expect(drop[2]).toBe('drop table "o_c1c1c1c1c101_draft"."posting_rule"');
+    for (const s of drop) expect(checkStatement(s)).toBe(s);
+    expect(() => compileDrop(fixtureModel("vendor"), { ...T.draft, schema: "platform" })).toThrow(CompileError);
+  });
+
   it("refuses what it must not do", () => {
     const refused = (change: unknown, current: ModelDefinition = vendor) => expect(() => compileChange(change as ModelChange, current, T.draft, ctx)).toThrow(CompileError);
+    for (const name of ["xmin", "xmax", "cmin", "cmax", "ctid", "tableoid"]) refused({ op: "add_field", model: "vendor", field: { key: name, label: "x", type: "text" } });
     refused({ op: "add_field", model: "vendor", field: { key: "phone", label: "Phone", type: "text", required: true } });
     refused({ op: "add_field", model: "vendor", field: { key: "name", label: "Again", type: "text" } });
     refused({ op: "add_field", model: "vendor", field: { key: "source", label: "System", type: "text" } });
@@ -520,6 +582,116 @@ describe("compileChange", () => {
   });
 });
 
+// ---------------------------------------------------------------- custom models
+
+describe("custom models", () => {
+  const refused = (def: ModelDefinition, why: RegExp) => expect(() => compileModel(def, T.live, ctx)).toThrow(why);
+
+  it("can only have check rules: the compiler refuses the rest itself", () => {
+    const entry = { key: "x_ledger", appendOnly: true, fields: [{ key: "day", label: "Day", type: "date", required: true }, { key: "account", label: "Account", type: "ref", model: "account" }] };
+    refused(custom({ ...entry, rules: [{ kind: "balanced", name: "b", lineModel: "journal_line", lineRef: "entry", debit: "debit", credit: "credit" }] }), /only have check rules/);
+    refused(custom({ ...entry, rules: [{ kind: "open_period_only", name: "o", dateField: "day" }] }), /only have check rules/);
+    refused(custom({ ...entry, rules: [{ kind: "ref_value_in", name: "r", field: "account", refField: "type", allowed: ["liability"], message: "m" }] }), /only have check rules/);
+    // The same model is fine with a check rule, and never gets a function.
+    const ok = compileModel(custom({ ...entry, rules: [{ kind: "check", name: "has_day", expr: { op: "not", arg: { op: "is_null", arg: { field: "day" } } }, message: "m" }] }), T.live, ctx);
+    expect(ok.statements.join("\n")).not.toMatch(/create function|security definer|constraint trigger/);
+  });
+
+  it("must have a key that starts with x_, and no other model may", () => {
+    refused(custom({ key: "note" }), /must start with "x_"/);
+    refused(custom({ key: "vendor" }), /must start with "x_"/);
+    refused(custom({ key: "journal_line" }), /must start with "x_"/);
+    refused(custom({ key: "x_note", pack: "finance" }), /Only a custom model/);
+    expect(compileModel(custom({}), T.live, ctx).model).toBe("x_note");
+    // So no custom model can take the name of something the compiler makes for a library model.
+    for (const m of fixtureModels) {
+      for (const s of compileModel(m, T.live, ctx).statements) expect(s).not.toMatch(/"x_/);
+    }
+  });
+
+  it("cannot name a field after a column the database keeps for itself", () => {
+    for (const name of ["xmin", "xmax", "cmin", "cmax", "ctid", "tableoid"]) {
+      refused(custom({ fields: [{ key: name, label: "x", type: "text" }] }), /keeps for itself/);
+    }
+    refused(custom({ fields: [{ key: "ctid", label: "x", type: "quantity" }] }), /keeps for itself/);
+  });
+
+  it("cannot compare with nothing using eq or ne", () => {
+    const rule = (expr: unknown) => custom({ rules: [{ kind: "check", name: "c", expr, message: "m" }] });
+    refused(rule({ op: "eq", args: [{ field: "body" }, { lit: null }] }), /is_null/);
+    refused(rule({ op: "ne", args: [{ lit: null }, { field: "body" }] }), /is_null/);
+    refused(rule({ op: "and", args: [{ lit: true }, { op: "not", arg: { op: "eq", args: [{ field: "body" }, { lit: null }] } }] }), /is_null/);
+    expect(() => compileModel(rule({ op: "is_null", arg: { field: "body" } }), T.live, ctx)).not.toThrow();
+    expect(() => compileModel(rule({ op: "gt", args: [{ field: "body" }, { lit: "a" }] }), T.live, ctx)).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------- the second wall
+
+describe("the statement guard", () => {
+  const all = [T.live, T.draft].flatMap((t) => fixtureModels.flatMap((m) => compileModel(m, t, ctx).statements));
+
+  it("lets through everything the compiler emits, hostile values included", () => {
+    for (const s of all) expect(checkStatement(s)).toBe(s);
+    for (const h of HOSTILE) {
+      const def = custom({ rules: [{ kind: "check", name: "c", expr: { op: "ne", args: [{ field: "body" }, { lit: h }] }, message: "m" }] });
+      for (const s of compileModel(def, T.live, ctx).statements) expect(checkStatement(s)).toBe(s);
+    }
+  });
+
+  it("refuses a second statement, a comment, or a command the compiler never emits", () => {
+    const table = all[0] ?? "";
+    const fn = all.find((s) => s.startsWith("create function")) ?? "";
+    const bad = [
+      `${table}; set role postgres`,
+      `alter table "o_c1c1c1c1c101"."vendor" add column "x" text; set role rms_admin`,
+      `grant select on table "o_c1c1c1c1c101"."vendor" to "o_c1c1c1c1c101_rw"; drop schema platform cascade`,
+      `alter table "o_c1c1c1c1c101"."vendor" add column "x" text -- note`,
+      `alter table "o_c1c1c1c1c101"."vendor" add column "x" text /* note */`,
+      `alter table "o_c1c1c1c1c101"."vendor" add column "x" text default $$a$$`,
+      `alter table "o_c1c1c1c1c101"."vendor" add column "x" text default 'a\\'; set role rms_admin; --'`,
+      `alter table "o_c1c1c1c1c101"."Vendor" add column "x" text`,
+      `alter table "o_c1c1c1c1c101"."ven""dor" add column "x" text`,
+      `alter table "o_c1c1c1c1c101"."vendor" add column "x" text default 'open`,
+      `alter table "o_c1c1c1c1c101"."vendor" add column "x" text $rms$ select 1; $rms$`,
+      `${fn} $rms$ select 1 $rms$`,
+      fn.replace("return null;", "return null; $rms$; set role rms_admin; $rms$"),
+      fn.replace("return null;", "return null; -- hidden"),
+      `set role rms_admin`,
+      `set local role "o_c1c1c1c1c102_rw"`,
+      `select pg_sleep(10)`,
+      `drop schema "platform" cascade`,
+      `drop role "o_c1c1c1c1c101_rw"`,
+      `create role "x"`,
+      `create extension "dblink"`,
+      `alter role "o_c1c1c1c1c101_rw" superuser`,
+      `alter function "o_c1c1c1c1c101"."f"() security definer`,
+      `do $rms$ begin end $rms$`,
+      `copy "o_c1c1c1c1c101"."vendor" to program 'sh'`,
+      ` create table "o_c1c1c1c1c101"."x" ("id" uuid)`,
+      "",
+    ];
+    for (const s of bad) expect(() => checkStatement(s), s.slice(0, 90)).toThrow(/Refused to run/);
+    expect(() => checkStatement(undefined as unknown as string)).toThrow(/Refused to run/);
+  });
+
+  it("only lets the compiler's own read-only checks through as queries", () => {
+    const ok = 'select 1 as found from "o_c1c1c1c1c101"."vendor" where "name" is not null group by "name" having pg_catalog.count(*) > 1 limit 1';
+    expect(checkQuery(ok)).toBe(ok);
+    for (const s of [
+      `${ok}; set role rms_admin`,
+      `select 1 as found from "o_c1c1c1c1c101"."vendor" into "x"`,
+      `select "name" from "o_c1c1c1c1c101"."vendor"`,
+      `select 1 as found from platform.secrets`,
+      `with x as (delete from "o_c1c1c1c1c101"."vendor" returning 1) select 1 as found from "x"`,
+      `select 1 as found from "o_c1c1c1c1c101"."vendor" where "name" = (select set_config('rms.locations', 'all', false))`,
+      `update "o_c1c1c1c1c101"."vendor" set "name" = 'x'`,
+    ]) {
+      expect(() => checkQuery(s), s).toThrow(/Refused to run/);
+    }
+  });
+});
+
 // ---------------------------------------------------------------- the library
 
 describe("buildLibrary", () => {
@@ -538,6 +710,7 @@ describe("buildLibrary", () => {
     expect(() => buildLibrary(without("journal_line"))).toThrow(/"journal_entry" needs "journal_line"/);
     expect(() => buildLibrary(without("sales_day"))).toThrow(/reads "sales_day"/);
     expect(() => buildLibrary({ ...fixturePack, models: [...fixturePack.models, custom({})] })).toThrow(/custom pack/);
+    expect(() => buildLibrary({ ...fixturePack, models: [...fixturePack.models, custom({ pack: "sales", key: "x_sneaky" })] })).toThrow(/x_/);
     expect(() => buildLibrary({ ...fixturePack, models: [{ key: "x" }] })).toThrow();
     expect(() => buildLibrary({ ...fixturePack, namedActions: [{ ...fixturePack.namedActions[0], writes: ["nothing_here"] }] })).toThrow(/writes "nothing_here"/);
   });

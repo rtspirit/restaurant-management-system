@@ -5,7 +5,7 @@
 // compiler contract in supabase/migrations/20261121120100_store_provisioning.sql.
 import { type Expr, type FieldDef, LOCATION_POLICY_FN, ModelChange, type ModelDefinition, RowSource } from "@rms/contracts";
 import { compileExpr } from "./expr.js";
-import { compileTriggerRule, ruleDependencies } from "./rules.js";
+import { compileTriggerRule, ruleDependencies, ruleFunctionNames } from "./rules.js";
 import {
   type Column,
   type CompileContext,
@@ -16,6 +16,7 @@ import {
   exprColumn,
   fieldColumns,
   hasMoney,
+  hasSoftDelete,
   indexName,
   keyColumns,
   lookupFor,
@@ -37,9 +38,14 @@ export type CompiledModel = {
   statements: string[];
 };
 
+/** A question to ask the table before a change. Any row back means "stop", with this plain-words reason. */
+export type PreCheck = { sql: string; message: string };
+
 export type CompiledChange = {
   model: string;
   schema: string;
+  /** Run these first. They read the table and return a row only when the change must not go ahead. */
+  checks: PreCheck[];
   statements: string[];
   /** The model's definition after the change. */
   definition: ModelDefinition;
@@ -99,6 +105,37 @@ const autoIndex = (def: ModelDefinition, schema: string, column: string): string
 
 const sameKeys = (a: readonly string[], b: readonly string[]): boolean => a.length === b.length && a.every((k, i) => k === b[i]);
 
+/**
+ * A unique rule. On a soft-delete model it only counts rows that are not deleted, so a
+ * deleted row never blocks a new one with the same values. That needs an index, not a constraint.
+ */
+const uniqueRule = (def: ModelDefinition, schema: string, keys: readonly string[]): { inline?: string; statement?: string; drop: string } => {
+  const name = uniqueConstraintName(def.key, keys);
+  const columns = columnList(def, keys).sql;
+  const table = qualified(schema, def.key);
+  if (hasSoftDelete(def)) {
+    return {
+      statement: `create unique index ${quoteIdent(name)} on ${table} (${columns}) where ${quoteIdent("deleted_at")} is null`,
+      drop: `drop index ${qualified(schema, name)}`,
+    };
+  }
+  return {
+    inline: `constraint ${quoteIdent(name)} unique (${columns})`,
+    statement: `alter table ${table} add constraint ${quoteIdent(name)} unique (${columns})`,
+    drop: `alter table ${table} drop constraint ${quoteIdent(name)}`,
+  };
+};
+
+/** Finds rows that already share the same values. It returns at most one row, and that row holds no data. */
+const duplicateCheck = (def: ModelDefinition, schema: string, keys: readonly string[]): PreCheck => {
+  const { columns } = columnList(def, keys);
+  const filled = [...columns.map((c) => `${quoteIdent(c)} is not null`), ...(hasSoftDelete(def) ? [`${quoteIdent("deleted_at")} is null`] : [])];
+  return {
+    sql: `select 1 as found from ${qualified(schema, def.key)} where ${filled.join(" and ")} group by ${columns.map(quoteIdent).join(", ")} having pg_catalog.count(*) > 1 limit 1`,
+    message: "Some rows already share the same values. Change or remove them first, then add the rule.",
+  };
+};
+
 const tableGrants = (def: ModelDefinition, table: string, grantees: Grantee[]): string[] => [
   `revoke all on table ${table} from public`,
   ...grantees.map((g) => `grant ${g.write ? (def.appendOnly ? "select, insert" : "select, insert, update, delete") : "select"} on table ${table} to ${quoteIdent(g.role)}`),
@@ -138,12 +175,13 @@ export const compileModel = (definition: ModelDefinition, target: CompileTarget,
     ...columns.map(columnSql),
     `constraint ${quoteIdent(objectName("pkey", def.key))} primary key (${quoteIdent("id")})`,
     ...checks.map((c) => `constraint ${quoteIdent(c.name)} check (${c.check})`),
-    ...uniques.map((u) => `constraint ${quoteIdent(uniqueConstraintName(def.key, u))} unique (${columnList(def, u).sql})`),
+    ...uniques.flatMap((u) => (hasSoftDelete(def) ? [] : [uniqueRule(def, schema, u).inline as string])),
   ];
 
   // Indexes the definition asks for, plus one per link and one on the location, unless an
   // index or unique rule already starts with that column.
-  const leading = new Set([...uniques, ...indexes].map((k) => keyColumns(def, k[0] as string)[0]));
+  // (A unique rule on a soft-delete model is a partial index, which cannot serve every lookup.)
+  const leading = new Set([...(hasSoftDelete(def) ? [] : uniques), ...indexes].map((k) => keyColumns(def, k[0] as string)[0]));
   const extra = [...(def.locationScoped ? ["location_id"] : []), ...def.fields.flatMap((f) => (f.type === "ref" ? [f.key] : []))].filter((k) => !leading.has(k));
 
   const policy = def.locationScoped ? `${functionRef(LOCATION_POLICY_FN)}(${quoteIdent("location_id")})` : "true";
@@ -152,6 +190,7 @@ export const compileModel = (definition: ModelDefinition, target: CompileTarget,
     `create table ${table} (\n  ${body.join(",\n  ")}\n)`,
     // Re-importing the same source record is harmless (domain rule 8).
     `create unique index ${quoteIdent(objectName("srcid", def.key))} on ${table} (${quoteIdent("source")}, ${quoteIdent("source_id")}) where ${quoteIdent("source_id")} is not null`,
+    ...uniques.flatMap((u) => (hasSoftDelete(def) ? [uniqueRule(def, schema, u).statement as string] : [])),
     ...indexes.map((k) => createIndex(def, schema, k)),
     ...extra.map((k) => autoIndex(def, schema, k)),
     // Every table has row-level security on, so a role with no policy sees nothing. Location-scoped
@@ -197,7 +236,7 @@ export const compileChange = (change: ModelChange, current: ModelDefinition, tar
       ...fieldChecks(def.key, f).map((c) => `alter table ${table} add constraint ${quoteIdent(c.name)} check (${c.check})`),
       ...(f.type === "ref" ? [foreignKey(next, f, schema, lookup), autoIndex(next, schema, f.key)] : []),
     ];
-    return { model: def.key, schema, statements, definition: next };
+    return { model: def.key, schema, checks: [], statements, definition: next };
   }
 
   if (ch.op === "add_unique") {
@@ -206,12 +245,57 @@ export const compileChange = (change: ModelChange, current: ModelDefinition, tar
     return {
       model: def.key,
       schema,
-      statements: [`alter table ${table} add constraint ${quoteIdent(uniqueConstraintName(def.key, ch.fields))} unique (${columnList(next, ch.fields).sql})`],
+      checks: [duplicateCheck(next, schema, ch.fields)],
+      statements: [uniqueRule(next, schema, ch.fields).statement as string],
       definition: next,
     };
   }
 
   if (def.indexes.some((u) => sameKeys(u, ch.fields))) throw new CompileError("That index is already there");
   const next = parseModel({ ...def, indexes: [...def.indexes, ch.fields] });
-  return { model: def.key, schema, statements: [createIndex(next, schema, ch.fields)], definition: next };
+  return { model: def.key, schema, checks: [], statements: [createIndex(next, schema, ch.fields)], definition: next };
+};
+
+/**
+ * Takes one add_field, add_unique or add_index back out of a schema. `current` is the model
+ * WITH the change. Only for a change that is in draft and not yet live.
+ */
+export const compileDiscard = (change: ModelChange, current: ModelDefinition, target: CompileTarget): CompiledChange => {
+  const parsedChange = ModelChange.safeParse(change);
+  if (!parsedChange.success) throw new CompileError("Change is not valid");
+  const ch = parsedChange.data;
+  const def = parseModel(current);
+  const { schema } = checkTarget(target);
+  const table = qualified(schema, def.key);
+  if (ch.op !== "add_field" && ch.op !== "add_unique" && ch.op !== "add_index") throw new CompileError("This change created a model. Use compileDrop");
+  if (ch.model !== def.key) throw new CompileError("Change is for a different model");
+
+  if (ch.op === "add_field") {
+    const f = def.fields.find((x) => x.key === ch.field.key);
+    if (!f) throw new CompileError("The model does not have that field");
+    const used = [...def.unique, ...def.indexes].some((keys) => keys.includes(f.key)) || def.labelField === f.key;
+    if (used) throw new CompileError("A rule or index still uses that field");
+    const next = parseModel({ ...def, fields: def.fields.filter((x) => x.key !== f.key) });
+    // The field's own checks, link and index go with the column.
+    return { model: def.key, schema, checks: [], statements: fieldColumns(f).map((c) => `alter table ${table} drop column ${quoteIdent(c.name)}`), definition: next };
+  }
+  const list = ch.op === "add_unique" ? def.unique : def.indexes;
+  const at = list.findLastIndex((u) => sameKeys(u, ch.fields));
+  if (at < 0) throw new CompileError("The model does not have that rule");
+  const rest = list.filter((_, i) => i !== at);
+  if (ch.op === "add_unique") {
+    return { model: def.key, schema, checks: [], statements: [uniqueRule(def, schema, ch.fields).drop], definition: parseModel({ ...def, unique: rest }) };
+  }
+  return { model: def.key, schema, checks: [], statements: [`drop index ${qualified(schema, indexName(def.key, ch.fields))}`], definition: parseModel({ ...def, indexes: rest }) };
+};
+
+/**
+ * Removes a model's table from one schema, with the trigger functions its rules created (and
+ * with them their triggers on other tables). It fails, and changes nothing, while another table
+ * still points at this one.
+ */
+export const compileDrop = (definition: ModelDefinition, target: CompileTarget): string[] => {
+  const def = parseModel(definition);
+  const { schema } = checkTarget(target);
+  return [...ruleFunctionNames(def).map((fn) => `drop function ${qualified(schema, fn)}() cascade`), `drop table ${qualified(schema, def.key)}`];
 };

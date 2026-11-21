@@ -8,8 +8,29 @@
 // SQL is always compiled fresh from definitions. The `compiled_sql` column is a record. It is never run.
 import { ModelChange, type ModelDefinition, StorePrefix, Uuid, toUuid } from "@rms/contracts";
 import { type Sql, type Tx, asMigrator, newUuid } from "@rms/db";
-import { type CompileTarget, compileChange, compileModel, modelDependencies, targetsFor } from "./compiler/index.js";
-import { parseModel } from "./compiler/shape.js";
+import {
+  type CompileTarget,
+  type PreCheck,
+  checkQuery,
+  checkStatement,
+  compileChange,
+  compileDiscard,
+  compileDrop,
+  compileModel,
+  modelDependencies,
+  targetsFor,
+} from "./compiler/index.js";
+import { CUSTOM_KEY_PREFIX, parseModel } from "./compiler/shape.js";
+
+/** Limits that keep one restaurant from growing its store, or one definition, without bound. */
+export const STORE_LIMITS = {
+  modelsPerRestaurant: 60,
+  customModelRefs: 12,
+  customModelIndexes: 12,
+  customDefinitionBytes: 64 * 1024,
+  statementTimeout: "30s",
+  lockTimeout: "10s",
+} as const;
 
 export type StoreOptions = {
   /** Model definitions to use instead of the installed library (platform.model_templates). */
@@ -42,6 +63,9 @@ type ChangeState = {
   dirty: boolean;
 };
 
+/** One thing to do in the restaurant's schemas, in order: change something, or look first. */
+type Step = { kind: "statement"; sql: string } | { kind: "check"; sql: string; message: string };
+
 type Session = {
   orgUuid: string;
   targets: { live: CompileTarget; draft: CompileTarget };
@@ -51,13 +75,24 @@ type Session = {
   library: (key: string) => ModelDefinition | undefined;
   /** Keys that have a row in platform.model_templates. */
   installed: Set<string>;
-  ddl: string[];
+  /** Keys held by a record that is not a proper model: a custom model with a name custom models may not have. */
+  blocked: Set<string>;
+  steps: Step[];
+  removedModels: ModelState[];
+  removedChanges: ChangeState[];
   opts: StoreOptions;
 };
 
 const orgUuidOf = (org: string): string => (org.startsWith("org_") ? toUuid(org) : org);
 
 const record = (target: CompileTarget, statements: string[]): string => `-- ${target.schema}\n${statements.map((s) => `${s};`).join("\n")}`;
+
+const run = (s: Session, statements: string[]): void => {
+  for (const sql of statements) s.steps.push({ kind: "statement", sql });
+};
+const look = (s: Session, checks: PreCheck[]): void => {
+  for (const c of checks) s.steps.push({ kind: "check", sql: c.sql, message: c.message });
+};
 
 const definitions = (s: Session, extra: ModelDefinition[] = []): Map<string, ModelDefinition> =>
   new Map([...[...s.models.values()].map((m) => [m.key, m.definition] as const), ...extra.map((d) => [d.key, d] as const)]);
@@ -83,6 +118,13 @@ const withoutChanges = (def: ModelDefinition, changes: ModelChange[]): ModelDefi
   return parseModel({ ...def, fields, unique, indexes });
 };
 
+/** Limits on a model the agent designed. Library models are reviewed by maintainers instead. */
+const checkCustomLimits = (def: ModelDefinition): void => {
+  if (def.fields.filter((f) => f.type === "ref").length > STORE_LIMITS.customModelRefs) throw new Error(`A custom model can link to at most ${STORE_LIMITS.customModelRefs} other models`);
+  if (def.indexes.length > STORE_LIMITS.customModelIndexes) throw new Error(`A custom model can have at most ${STORE_LIMITS.customModelIndexes} indexes`);
+  if (Buffer.byteLength(JSON.stringify(def)) >= STORE_LIMITS.customDefinitionBytes) throw new Error("The custom model's definition is too large");
+};
+
 const loadSession = async (tx: Tx, orgUuid: string, opts: StoreOptions): Promise<Session> => {
   const [org] = await tx<{ store_prefix: string; store_ready: boolean }[]>`select store_prefix, store_ready from platform.organizations where id = ${orgUuid}`;
   if (!org?.store_ready) throw new Error("The restaurant's store is not ready");
@@ -92,9 +134,18 @@ const loadSession = async (tx: Tx, orgUuid: string, opts: StoreOptions): Promise
     select id, key, kind, status, definition from platform.org_models where org_id = ${orgUuid}`;
   const models = new Map<string, ModelState>();
   const byId = new Map<string, string>();
+  const blocked = new Set<string>();
   for (const r of rows) {
     if (r.status !== "draft" && r.status !== "live") continue; // archived models are left alone
-    models.set(r.key, { id: r.id, key: r.key, kind: r.kind, status: r.status, definition: parseModel(r.definition), isNew: false, dirty: false });
+    // A custom model outside the x_ names is never loaded, never compiled, and never built on.
+    if (r.kind === "custom" && !r.key.startsWith(CUSTOM_KEY_PREFIX)) {
+      blocked.add(r.key);
+      continue;
+    }
+    const definition = parseModel(r.definition);
+    // The record and the definition must agree on what kind of model this is.
+    if ((r.kind === "custom") !== (definition.pack === "custom") || definition.key !== r.key) throw new Error(`The record of model "${r.key}" does not match its definition`);
+    models.set(r.key, { id: r.id, key: r.key, kind: r.kind, status: r.status, definition, isNew: false, dirty: false });
     byId.set(r.id, r.key);
   }
   const archived = new Set(rows.filter((r) => r.status === "archived").map((r) => r.key));
@@ -130,7 +181,7 @@ const loadSession = async (tx: Tx, orgUuid: string, opts: StoreOptions): Promise
       return def;
     };
   }
-  return { orgUuid, targets, models, pending, library, installed, ddl: [], opts };
+  return { orgUuid, targets, models, pending, library, installed, blocked, steps: [], removedModels: [], removedChanges: [], opts };
 };
 
 /** Creates new models in the draft schema, as one batch so they may point at each other. */
@@ -138,23 +189,34 @@ const createInDraft = (s: Session, items: { definition: ModelDefinition; kind: "
   if (items.length === 0) return;
   const ctx = { models: definitions(s, items.map((i) => i.definition)) };
   const compiled = items.map((i) => compileModel(i.definition, s.targets.draft, ctx));
-  s.ddl.push(...compiled.flatMap((c) => c.create), ...compiled.flatMap((c) => c.link));
+  run(s, [...compiled.flatMap((c) => c.create), ...compiled.flatMap((c) => c.link)]);
   items.forEach((item, i) => {
     const c = compiled[i];
     if (!c) return;
     const definition = parseModel(item.definition);
+    if ((item.kind === "custom") !== (definition.pack === "custom")) throw new Error("A custom model must be in the custom pack, and only a custom model may be");
     s.models.set(definition.key, { id: newUuid(), key: definition.key, kind: item.kind, status: "draft", definition, isNew: true, dirty: false });
     s.pending.push({ id: newUuid(), modelKey: definition.key, change: item.change, sql: [record(s.targets.draft, c.statements)], appliedLive: false, isNew: true, dirty: false });
   });
 };
 
-/** Library models not yet in the store, with everything they need, dependencies first. */
+/**
+ * Library models not yet in the store, with everything they need, dependencies first.
+ * A custom model can never stand in for a library model: if the restaurant has its own model
+ * under a key the library needs, this stops. (A library model's rules can create trigger
+ * functions with owner rights. Those must only ever sit on tables the library defined.)
+ */
 const missingFromLibrary = (s: Session, keys: readonly string[]): ModelDefinition[] => {
   const out: ModelDefinition[] = [];
   const seen = new Set<string>();
   const visit = (key: string, neededBy?: string): void => {
-    if (seen.has(key) || s.models.has(key)) return;
+    if (seen.has(key)) return;
     seen.add(key);
+    const existing = s.models.get(key);
+    if (s.blocked.has(key) || (existing && existing.kind !== "standard")) {
+      throw new Error(`This restaurant has its own model called "${String(key).slice(0, 48)}". It cannot be used in place of the library model`);
+    }
+    if (existing) return;
     const def = s.library(key);
     if (!def) throw new Error(`Model "${String(key).slice(0, 48)}" is not in the library${neededBy ? `. Model "${neededBy}" needs it` : ""}`);
     if (def.pack === "custom") throw new Error("A library model cannot be in the custom pack");
@@ -192,7 +254,7 @@ const bringLive = (s: Session, keys: readonly string[]): string[] => {
   if (promote.length > 0) {
     const ctx = { models: definitions(s) };
     const compiled = promote.map((m) => compileModel(m.definition, s.targets.live, ctx));
-    s.ddl.push(...compiled.flatMap((c) => c.create), ...compiled.flatMap((c) => c.link));
+    run(s, [...compiled.flatMap((c) => c.create), ...compiled.flatMap((c) => c.link)]);
     promote.forEach((m, i) => {
       const c = compiled[i];
       if (!c) return;
@@ -213,7 +275,8 @@ const bringLive = (s: Session, keys: readonly string[]): string[] => {
     let live = withoutChanges(m.definition, waiting.map((p) => p.change));
     for (const p of waiting) {
       const c = compileChange(p.change, live, s.targets.live, { models: definitions(s) });
-      s.ddl.push(...c.statements);
+      look(s, c.checks);
+      run(s, c.statements);
       p.sql.push(record(s.targets.live, c.statements));
       p.appliedLive = true;
       p.dirty = true;
@@ -224,6 +287,9 @@ const bringLive = (s: Session, keys: readonly string[]): string[] => {
 };
 
 const flush = async (tx: Tx, s: Session): Promise<void> => {
+  for (const p of s.removedChanges) if (!p.isNew) await tx`delete from platform.org_model_changes where id = ${p.id} and org_id = ${s.orgUuid} and applied_live_at is null`;
+  for (const m of s.removedModels) if (!m.isNew) await tx`delete from platform.org_models where id = ${m.id} and org_id = ${s.orgUuid} and status = 'draft'`;
+
   for (const m of s.models.values()) {
     const definition = JSON.stringify(m.definition);
     if (m.isNew) {
@@ -255,6 +321,22 @@ const flush = async (tx: Tx, s: Session): Promise<void> => {
 };
 
 /**
+ * Runs the planned steps as the migrator. Every statement is read once more by the guard
+ * (compiler/guard.ts) before it is sent: one statement, of a kind the compiler emits.
+ */
+const execute = async (tx: Tx, steps: Step[]): Promise<void> => {
+  for (const step of steps) {
+    if (step.kind === "statement") {
+      await tx.unsafe(checkStatement(step.sql));
+    } else {
+      const rows = await tx.unsafe(checkQuery(step.sql));
+      // The row says only that something was found. Its values never leave the database.
+      if (rows.length > 0) throw new Error(step.message);
+    }
+  }
+};
+
+/**
  * One transaction per restaurant: lock, read what is there, plan and compile (no database
  * work), run the SQL as the migrator, then write the records as the admin login.
  * A failure anywhere rolls back the tables and the records together.
@@ -262,7 +344,8 @@ const flush = async (tx: Tx, s: Session): Promise<void> => {
 const inStore = async <T>(adminSql: Sql, org: string, opts: StoreOptions, work: (s: Session) => T): Promise<T> => {
   const orgUuid = Uuid.parse(orgUuidOf(org));
   return asMigrator(adminSql, async (tx) => {
-    await tx.unsafe("set local lock_timeout = '10s'");
+    await tx.unsafe(`set local lock_timeout = '${STORE_LIMITS.lockTimeout}'`);
+    await tx.unsafe(`set local statement_timeout = '${STORE_LIMITS.statementTimeout}'`);
     // Compiled SQL names everything in full. An empty search path makes sure nothing else is ever picked up.
     await tx.unsafe("set local search_path = ''");
     await tx`select pg_advisory_xact_lock(hashtextextended(${`rms.models:${orgUuid}`}, 0))`;
@@ -270,9 +353,10 @@ const inStore = async <T>(adminSql: Sql, org: string, opts: StoreOptions, work: 
     await tx.unsafe("set local role rms_admin");
     const s = await loadSession(tx, orgUuid, opts);
     const out = work(s);
-    if (s.ddl.length > 0) {
+    if (s.models.size + s.blocked.size > STORE_LIMITS.modelsPerRestaurant) throw new Error(`A restaurant can have at most ${STORE_LIMITS.modelsPerRestaurant} models`);
+    if (s.steps.length > 0) {
       await tx.unsafe("set local role rms_tenant_migrator");
-      for (const statement of s.ddl) await tx.unsafe(statement);
+      await execute(tx, s.steps);
       await tx.unsafe("set local role rms_admin");
     }
     await flush(tx, s);
@@ -296,14 +380,21 @@ export type EnsureResult = {
 export const ensureModels = (adminSql: Sql, org: string, keys: readonly string[], opts: StoreOptions = {}): Promise<EnsureResult> =>
   inStore(adminSql, org, opts, (s) => {
     const wanted = [...new Set(keys)];
-    const unchanged = wanted.filter((k) => s.models.get(k)?.status === "live");
     const missing = missingFromLibrary(s, wanted);
+    const unchanged = wanted.filter((k) => s.models.get(k)?.status === "live");
     createInDraft(s, missing.map((definition) => ({ definition, kind: "standard" as const, change: { op: "use_template" as const, template: definition.key } })));
     const created = missing.map((m) => m.key);
     const toLive = [...created, ...wanted.filter((k) => s.models.get(k)?.status === "draft")];
     const live = bringLive(s, [...new Set(toLive)]);
     return { created, madeLive: live.filter((k) => !created.includes(k)), unchanged };
   });
+
+export type ApplyOptions = StoreOptions & {
+  /** Also apply to live now (the mini-app is being published, or the owner confirmed). */
+  live?: boolean;
+  /** The owner said yes to this change. Needed for a unique rule on a library model. */
+  ownerConfirmed?: boolean;
+};
 
 export type ApplyResult = {
   /** The model the change was about. */
@@ -315,11 +406,12 @@ export type ApplyResult = {
 };
 
 /**
- * Applies one structured change. Draft first, always. Live only when `live` is true (the
- * mini-app is being published, or the owner confirmed).
- * The change is validated here. For `create_custom_model` the key may not shadow a library model.
+ * Applies one structured change. Draft first, always. Live only when `live` is true.
+ * The change is validated here. A custom model's key starts with `x_` and may not shadow a
+ * library model. A unique rule is only added when no rows already break it, and on a library
+ * model only when the owner confirmed.
  */
-export const applyChange = async (adminSql: Sql, org: string, change: ModelChange, opts: StoreOptions & { live?: boolean } = {}): Promise<ApplyResult> => {
+export const applyChange = async (adminSql: Sql, org: string, change: ModelChange, opts: ApplyOptions = {}): Promise<ApplyResult> => {
   const ch = ModelChange.parse(change);
   return inStore(adminSql, org, opts, (s) => {
     const before = new Set(s.pending.map((p) => p.id));
@@ -331,17 +423,33 @@ export const applyChange = async (adminSql: Sql, org: string, change: ModelChang
       createInDraft(s, missing.map((definition) => ({ definition, kind: "standard" as const, change: { op: "use_template" as const, template: definition.key } })));
     } else if (ch.op === "create_custom_model") {
       model = ch.definition.key;
-      if (s.models.has(model)) throw new Error("This restaurant already has a model with that name");
-      if (s.library(model) || s.installed.has(model)) throw new Error("That name belongs to a library model");
       const definition = parseModel(ch.definition);
+      if (s.models.has(model) || s.blocked.has(model)) throw new Error("This restaurant already has a model with that name");
+      if (s.library(model) || s.installed.has(model)) throw new Error("That name belongs to a library model");
+      checkCustomLimits(definition);
       for (const dep of modelDependencies(definition)) if (!s.models.has(dep)) throw new Error(`Model "${dep}" is not in this restaurant's store yet`);
       createInDraft(s, [{ definition, kind: "custom", change: ch }]);
     } else {
       model = ch.model;
       const m = s.models.get(model);
       if (!m) throw new Error("Model is not in this restaurant's store");
+      if (ch.op === "add_unique" && m.kind === "standard" && opts.ownerConfirmed !== true) {
+        throw new Error("A unique rule on a library model needs the owner to confirm it first");
+      }
       const c = compileChange(ch, m.definition, s.targets.draft, { models: definitions(s) });
-      s.ddl.push(...c.statements);
+      if (m.kind === "custom") checkCustomLimits(c.definition);
+      look(s, c.checks);
+      // Look at live too, when the rule can already be checked there, so that the owner hears
+      // about rows that break it now and not on the day the mini-app is published.
+      if (ch.op === "add_unique" && m.status === "live" && !opts.live) {
+        const live = withoutChanges(m.definition, s.pending.filter((p) => p.modelKey === model && !p.appliedLive).map((p) => p.change));
+        try {
+          look(s, compileChange(ch, live, s.targets.live, { models: definitions(s) }).checks);
+        } catch {
+          // The rule uses a field that is not live yet. It is checked when that field goes live.
+        }
+      }
+      run(s, c.statements);
       m.definition = c.definition;
       m.dirty = true;
       s.pending.push({ id: newUuid(), modelKey: model, change: ch, sql: [record(s.targets.draft, c.statements)], appliedLive: false, isNew: true, dirty: false });
@@ -360,6 +468,40 @@ export const applyChange = async (adminSql: Sql, org: string, change: ModelChang
  */
 export const publishModelChanges = (adminSql: Sql, org: string, keys?: readonly string[], opts: StoreOptions = {}): Promise<string[]> =>
   inStore(adminSql, org, opts, (s) => bringLive(s, keys ?? [...s.models.keys()]));
+
+/**
+ * Throws away one change that is in draft and not yet live, and undoes it in the draft schema.
+ * Changes to one model are discarded newest first. A new model can be discarded only while
+ * no other model points at it. Returns the model the change was about.
+ */
+export const discardPendingChange = (adminSql: Sql, org: string, changeId: string, opts: StoreOptions = {}): Promise<{ model: string }> =>
+  inStore(adminSql, org, opts, (s) => {
+    const id = Uuid.parse(changeId);
+    const p = s.pending.find((x) => x.id === id);
+    if (!p) throw new Error("That change is not waiting. It is already live, or it does not belong to this restaurant");
+    const m = s.models.get(p.modelKey);
+    if (!m) throw new Error("Model is not in this restaurant's store");
+    const waiting = s.pending.filter((x) => x.modelKey === p.modelKey);
+    if (waiting[waiting.length - 1] !== p) throw new Error("Discard the newer changes to this model first");
+
+    if (p.change.op === "add_field" || p.change.op === "add_unique" || p.change.op === "add_index") {
+      const c = compileDiscard(p.change, m.definition, s.targets.draft);
+      run(s, c.statements);
+      m.definition = c.definition;
+      m.dirty = true;
+    } else {
+      if (m.status !== "draft") throw new Error("That model is already live");
+      for (const other of s.models.values()) {
+        if (other.key !== m.key && modelDependencies(other.definition).includes(m.key)) throw new Error(`Model "${other.key}" still points at this one`);
+      }
+      run(s, compileDrop(m.definition, s.targets.draft));
+      s.models.delete(m.key);
+      s.removedModels.push(m);
+    }
+    s.pending.splice(s.pending.indexOf(p), 1);
+    s.removedChanges.push(p);
+    return { model: p.modelKey };
+  });
 
 /**
  * The model as it is in one environment. Draft can be ahead of live: platform.org_models holds

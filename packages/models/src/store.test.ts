@@ -8,7 +8,7 @@ import { type Tx, adminDb, apiDb, closeAll, newUuid, provisionStore, withOrg, wi
 import { fixtureModel, fixtureModels } from "./compiler/__fixtures__/pack.js";
 import { compileModel, objectName, ruleConstraintName, targetsFor } from "./compiler/index.js";
 import { buildLibrary, installLibrary } from "./library.js";
-import { applyChange, effectiveDefinition, ensureModels, publishModelChanges } from "./store.js";
+import { STORE_LIMITS, applyChange, discardPendingChange, effectiveDefinition, ensureModels, publishModelChanges } from "./store.js";
 
 // The worktree has no .env.local. Walk up to the main checkout's file. Its values are never printed.
 const findEnv = (): string | undefined => {
@@ -22,7 +22,10 @@ const findEnv = (): string | undefined => {
 };
 const envFile = findEnv();
 if (envFile) process.loadEnvFile(envFile);
-const hasDb = Boolean(process.env.DATABASE_URL && process.env.DATABASE_ADMIN_URL);
+// These tests are the proof that the compiled SQL is safe on a real database. Without one they must fail, not skip.
+if (!process.env.DATABASE_URL || !process.env.DATABASE_ADMIN_URL) {
+  throw new Error("The model store tests need the local database: DATABASE_URL and DATABASE_ADMIN_URL are not set (no .env.local found)");
+}
 
 const id = (suffix: string) => `0193a3c0-0000-7000-8000-0000000000${suffix}`;
 const A = id("c1");
@@ -88,7 +91,7 @@ const expectedColumns = (def: ModelDefinition) => {
   return [...system, ...def.fields.flatMap(columnsForField)].map((c) => ({ name: c.name, type: catalogType(c.sqlType), notnull: !c.nullable }));
 };
 
-describe.skipIf(!hasDb)("model tables in a restaurant's store", () => {
+describe("model tables in a restaurant's store", () => {
   let first: Awaited<ReturnType<typeof ensureModels>>;
 
   beforeAll(async () => {
@@ -210,13 +213,13 @@ describe.skipIf(!hasDb)("model tables in a restaurant's store", () => {
                    left join pg_roles g on g.oid = a.grantee where a.grantee <> p.proowner)::text[] as grantees
       from pg_proc p join pg_namespace n on n.oid = p.pronamespace join pg_roles r on r.oid = p.proowner
       where n.nspname in ${sql([PA, `${PA}_draft`])}`;
-    expect(fns).toHaveLength(12);
+    expect(fns).toHaveLength(14);
     for (const f of fns) {
       expect(f.owner).toBe("rms_tenant_migrator");
       expect(f.config).toEqual(['search_path=""']);
       expect(f.grantees).toEqual([]);
       // Definer rights only where the check must see rows at every location.
-      expect(f.definer, f.name).toBe([objectName("fn", "journal_entry", "entry_balances"), objectName("fnr", "paid_out", "paid_from_an_expense")].includes(f.name));
+      expect(f.definer, f.name).toBe([objectName("fn", "journal_entry", "entry_balances"), objectName("fnh", "journal_entry", "entry_balances"), objectName("fnr", "paid_out", "paid_from_an_expense")].includes(f.name));
     }
   });
 
@@ -296,13 +299,18 @@ describe.skipIf(!hasDb)("model tables in a restaurant's store", () => {
     for (const env of ["live", "draft"] as const) {
       const c = ctx(A, PA, env);
       const e = newUuid();
-      await one(c, `insert into $T.journal_entry (${SYS}, location_id, entry_date) values (${sys()}, $2, '2026-11-02')`, [e, L1]);
+      const [debit, credit] = [newUuid(), newUuid()];
+      await asStore(c, async (q) => {
+        await q(`insert into $T.account (${SYS}, code, name, type) values (${sys(1)}, '9001', 'Test debit', 'asset'), ($2, 'manual', 'u', 'u', '9002', 'Test credit', 'revenue')`, [debit, credit]);
+        await q(`insert into $T.journal_entry (${SYS}, location_id, entry_date) values (${sys()}, $2, '2026-11-02')`, [e, L1]);
+        await q(`insert into $T.journal_line (${SYS}, location_id, currency, entry, account, debit, credit) values (${sys(1)}, $3, 'USD', $4, $5, 100, 0), ($2, 'manual', 'u', 'u', $3, 'USD', $4, $6, 0, 100)`, [newUuid(), newUuid(), L1, e, debit, credit]);
+      });
       await expect(one(c, `update $T.journal_entry set memo = 'edited' where id = $1`, [e])).rejects.toThrow(/permission denied/);
       await expect(one(c, `delete from $T.journal_entry where id = $1`, [e])).rejects.toThrow(/permission denied/);
       await expect(one(c, `truncate $T.journal_entry`)).rejects.toThrow(/permission denied/);
       await expect(one(c, `update $T.journal_line set debit = 0`)).rejects.toThrow(/permission denied/);
       await expect(one(c, `delete from $T.journal_line`)).rejects.toThrow(/permission denied/);
-      expect(await one(c, `select count(*)::int as n from $T.journal_entry where id = $1`, [e])).toEqual([{ n: 1 }]);
+      expect(await one(c, `select (select count(*) from $T.journal_entry where id = $1)::int as entries, (select count(*) from $T.journal_line where entry = $1)::int as lines`, [e])).toEqual([{ entries: 1, lines: 2 }]);
     }
   });
 
@@ -369,7 +377,7 @@ describe.skipIf(!hasDb)("model tables in a restaurant's store", () => {
         accounts.tips,
       ]);
     });
-    expect(await one(ctx(A, PA), `select count(*)::int as n from $T.account`)).toEqual([{ n: 3 }]);
+    expect(await one(ctx(A, PA), `select count(*)::int as n from $T.account where code in ('1000', '4000', '2100')`)).toEqual([{ n: 3 }]);
   });
 
   it("an unbalanced batch fails at commit and leaves nothing behind", async () => {
@@ -395,26 +403,80 @@ describe.skipIf(!hasDb)("model tables in a restaurant's store", () => {
     expect(await lineCount(e)).toBe(0);
   });
 
-  it("a later unbalanced line on a balanced entry fails, and a balanced pair passes", async () => {
+  it("a posted entry can never be changed: no later lines, balanced or not, by anyone", async () => {
     const e = newUuid();
     await post(ctx(A, PA), e, "2026-11-11", [line(e, accounts.cash, 700, 0), line(e, accounts.sales, 0, 700)]);
-    await expect(post(ctx(A, PA), e, "2026-11-11", [line(e, accounts.cash, 1, 0)], { header: false })).rejects.toThrow(/does not balance/);
-    await post(ctx(A, PA), e, "2026-11-11", [line(e, accounts.cash, 50, 0), line(e, accounts.sales, 0, 50)], { header: false });
-    expect(await lineCount(e)).toBe(4);
+    const later = (c: TenantContext, lines: ReturnType<typeof line>[]) => post(c, e, "2026-11-11", lines, { header: false });
+    const posted = { code: "23514", message: "The entry is already posted and cannot be changed", constraint_name: ruleConstraintName("journal_entry", "entry_balances") };
+    await expect(later(ctx(A, PA), [line(e, accounts.cash, 1, 0)])).rejects.toMatchObject(posted);
+    // A balanced addition is still a change to a posted entry.
+    await expect(later(ctx(A, PA), [line(e, accounts.cash, 50, 0), line(e, accounts.sales, 0, 50)])).rejects.toMatchObject(posted);
+    // So is one from a caller at the same location, or limited to another one.
+    await expect(later(ctx(A, PA, "live", [L1]), [line(e, accounts.cash, 50, 0), line(e, accounts.sales, 0, 50)])).rejects.toMatchObject(posted);
+    await expect(later(ctx(A, PA, "live", [L2]), [line(e, accounts.cash, 50, 0, L2), line(e, accounts.sales, 0, 50, L2)])).rejects.toMatchObject(posted);
+    expect(await lineCount(e)).toBe(2);
   });
 
-  it("the balance check counts lines at locations the caller cannot see", async () => {
+  it("an entry with no lines does not commit", async () => {
+    const e = newUuid();
+    await expect(post(ctx(A, PA), e, "2026-11-11", [])).rejects.toMatchObject({ code: "23514", message: "The entry has no lines", constraint_name: ruleConstraintName("journal_entry", "entry_balances") });
+    expect(await one(ctx(A, PA), `select count(*)::int as n from $T.journal_entry where id = $1`, [e])).toEqual([{ n: 0 }]);
+  });
+
+  it("a header and its lines written inside savepoints still count as one transaction", async () => {
+    const write = (plan: (tx: Tx, header: () => Promise<unknown>, lines: () => Promise<unknown>) => Promise<unknown>) => {
+      const e = newUuid();
+      const done = withStore(apiDb(), ctx(A, PA), (tx, store) => {
+        const header = () => tx.unsafe(`insert into ${store.table("journal_entry")} (${SYS}, location_id, entry_date) values ($1, 'manual', 'u', 'u', $2, '2026-11-11')`, [e, L1]);
+        const lines = () =>
+          tx.unsafe(
+            `insert into ${store.table("journal_line")} (${SYS}, location_id, currency, entry, account, debit, credit) values ($1, 'manual', 'u', 'u', $3, 'USD', $4, $5, 90, 0), ($2, 'manual', 'u', 'u', $3, 'USD', $4, $6, 0, 90)`,
+            [newUuid(), newUuid(), L1, e, accounts.cash, accounts.sales],
+          );
+        return plan(tx, header, lines);
+      });
+      return { e, done };
+    };
+    // Both inside one savepoint.
+    const both = write((tx, header, lines) => tx.savepoint(async () => { await header(); await lines(); }));
+    await both.done;
+    expect(await lineCount(both.e)).toBe(2);
+    // Header in the main transaction, lines in a savepoint. And the other way round.
+    const split = write(async (tx, header, lines) => { await header(); await tx.savepoint(() => lines()); });
+    await split.done;
+    const other = write(async (tx, header, lines) => { await tx.savepoint(() => header()); await lines(); });
+    await other.done;
+    expect(await lineCount(split.e)).toBe(2);
+    expect(await lineCount(other.e)).toBe(2);
+    // Lines in a savepoint that is rolled back are gone, so the entry has no lines and does not commit.
+    const undone = write(async (tx, header, lines) => {
+      await header();
+      await tx.savepoint(async () => { await lines(); throw new Error("undo the lines"); }).catch(() => undefined);
+    });
+    await expect(undone.done).rejects.toThrow(/has no lines/);
+  });
+
+  it("the balance check counts every line, whatever the caller's locations are at commit", async () => {
     // One entry with its debit at location 1 and its credit at location 2. Balanced as a whole.
     const e = newUuid();
     await post(ctx(A, PA), e, "2026-11-12", [line(e, accounts.cash, 4000, 0, L1), line(e, accounts.sales, 0, 4000, L2)]);
-    const onlyL1 = ctx(A, PA, "live", [L1]);
-    expect(await asStore(onlyL1, (q) => q(`select count(*)::int as n from $T.journal_line where entry = $1`, [e]))).toEqual([{ n: 1 }]);
-    // The part this caller can see is NOT balanced on its own (4000 debit, no credit). A check that
-    // ran as the caller would let it "fix" that with a credit of 4000 and break the entry.
-    await expect(post(onlyL1, e, "2026-11-12", [line(e, accounts.sales, 0, 4000, L1)], { header: false })).rejects.toThrow(/does not balance/);
-    // And a correct, balanced addition is accepted.
-    await post(onlyL1, e, "2026-11-12", [line(e, accounts.cash, 25, 0, L1), line(e, accounts.sales, 0, 25, L1)], { header: false });
-    expect(await lineCount(e)).toBe(4);
+    expect(await one(ctx(A, PA, "live", [L1]), `select count(*)::int as n from $T.journal_line where entry = $1`, [e])).toEqual([{ n: 1 }]);
+
+    // A debit at location 2, then the transaction narrows to location 1 and adds a balanced pair there.
+    // At commit only the pair is visible to the caller. A check that ran as the caller would pass it.
+    const bad = newUuid();
+    const sneaky = withStore(apiDb(), ctx(A, PA), async (tx, store) => {
+      const insertLine = (loc: string, account: string, debit: number, credit: number) =>
+        tx.unsafe(`insert into ${store.table("journal_line")} (${SYS}, location_id, currency, entry, account, debit, credit) values ($1, 'manual', 'u', 'u', $2, 'USD', $3, $4, $5, $6)`, [newUuid(), loc, bad, account, debit, credit]);
+      await tx.unsafe(`insert into ${store.table("journal_entry")} (${SYS}, location_id, entry_date) values ($1, 'manual', 'u', 'u', $2, '2026-11-12')`, [bad, L1]);
+      await insertLine(L2, accounts.cash, 4000, 0);
+      await tx`select set_config('rms.locations', ${L1}, true)`;
+      await insertLine(L1, accounts.cash, 25, 0);
+      await insertLine(L1, accounts.sales, 0, 25);
+      return [...(await tx.unsafe(`select count(*)::int as n from ${store.table("journal_line")} where entry = $1`, [bad]))];
+    });
+    await expect(sneaky).rejects.toThrow(/does not balance/);
+    expect(await lineCount(bad)).toBe(0);
   });
 
   it("line rules: one side only, never negative, and a real entry and account", async () => {
@@ -453,8 +515,25 @@ describe.skipIf(!hasDb)("model tables in a restaurant's store", () => {
       await post(ctx(A, PA), e, day, [line(e, accounts.cash, 100, 0), line(e, accounts.sales, 0, 100)]);
     }
     // Closing a period later shuts it for new entries.
+    const december = (await one(ctx(A, PA), `select id from $T.journal_entry where entry_date = '2026-12-15'`))[0]?.id as string;
     await one(ctx(A, PA), `update $T.fiscal_period set status = 'closed' where name = 'December 2026'`);
     await expect(post(ctx(A, PA), newUuid(), "2026-12-16", [])).rejects.toThrow(/period is closed/);
+    // And the entry posted there before it closed takes no more lines.
+    await expect(post(ctx(A, PA), december, "2026-12-15", [line(december, accounts.cash, 5, 0), line(december, accounts.sales, 0, 5)], { header: false })).rejects.toMatchObject({
+      code: "23514",
+      constraint_name: ruleConstraintName("journal_entry", "entry_balances"),
+    });
+    expect(await lineCount(december)).toBe(2);
+    // The header's period rule is checked again for its lines: a period that closes after the
+    // header is written, in the same transaction, still stops them.
+    const late = newUuid();
+    const closing = asStore(ctx(A, PA), async (q) => {
+      await q(`insert into $T.journal_entry (${SYS}, location_id, entry_date) values (${sys()}, $2, '2027-03-10')`, [late, L1]);
+      await q(`insert into $T.fiscal_period (${SYS}, name, start_date, end_date, status) values (${sys()}, 'March 2027', '2027-03-01', '2027-03-31', 'closed')`, [newUuid()]);
+      for (const l of [line(late, accounts.cash, 100, 0), line(late, accounts.sales, 0, 100)]) await q(l.text, l.params);
+    });
+    await expect(closing).rejects.toMatchObject({ code: "23514", message: "The period is closed", constraint_name: ruleConstraintName("journal_entry", "period_is_open") });
+    expect(await lineCount(late)).toBe(0);
     await expect(one(ctx(A, PA), `insert into $T.fiscal_period (${SYS}, name, start_date, end_date, status) values (${sys()}, 'Backwards', '2027-02-01', '2027-01-01', 'open')`, [newUuid()])).rejects.toThrow(/violates check constraint/);
   });
 
@@ -548,6 +627,15 @@ describe.skipIf(!hasDb)("model tables in a restaurant's store", () => {
     await expect(day("takeout", "USD", -1)).rejects.toMatchObject({ constraint_name: ruleConstraintName("sales_day", "net_sales_not_negative") });
     await expect(day("takeout", "USD", 1, "x".repeat(501))).rejects.toThrow(/violates check constraint/);
     await expect(one(c, `insert into $T.account (${SYS}, code, name, type) values (${sys()}, '1000', 'Cash again', 'asset')`, [newUuid()])).rejects.toThrow(/unique/);
+    // A deleted row does not hold on to its code: the same code can be used again, once.
+    const petty = async () => (await one(c, `insert into $T.account (${SYS}, code, name, type) values (${sys()}, '1900', 'Petty cash', 'asset') returning id`, [newUuid()]))[0]?.id;
+    const first = await petty();
+    await expect(petty()).rejects.toThrow(/unique/);
+    await one(c, `update $T.account set deleted_at = now() where id = $1`, [first]);
+    const second = await petty();
+    expect(second).not.toBe(first);
+    await expect(petty()).rejects.toThrow(/unique/);
+    expect(await one(c, `select count(*)::int as n from $T.account where code = '1900'`)).toEqual([{ n: 2 }]);
     await expect(one(c, `insert into $T.labour_day (${SYS}, location_id, currency, business_date, hours) values (${sys()}, $2, 'USD', '2026-11-14', 8)`, [newUuid(), L1])).rejects.toThrow(/null value in column "job"/);
     await one(c, `insert into $T.labour_day (${SYS}, location_id, currency, business_date, job, job_label, hours, wages) values (${sys()}, $2, 'USD', '2026-11-14', $3, 'Line cook', 7.5, 13500)`, [newUuid(), L1, newUuid()]);
   });
@@ -566,6 +654,19 @@ describe.skipIf(!hasDb)("model tables in a restaurant's store", () => {
     await expect(ensureModels(sql, C, ["vendor", "no_such_model"], { library })).rejects.toThrow('Model "no_such_model" is not in the library');
     expect(await left()).toEqual({ models: 0, tables: 0 });
     await expect(ensureModels(sql, id("ce"), ["vendor"], { library })).rejects.toThrow(/store is not ready/);
+
+    // A record that says the restaurant has its OWN model under a library name. The library model's
+    // rules (and their trigger functions) must never be put on such a table, asked for by name or pulled in.
+    for (const key of ["labour_day", "fiscal_period", "journal_line"]) {
+      const planted = newUuid();
+      const shaped = { ...fixtureModel("vendor"), key, pack: "custom" };
+      await sql`insert into platform.org_models (id, org_id, key, kind, definition, status) values (${planted}, ${C}, ${key}, 'custom', ${JSON.stringify(shaped)}::text::jsonb, 'live')`;
+      const ask = key === "labour_day" ? ["labour_day"] : ["vendor", "journal_entry"];
+      await expect(ensureModels(sql, C, ask, { library })).rejects.toThrow(`This restaurant has its own model called "${key}". It cannot be used in place of the library model`);
+      await expect(applyChange(sql, C, { op: "use_template", template: key }, { library })).rejects.toThrow(/cannot be used in place of the library model/);
+      await sql`delete from platform.org_models where id = ${planted}`;
+      expect(await left()).toEqual({ models: 0, tables: 0 });
+    }
 
     // A statement that fails rolls back every table and every record of that call.
     // This model's check compares text with a number: it compiles, and Postgres refuses it.
@@ -615,7 +716,9 @@ describe.skipIf(!hasDb)("model tables in a restaurant's store", () => {
     expect(change?.compiled_sql).not.toContain(`"${PC}"."vendor"`);
 
     // A second waiting change, then both go live together, in order.
-    await applyChange(sql, C, { op: "add_unique", model: "vendor", fields: ["name", "phone"] }, { library });
+    await expect(applyChange(sql, C, { op: "add_unique", model: "vendor", fields: ["name", "phone"] }, { library })).rejects.toThrow(/needs the owner to confirm/);
+    await expect(applyChange(sql, C, { op: "add_unique", model: "vendor", fields: ["name", "phone"] }, { library, ownerConfirmed: "yes" as never })).rejects.toThrow(/needs the owner to confirm/);
+    await applyChange(sql, C, { op: "add_unique", model: "vendor", fields: ["name", "phone"] }, { library, ownerConfirmed: true });
     await applyChange(sql, C, { op: "add_index", model: "vendor", fields: ["phone"] }, { library });
     expect(await publishModelChanges(sql, C, ["vendor"], { library })).toEqual(["vendor"]);
     expect(await columnsIn(PC, "vendor")).toContain("phone");
@@ -656,6 +759,15 @@ describe.skipIf(!hasDb)("model tables in a restaurant's store", () => {
       { op: "create_custom_model", definition: { ...fixtureModel("sales_day"), pack: "custom" } },
       { op: "create_custom_model", definition: { ...fixtureModel("journal_entry"), key: "my_ledger", pack: "custom" } },
       { op: "use_template", template: "no_such_template" },
+      // A custom model's key must start with x_. A library model's key never does.
+      { op: "create_custom_model", definition: { ...fixtureModel("vendor"), key: "plain_note", pack: "custom" } },
+      { op: "create_custom_model", definition: { ...fixtureModel("vendor"), key: "x_note", pack: "inventory" } },
+      // Too many links, and a definition that is too large.
+      { op: "create_custom_model", definition: { ...fixtureModel("vendor"), key: "x_many_links", pack: "custom", fields: Array.from({ length: 13 }, (_, i) => ({ key: `link_${i}`, label: "Link", type: "ref", model: "vendor" })) } },
+      { op: "create_custom_model", definition: { ...fixtureModel("vendor"), key: "x_huge", pack: "custom", fields: Array.from({ length: 80 }, (_, i) => ({ key: `pick_${i}`, label: "Pick", type: "enum", values: Array.from({ length: 60 }, (_, v) => `value_${String(v).padStart(2, "0")}_${"a".repeat(38)}`) })) } },
+      // A field named after a column the database keeps for itself.
+      { op: "add_field", model: "vendor", field: { key: "xmin", label: "x", type: "text" } },
+      { op: "create_custom_model", definition: { ...fixtureModel("vendor"), key: "x_ctid", pack: "custom", fields: [{ key: "ctid", label: "x", type: "text" }] } },
     ];
     for (const change of bad) await expect(applyChange(sql, C, change as never, { library }), JSON.stringify(change).slice(0, 80)).rejects.toThrow();
     expect(await columnsIn(`${PC}_draft`, "vendor")).toEqual(before);
@@ -668,7 +780,7 @@ describe.skipIf(!hasDb)("model tables in a restaurant's store", () => {
   it("a custom model starts in draft only, with hostile text kept as plain data", async () => {
     const sql = adminDb();
     const definition = {
-      key: "team_note",
+      key: "x_team_note",
       version: 1,
       pack: "custom",
       name: "Team note",
@@ -683,31 +795,118 @@ describe.skipIf(!hasDb)("model tables in a restaurant's store", () => {
       defaultAccess: { owner: "write", staff: "write" },
     };
     const r = await applyChange(sql, C, { op: "create_custom_model", definition } as never, { library });
-    expect(r).toMatchObject({ model: "team_note", appliedDraft: true, appliedLive: false });
-    const [row] = await sql`select kind, status, template_key from platform.org_models where org_id = ${C} and key = 'team_note'`;
+    expect(r).toMatchObject({ model: "x_team_note", appliedDraft: true, appliedLive: false });
+    const [row] = await sql`select kind, status, template_key from platform.org_models where org_id = ${C} and key = 'x_team_note'`;
     expect({ ...row }).toEqual({ kind: "custom", status: "draft", template_key: null });
-    expect(await effectiveDefinition(sql, C, "team_note", "live")).toBeUndefined();
-    expect((await effectiveDefinition(sql, C, "team_note", "draft"))?.key).toBe("team_note");
+    expect(await effectiveDefinition(sql, C, "x_team_note", "live")).toBeUndefined();
+    expect((await effectiveDefinition(sql, C, "x_team_note", "draft"))?.key).toBe("x_team_note");
 
     // In draft the table works, and the hostile text is just a value the check compares with.
-    const note = (body: string) => one(ctx(C, PC, "draft"), `insert into $T.team_note (${SYS}, location_id, body) values (${sys()}, $2, $3)`, [newUuid(), L1, body]);
+    const note = (body: string) => one(ctx(C, PC, "draft"), `insert into $T.x_team_note (${SYS}, location_id, body) values (${sys()}, $2, $3)`, [newUuid(), L1, body]);
     await note("Order more limes");
     await note(`${HOSTILE} `);
-    await expect(note(HOSTILE)).rejects.toMatchObject({ constraint_name: ruleConstraintName("team_note", "not_the_bad_word") });
+    await expect(note(HOSTILE)).rejects.toMatchObject({ constraint_name: ruleConstraintName("x_team_note", "not_the_bad_word") });
     await expect(note(`${HOSTILE}2`)).rejects.toThrow(/violates check constraint/);
     await expect(note("banned")).rejects.toThrow(/violates check constraint/);
     // Not in live yet.
-    await expect(one(ctx(C, PC), `select * from $T.team_note`)).rejects.toThrow(/does not exist/);
+    await expect(one(ctx(C, PC), `select * from $T.x_team_note`)).rejects.toThrow(/does not exist/);
 
     // A live model gets a link to the draft-only model. Publishing that change brings the custom model live first.
-    await applyChange(sql, C, { op: "add_field", model: "account", field: { key: "note", label: "Note", type: "ref", model: "team_note", required: false, onDelete: "set_null" } }, { library });
-    expect((await publishModelChanges(sql, C, ["account"], { library })).sort()).toEqual(["account", "team_note"]);
-    expect(await one(ctx(C, PC), `select count(*)::int as n from $T.team_note`)).toEqual([{ n: 0 }]);
-    await expect(one(ctx(C, PC), `insert into $T.team_note (${SYS}, location_id, body) values (${sys()}, $2, $3)`, [newUuid(), L1, HOSTILE])).rejects.toThrow(/violates check constraint/);
-    expect((await sql`select status from platform.org_models where org_id = ${C} and key = 'team_note'`)[0]?.status).toBe("live");
+    await applyChange(sql, C, { op: "add_field", model: "account", field: { key: "note", label: "Note", type: "ref", model: "x_team_note", required: false, onDelete: "set_null" } }, { library });
+    expect((await publishModelChanges(sql, C, ["account"], { library })).sort()).toEqual(["account", "x_team_note"]);
+    expect(await one(ctx(C, PC), `select count(*)::int as n from $T.x_team_note`)).toEqual([{ n: 0 }]);
+    await expect(one(ctx(C, PC), `insert into $T.x_team_note (${SYS}, location_id, body) values (${sys()}, $2, $3)`, [newUuid(), L1, HOSTILE])).rejects.toThrow(/violates check constraint/);
+    expect((await sql`select status from platform.org_models where org_id = ${C} and key = 'x_team_note'`)[0]?.status).toBe("live");
     expect((await sql`select count(*)::int as n from platform.org_model_changes where org_id = ${C} and applied_live_at is null`)[0]?.n).toBe(0);
     // And the platform is still there.
     expect((await sql`select count(*)::int as n from platform.organizations where id = ${C}`)[0]?.n).toBe(1);
+  });
+
+  it("a unique rule is only added when no rows already break it, and the error names no values", async () => {
+    const sql = adminDb();
+    const vendorRow = (env: "live" | "draft", name: string, phone: string) =>
+      one(ctx(C, PC, env), `insert into $T.vendor (${SYS}, name, phone) values (${sys()}, $2, $3) returning id`, [newUuid(), name, phone]).then((r) => r[0]?.id as string);
+    const add = () => applyChange(sql, C, { op: "add_unique", model: "vendor", fields: ["phone"] }, { library, ownerConfirmed: true });
+    const waiting = async () => (await sql`select count(*)::int as n from platform.org_model_changes where org_id = ${C} and applied_live_at is null`)[0]?.n;
+
+    // Two draft rows share a phone number.
+    const d1 = await vendorRow("draft", "Draft One", "555-0199");
+    await vendorRow("draft", "Draft Two", "555-0199");
+    const refusal = await add().then(() => undefined, (e: Error) => e);
+    expect(refusal?.message).toBe("Some rows already share the same values. Change or remove them first, then add the rule.");
+    expect(refusal?.message).not.toContain("555");
+    expect(await waiting()).toBe(0);
+    await one(ctx(C, PC, "draft"), `delete from $T.vendor where id = $1`, [d1]);
+
+    // Draft is clean now, but two live rows share one. The change is still refused, before publish day.
+    const l1 = await vendorRow("live", "Live One", "555-0142");
+    await vendorRow("live", "Live Two", "555-0142");
+    await expect(add()).rejects.toThrow(/already share the same values/);
+    expect(await waiting()).toBe(0);
+
+    // A deleted row does not count. With one of the two deleted, the rule goes in, and then holds.
+    await one(ctx(C, PC), `update $T.vendor set deleted_at = now() where id = $1`, [l1]);
+    expect(await add()).toMatchObject({ appliedDraft: true, appliedLive: false });
+    await expect(vendorRow("draft", "Draft Three", "555-0199")).rejects.toThrow(/unique/);
+    // Rows that break it appear in live before it is published: publishing is refused, and nothing goes live.
+    await vendorRow("live", "Live Three", "555-0142");
+    await expect(publishModelChanges(sql, C, ["vendor"], { library })).rejects.toThrow(/already share the same values/);
+    expect(await waiting()).toBe(1);
+    await one(ctx(C, PC), `delete from $T.vendor where name = 'Live Three'`);
+    expect(await publishModelChanges(sql, C, ["vendor"], { library })).toEqual(["vendor"]);
+    await expect(vendorRow("live", "Live Four", "555-0142")).rejects.toThrow(/unique/);
+  });
+
+  it("discards a change that is in draft and not yet live", async () => {
+    const sql = adminDb();
+    const fax = await applyChange(sql, C, { op: "add_field", model: "vendor", field: { key: "fax", label: "Fax", type: "quantity", required: false } }, { library });
+    const faxIndex = await applyChange(sql, C, { op: "add_index", model: "vendor", fields: ["fax"] }, { library });
+    expect(await columnsIn(`${PC}_draft`, "vendor")).toEqual(expect.arrayContaining(["fax", "fax_unit"]));
+
+    // Newest first: the index uses the field.
+    await expect(discardPendingChange(sql, C, fax.changeId as string)).rejects.toThrow(/Discard the newer changes/);
+    expect(await discardPendingChange(sql, C, faxIndex.changeId as string, { library })).toEqual({ model: "vendor" });
+    expect(await discardPendingChange(sql, C, fax.changeId as string)).toEqual({ model: "vendor" });
+    const draftColumns = await columnsIn(`${PC}_draft`, "vendor");
+    expect(draftColumns).not.toContain("fax");
+    expect(draftColumns).not.toContain("fax_unit");
+    expect((await effectiveDefinition(sql, C, "vendor", "draft"))?.fields.map((f) => f.key)).not.toContain("fax");
+    expect((await effectiveDefinition(sql, C, "vendor", "draft"))?.indexes).toEqual((await effectiveDefinition(sql, C, "vendor", "live"))?.indexes);
+    expect((await sql`select count(*)::int as n from platform.org_model_changes where id in ${sql([fax.changeId as string, faxIndex.changeId as string])}`)[0]?.n).toBe(0);
+    // The table still works, and the field can be added again.
+    await one(ctx(C, PC, "draft"), `insert into $T.vendor (${SYS}, name) values (${sys()}, 'After discard')`, [newUuid()]);
+
+    // What is live, gone, or someone else's cannot be discarded.
+    const liveChange = (await sql`select id from platform.org_model_changes where org_id = ${C} and applied_live_at is not null limit 1`)[0]?.id as string;
+    const foreign = (await sql`select id from platform.org_model_changes where org_id = ${A} limit 1`)[0]?.id as string;
+    for (const idOf of [liveChange, foreign, fax.changeId as string, newUuid()]) await expect(discardPendingChange(sql, C, idOf)).rejects.toThrow(/not waiting/);
+    await expect(discardPendingChange(sql, C, "x'; drop schema platform cascade; --")).rejects.toThrow();
+
+    // A new model that is still only in draft goes away completely, unless something points at it.
+    const scratch = { key: "x_scratch", version: 1, pack: "custom", name: "Scratch", description: "A model made only to be thrown away.", fields: [{ key: "body", label: "Body", type: "text" }], defaultAccess: { owner: "write", staff: "none" } };
+    const made = await applyChange(sql, C, { op: "create_custom_model", definition: scratch } as never, { library });
+    const link = await applyChange(sql, C, { op: "add_field", model: "vendor", field: { key: "scratch", label: "Scratch", type: "ref", model: "x_scratch", required: false, onDelete: "set_null" } }, { library });
+    await expect(discardPendingChange(sql, C, made.changeId as string)).rejects.toThrow('Model "vendor" still points at this one');
+    await discardPendingChange(sql, C, link.changeId as string);
+    expect(await discardPendingChange(sql, C, made.changeId as string)).toEqual({ model: "x_scratch" });
+    expect(await columnsIn(`${PC}_draft`, "x_scratch")).toEqual([]);
+    expect((await sql`select count(*)::int as n from platform.org_models where org_id = ${C} and key = 'x_scratch'`)[0]?.n).toBe(0);
+    expect(await effectiveDefinition(sql, C, "x_scratch", "draft")).toBeUndefined();
+    expect((await sql`select count(*)::int as n from platform.org_model_changes where org_id = ${C} and applied_live_at is null`)[0]?.n).toBe(0);
+  });
+
+  it("stops at sixty models for one restaurant", async () => {
+    const sql = adminDb();
+    const have = (await sql`select count(*)::int as n from platform.org_models where org_id = ${C}`)[0]?.n as number;
+    const filler = (i: number) => ({ key: `x_filler_${i}`, version: 1, pack: "custom", name: "Filler", description: "A record made only to fill the list.", fields: [{ key: "body", label: "Body", type: "text" }], defaultAccess: { owner: "write", staff: "none" } });
+    for (let i = have; i < STORE_LIMITS.modelsPerRestaurant; i++) {
+      await sql`insert into platform.org_models (id, org_id, key, kind, definition, status) values (${newUuid()}, ${C}, ${`x_filler_${i}`}, 'custom', ${JSON.stringify(filler(i))}::text::jsonb, 'draft')`;
+    }
+    await expect(applyChange(sql, C, { op: "create_custom_model", definition: filler(999) } as never, { library })).rejects.toThrow("A restaurant can have at most 60 models");
+    await expect(ensureModels(sql, C, ["prep_item"], { library })).rejects.toThrow("A restaurant can have at most 60 models");
+    await sql`delete from platform.org_models where org_id = ${C} and key like 'x_filler_%'`;
+    expect(await columnsIn(`${PC}_draft`, "x_filler_999")).toEqual([]);
+    expect(await columnsIn(`${PC}_draft`, "prep_item")).toEqual([]);
   });
 
   it("use_template creates a library model in draft, and ensureModels then brings it live", async () => {
@@ -753,6 +952,17 @@ describe.skipIf(!hasDb)("model tables in a restaurant's store", () => {
     const rows = await sql`select key, kind, template_key, template_version, status from platform.org_models where org_id = ${C} and key like 'c1test%' order by key`;
     expect(rows.map((r) => ({ ...r }))).toEqual(TEST_TEMPLATES.map((key) => ({ key, kind: "standard", template_key: key, template_version: 1, status: "live" })));
     // A custom model may not take a library model's name, even in a restaurant that does not use that model.
-    await expect(applyChange(sql, A, { op: "create_custom_model", definition: { ...model("c1test_item", [{ key: "name", label: "Name", type: "text" }]), pack: "custom" } } as never)).rejects.toThrow(/library model/);
+    await expect(applyChange(sql, A, { op: "create_custom_model", definition: { ...model("c1test_item", [{ key: "name", label: "Name", type: "text" }]), pack: "custom" } } as never)).rejects.toThrow(/must start with "x_"/);
+
+    // A stored version is never changed in place.
+    const edited = (version: number) => buildLibrary({ models: [{ ...lib.models[0], version, description: "The same model with different words in it." }, lib.models[1]], namedQueries: [], namedActions: [] });
+    await expect(installLibrary(sql, edited(1))).rejects.toThrow('Library model "c1test_item" changed but is still version 1. Give it a new version number');
+    expect((await sql`select definition from platform.model_template_versions where template_key = 'c1test_item' and version = 1`)[0]?.definition).toEqual(lib.models[0]);
+    expect(await installLibrary(sql, edited(2))).toMatchObject({ models: 2 });
+    const versions = await sql`select v.version, t.current_version, v.definition from platform.model_template_versions v join platform.model_templates t on t.key = v.template_key where v.template_key = 'c1test_item' order by v.version`;
+    expect(versions.map((v) => [v.version, v.current_version])).toEqual([[1, 2], [2, 2]]);
+    expect(versions[0]?.definition).toEqual(lib.models[0]);
+    // Installing the older library again is harmless: version 1 is unchanged and stays stored.
+    expect(await installLibrary(sql, lib)).toMatchObject({ models: 2 });
   });
 });

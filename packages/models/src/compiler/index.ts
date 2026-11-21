@@ -6,6 +6,7 @@ export {
   type CompileContext,
   type CompileTarget,
   type ModelSource,
+  CUSTOM_KEY_PREFIX,
   hasSoftDelete,
   indexName,
   ruleConstraintName,
@@ -15,4 +16,5 @@ export {
   uniqueConstraintName,
 } from "./shape.js";
 export { FISCAL_PERIOD } from "./rules.js";
-export { type CompiledChange, type CompiledModel, compileChange, compileModel, modelDependencies } from "./model.js";
+export { type CompiledChange, type CompiledModel, type PreCheck, compileChange, compileDiscard, compileDrop, compileModel, modelDependencies } from "./model.js";
+export { checkQuery, checkStatement } from "./guard.js";
