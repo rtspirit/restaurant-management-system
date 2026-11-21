@@ -83,13 +83,14 @@ describe.each([
     }
   });
 
-  it("the cost counts in the week the orders were sold, and is settled when the payout lands", () => {
+  it("the cost counts in the week the orders were sold, and is paid by the payout it was kept out of", () => {
     for (const s of statements) {
       expect(WEEKS).toContain(s.periodStart);
       expect(new Date(`${s.periodEnd}T00:00:00Z`).getUTCDay()).toBe(0); // a Sunday
-      expect(new Date(`${s.dueDate}T00:00:00Z`).getUTCDay()).toBe(3); // the Wednesday after
-      expect(s.dueDate > s.periodEnd).toBe(true);
-      expect(s.settled).toBe(s.periodStart !== LAST);
+      const payout = g.deliveryPayouts.find((p) => p.platform === s.platform && p.locationKey === s.locationKey && p.periodStart === s.periodStart);
+      expect(s.paidOn).toBe(payout?.payoutDate);
+      expect(new Date(`${s.paidOn}T00:00:00Z`).getUTCDay()).toBe(3); // the Wednesday after
+      expect(s.paidOn > s.periodEnd).toBe(true);
     }
   });
 
@@ -169,7 +170,7 @@ describe("delivery commissions in the books", () => {
   const load = async (r: Place): Promise<SeededBooks> => {
     for (let attempt = 1; ; attempt++) {
       try {
-        const { books } = await seedDemoBooks(adminDb(), { orgUuid: r.org, template: r.template, ownerUserId: r.owner, withSales: true });
+        const { books } = await seedDemoBooks(adminDb(), { orgUuid: r.org, template: r.template, ownerUserId: r.owner, withSales: true, draftSamples: false });
         if (!books) throw new Error("No numbers were loaded");
         return books;
       } catch (e) {
@@ -258,6 +259,27 @@ describe("delivery commissions in the books", () => {
       expect(Number(row?.credits)).toBe(0);
       const vendors = await raw(r, (t) => `select v.name, a.code from ${t("vendor")} v join ${t("account")} a on a.id = v.default_account order by v.name`);
       expect(vendors).toEqual([{ name: "Ferrymeal", code: "7500" }, { name: "Trolleybite", code: "7500" }]);
+    }
+  });
+
+  it("no statement is ever a bill to pay: all are paid on their payout date, none open, none overdue", async () => {
+    for (const [r, g] of [[MK, M], [SY, S]] as const) {
+      const statements = deliveryStatements(g);
+      const bills = await raw(
+        r,
+        (t) => `select v.name as company, b.bill_number, b.status, b.due_date::text as due_date, b.business_date::text as business_date
+                from ${t("vendor_bill")} b join ${t("vendor")} v on v.id = b.vendor where v.name in ('Ferrymeal', 'Trolleybite')`,
+      );
+      expect(bills).toHaveLength(statements.length);
+      for (const b of bills) {
+        const s = statements.find((x) => x.company === b.company && x.statementNumber === b.bill_number);
+        expect(b).toMatchObject({ status: "paid", due_date: s?.paidOn, business_date: s?.periodEnd });
+      }
+      // The list of bills to pay is the suppliers' own bills and nothing else, whatever today's date is.
+      const [toPay] = await raw(r, (t) => `select count(*)::int as n, count(*) filter (where v.name in ('Ferrymeal', 'Trolleybite'))::int as delivery from ${t("vendor_bill")} b join ${t("vendor")} v on v.id = b.vendor where b.status = 'open'`);
+      expect(toPay).toEqual({ n: g.vendorBills.length, delivery: 0 });
+      const [terms] = await raw(r, (t) => `select count(*)::int as n from ${t("vendor")} where name in ('Ferrymeal', 'Trolleybite') and terms_days = 0`);
+      expect(terms?.n).toBe(2);
     }
   });
 

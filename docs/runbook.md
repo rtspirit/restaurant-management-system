@@ -196,7 +196,7 @@ Sign in as `staff@marigold.test`.
 5. The live preview will appear beside the conversation with a "Sample numbers" tag.
 6. Type a change (section 4.2 follow-ups). The preview reloads.
 
-**You should see:** a list of suppliers with a detail panel and add, edit and remove. It reuses the standard Vendor record, so no new table should be made. If sample data is in the draft store (not confirmed), the list will show Marigold's four suppliers: Lanterbury Greengrocers Co-op, Quillfield Meat and Seafood, Pellbrook Beverage Supply, Tidewell Paper and Cleaning, each with 14 days to pay. Once the eight weeks are loaded it also shows the two delivery apps, Ferrymeal and Trolleybite (3 days to pay): their weekly statements of what they kept are held as bills.
+**You should see:** a list of suppliers with a detail panel and add, edit and remove. It reuses the standard Vendor record, so no new table should be made. If sample data is in the draft store (not confirmed), the list will show Marigold's four suppliers: Lanterbury Greengrocers Co-op, Quillfield Meat and Seafood, Pellbrook Beverage Supply, Tidewell Paper and Cleaning, each with 14 days to pay. Once the eight weeks are loaded it also shows the two delivery apps, Ferrymeal and Trolleybite: their weekly statements of what they kept are held as bills that are already paid, because the apps keep their cut out of the payout.
 
 **What it proves:** an owner gets a working tool from a sentence, built only from RMS's own parts, without seeing code.
 
@@ -499,7 +499,7 @@ A good extra test, which **should** add one small optional field (T1 in the feed
 | What was my busiest day in the last eight weeks? | Saturday 7 November, $18,188.33 | highest of 56 daily totals, both locations |
 | What share of my sales went on food and drink last week? | **30.2%** ($25,460.00) | opening $32,866.86 + purchases $26,429.13 - closing $33,835.99 = $25,460.00; ÷ $84,310.00 |
 | How much did staff cost me last week? | **$26,220.00**, 31.1% of sales | Downtown $16,285.06 + Riverside $9,934.94. By group: front of house $11,482.78, kitchen $10,819.33, managers $3,917.89 (whether Ask splits it this way is not confirmed) |
-| How much did I spend with suppliers last week? | **$27,645.96** across 16 bills | Quillfield Meat and Seafood $12,791.69 + Lanterbury Greengrocers Co-op $8,368.43 + Pellbrook Beverage Supply $5,269.01 + Tidewell Paper and Cleaning $1,216.83 (supplies). Food and drink alone: $26,429.13. The four delivery app statements ($1,306.56) are also held as bills: a good answer leaves them out or lists them apart. With them it is $28,952.52 across 20 bills |
+| How much did I spend with suppliers last week, delivery apps included? | **$28,952.52** across 20 bills | Four suppliers, 16 bills, $27,645.96: Quillfield Meat and Seafood $12,791.69 + Lanterbury Greengrocers Co-op $8,368.43 + Pellbrook Beverage Supply $5,269.01 + Tidewell Paper and Cleaning $1,216.83 (supplies). Two delivery apps, 4 statements, $1,306.56: Ferrymeal $855.70 + Trolleybite $450.86. Food and drink alone: $26,429.13. Asked without "delivery apps included", the total is the same $28,952.52, because the statements are kept as bills: a good answer says the delivery apps are in it |
 | How much stock do I have? | **$35,671.41** at the count on Sun 15 Nov, of which food and drink $33,835.99 | Downtown $22,085.96 + Riverside $13,585.45 |
 | How much did delivery apps keep last week? | **$1,306.56**, kept from $5,069.69 of orders (25.8%) | commission $1,205.95 + marketing $90.61 + refund charge $10.00. The same figure is the "Delivery platform commissions and fees" line on the weekly profit and loss. Payouts $4,279.47, expected 18 Nov. Ferrymeal kept $855.70, Trolleybite $450.86. In the slow week of 19 October: $1,003.49 |
 | What was my profit last week? | **$29,885.45** (35.4% of sales), after every cost in the books | net sales $84,310.00 - food and drink $25,460.00 - staff $26,220.00 - supplies $1,437.99 - delivery commissions and fees $1,306.56. Before delivery commissions were in the books this read $31,192.01. Rent and utilities are not in the demo books |
@@ -529,6 +529,8 @@ A good extra test, which **should** add one small optional field (T1 in the feed
 | Tip pool | Help me share out the tips between the servers and bussers each night. | Last week's tips at Marigold: $14,022.16. |
 | Waste log | I want my cooks to write down what gets thrown away. | Out of scope today (ADR 0006). Expect RMS to say so or build a simple list. |
 | Vendor bills due | Show me which supplier bills I need to pay this week. | Last week's 16 Marigold bills ($27,645.96) fall due 23 to 29 November. |
+
+The two delivery apps, Ferrymeal and Trolleybite, are in the vendor list and their weekly statements are among the supplier bills (ADR 0011). Those statements are always marked paid, on the payout date, so they add to what was spent but never to what is left to pay or overdue.
 
 ---
 

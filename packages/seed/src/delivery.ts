@@ -13,6 +13,9 @@
 //
 // The cost counts in the week the orders were sold (the statement's last day), not in the week
 // the payout lands. It is a running cost: it lowers net profit and never touches prime cost.
+//
+// A statement is never waiting to be paid: the app has already kept the money. So every one is
+// recorded as paid, on the day of its payout, and can never show up as a bill to pay or overdue.
 import { DEFAULT_CHART_OF_ACCOUNTS } from "@rms/models";
 import type { DeliveryPayoutLineType, GeneratedSales } from "./sales.js";
 
@@ -35,10 +38,8 @@ export type DeliveryStatement = {
   periodStart: string;
   /** The last day covered. Also the business date the cost counts in. */
   periodEnd: string;
-  /** The day the payout lands, with these amounts already taken out. */
-  dueDate: string;
-  /** True once that payout has been paid. */
-  settled: boolean;
+  /** The day of the payout these amounts were taken out of. Nothing is left to pay after it. */
+  paidOn: string;
   currency: "USD";
   /** Order subtotals on the same payout statement: what the commission was charged on. */
   deliverySalesMinor: number;
@@ -67,8 +68,7 @@ export const deliveryStatements = (sales: Pick<GeneratedSales, "deliveryPayouts"
       statementNumber: `${p.platform.slice(0, 3).toUpperCase()}-${p.periodEnd.replaceAll("-", "").slice(2)}-${number}`,
       periodStart: p.periodStart,
       periodEnd: p.periodEnd,
-      dueDate: p.payoutDate,
-      settled: p.status === "paid",
+      paidOn: p.payoutDate,
       currency: p.currency,
       deliverySalesMinor: p.lines.filter((l) => l.type === "sales").reduce((a, l) => a + l.amountMinor, 0),
       lines,
@@ -121,7 +121,7 @@ export const loadDeliveryStatements = async (sales: Pick<GeneratedSales, "delive
     companies.map((name) => ({
       key: name,
       sourceId: slug(name),
-      values: { name, terms_days: 3, default_account: account, active: true, note: "Delivery app. Its commission and fees are taken out of each weekly payout." },
+      values: { name, terms_days: 0, default_account: account, active: true, note: "Delivery app. It keeps its commission and fees out of each weekly payout, so there is never a bill to pay." },
     })),
   );
 
@@ -132,8 +132,8 @@ export const loadDeliveryStatements = async (sales: Pick<GeneratedSales, "delive
       key: key(s),
       sourceId: key(s),
       values: {
-        location_id: books.loc(s.locationKey), vendor: need(vendorId, s.company, "delivery company"), bill_number: s.statementNumber, business_date: s.periodEnd, due_date: s.dueDate,
-        total_amount: s.totalMinor, status: s.settled ? "paid" : "open", note: `Kept from the payout for orders from ${s.periodStart} to ${s.periodEnd}.`,
+        location_id: books.loc(s.locationKey), vendor: need(vendorId, s.company, "delivery company"), bill_number: s.statementNumber, business_date: s.periodEnd, due_date: s.paidOn,
+        total_amount: s.totalMinor, status: "paid", note: `Kept out of the payout of ${s.paidOn}, for orders from ${s.periodStart} to ${s.periodEnd}. Nothing to pay.`,
       },
     })),
   );
