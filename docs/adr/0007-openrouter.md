@@ -24,3 +24,10 @@ The plan said OpenAI only, with one OpenAI key. The sandbox test then found the 
 ## Fallback
 
 If the Codex agent cannot be made to work through OpenRouter in the time-boxed test, the build agent uses the plan's section 6 fallback: a simple tool loop that calls the model through OpenRouter and drives the sandbox by commands.
+
+## Proven and decided on 2026-11-21
+
+- **Proven:** the Codex agent works through OpenRouter inside a Vercel Sandbox with the key kept outside (three real runs, two labs' models, a resumed conversation, embeddings). See `docs/spikes/s1b-codex-via-openrouter.md`. No fallback is needed.
+- **Settings:** `RMS_BUILD_MODEL` and `RMS_ASK_MODEL` are `openai/gpt-6.2-sol`. `RMS_EMBED_MODEL` is `openai/text-embedding-3-small`.
+- **Privacy option: not used for now** (Rahul: "Let the agent tool keep the prompts. It's fine for now. We can scope it out if needed in the future."). Demo data is fictional. Before real restaurant data goes through it, turn off prompt retention and training on the OpenRouter account or key.
+- **Budget:** the key carries a $50 limit, which Rahul considers enough for the demo's scope. The key expires on 2026-11-22 at 18:26 UTC. The demo is on 2026-11-21, so that is accepted.
