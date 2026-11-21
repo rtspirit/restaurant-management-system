@@ -6,12 +6,87 @@ First version: 2026-11-21, at the start of Wave 2. Every figure in this file was
 
 ---
 
+## Where things stand (2026-11-21, during Wave 2)
+
+**Caveats first**
+
+- **Building from a prompt and Ask are not merged yet.** Until they are, beats 2, 5 and 6 cannot be shown on screen.
+- **Wave 3 and Wave 4 are not built.** Beats 4, 7 and 8 cannot run. Beat 2's accounts mini-app is Wave 4.
+- **`scripts/rehearse.sh` will show FAIL for beats 2 and 3 today.** Their "today" checks still expect the old screens (an older Build reply, and Settings with no Connected systems). That is the tests being behind, not RMS broken. QA must update them. (Read from the tests, not run.)
+- **Use `127.0.0.1`, never `localhost`.**
+- **Every demo sign-in uses the password on the `DEMO_PASSWORD` line in `.env.local`.** Read it there. Never write it down, paste it or show it.
+
+Each use case in section 3 and each beat in sections 1 and 5 starts with one word: **Works**, **In review** (built, waiting to be checked and merged) or **Not built**.
+
+### Works now on the laptop
+
+Start everything first ("Running it" below). The web app is `http://127.0.0.1:3000`, the console is `http://127.0.0.1:3001`.
+
+Sign-ins: `owner@marigold.test`, `staff@marigold.test`, `owner@sliceyard.test`, `staff@sliceyard.test` on the web app; `maintainer@rms.test` on the console. Who is who: section 2.
+
+1. **Sign up and onboarding.** Open `http://127.0.0.1:3000/sign-up`. Any new email, a password of 8 or more characters. Answer the five questions. You land on Home with "Hello", the restaurant's name and "No mini-apps yet".
+2. **Menu, Staff, Locations.** Sign in at `http://127.0.0.1:3000/sign-in` as `owner@marigold.test`. Menu: 40 items. Staff: 24 people. Locations: Downtown and Riverside. As `staff@marigold.test`: Downtown's 14 people only, no pay, no contact details.
+3. **Connecting the demo sales system (Demo POS).** Settings, **See connected systems**, **Connect Demo POS**. RMS lists what it will read. Press **Allow**, then **Bring in my sales**. After a few seconds: "Brought in 8 weeks of sales for 2 locations. Last week's sales: $84,310.00." Pressing again: "Your sales are already up to date." Use a restaurant with no sales yet: a new sign-up, or after `pnpm reset-demo --no-sales`. No screen shows the numbers themselves yet.
+4. **The duplicate check ("you already have this").** Merged and working behind the scenes. There is no way to reach it from a screen until building is merged.
+5. **The Build tab.** Mini-apps, Build. The message box and the three idea buttons work. Sending a message answers "Building is not switched on yet. Nothing was made or changed." That is the "not ready" state until building is merged.
+6. **The mini-app template and its safety check.** Merged. Nothing to click: building uses them.
+7. **The maintainer console.** Sign in at `http://127.0.0.1:3001/sign-in` as `maintainer@rms.test`. The change feed with its Tier and Status filters. The review queue with Approve and Reject (empty: nothing can be shared yet).
+8. **The browser tests and the rehearsal check.** `scripts/rehearse.sh` (see "Running it").
+
+### Built but not switched on yet
+
+| What | What it does | Waits for |
+|---|---|---|
+| **Building from a prompt** (the runner) | A prompt gives a plan. On yes, it makes the file changes in a sandbox, shows progress in plain words, then a live preview. Proven once end to end with a vendor list. **Only one full agent turn has been run so far** (it changed a heading) | Review and merge. Then, on this laptop, the sandbox sign-in (lasts about 12 hours) and the preview settings the lead adds when merging. Needs Rahul's Vercel login |
+| **Ask** | Answers questions about the restaurant's own numbers. Gave the right answers to the demo questions through the real path: 61.3% prime cost, $84,310.00, the slow week of 19 October | Review and merge. **Nobody has seen the Ask screen in a browser yet**: open `/ask` once before the demo |
+| **Phone mode** | The demo stays on the laptop and the phone opens it over Wi-Fi. No https and no certificate needed. Use an iPhone, and turn on the phone's hotspot with the laptop joined to it. `scripts/demo-phone.sh start` to begin, `scripts/demo-phone.sh stop` after. Stop the normal servers first: phone mode runs its own | Merge. It shows RMS itself on the phone. A published mini-app on the phone needs Wave 3 |
+| **Delivery commissions in the books** | What the delivery apps keep becomes a cost. Only profit changes: sales, food and drink, staff and prime cost stay the same | Merge |
+| **A design pass on finished screens** | Polishes how the finished screens look. Words and steps should not change | Merge |
+
+### Not built yet
+
+- **Wave 3:** publish a mini-app so it shows in the RMS menu and opens on the phone (beat 4). Tiers, approvals and the public share (beat 7). Share, "Recommended for you" and install at a second restaurant (beat 8).
+- **Wave 4:** the accounts mini-app, built through the product (the real content of beat 2). Fixes and polish. Two full run-throughs from a clean reset. Checkpoint C4 with Rahul.
+- **Also not built:** colour and logo in Settings; the location switcher narrowing what screens show.
+
+---
+
+## Running it
+
+Full detail is in section 2. In short, from the repo root:
+
+1. Start the local database and sign-in service: `pnpm exec supabase start -x realtime,storage-api,imgproxy,postgrest,postgres-meta,studio,edge-runtime,logflare,vector`. First time, or after the database was rebuilt: `scripts/dev-db-roles.sh`.
+2. `pnpm install`, then `pnpm build`.
+3. Start the three servers, each in its own terminal, or with the launch configs `rms-api`, `rms-web`, `rms-admin` in `.claude/launch.json`:
+   - API: `pnpm --filter @rms/api dev` (port 8787)
+   - Web app: `pnpm --filter @rms/web start` (port 3000)
+   - Console: `pnpm --filter @rms/admin start` (port 3001)
+
+   The web app and console serve the last build. After pulling new code: `pnpm build`, then restart them.
+4. Open `http://127.0.0.1:3000` and `http://127.0.0.1:3001`. **Not `localhost`**: sign-in will not stick there.
+5. **Resetting the demo data:** `pnpm reset-demo`. It wipes every restaurant, including the ones tests left behind, and every sign-in, then sets up the two seeded restaurants again with eight weeks of numbers. About 16 seconds. Sign in again everywhere afterwards. Never run it while anyone is running tests. `pnpm reset-demo --no-sales` gives the same restaurants with no numbers, for beat 3.
+6. **The rehearsal check:** `scripts/rehearse.sh`. It checks the three servers answer and the two seeded restaurants exist, runs the browser tests, and prints PASS or FAIL per beat. It never resets, never calls a model and never prints a secret. It signs up one test owner per run and removes it after. See the caveat above about beats 2 and 3.
+7. **The 25-restaurant cap:** the local database takes at most 25 restaurants. When tests have filled it, sign-up is refused. The screen says "We could not set up your restaurant just now. Please try again." (it should say "We are not taking new restaurants right now"; that wording is a known bug). Trying again will not help. `pnpm reset-demo` clears it.
+
+---
+
+## Known limits today
+
+- **The safety check on mini-app code written by the agent has passed for the demo only.** It is not yet trusted for real use.
+- **A mini-app's code is saved on the machine running the API**, in a folder, until the shared store is built.
+- **Under heavy use at once, the Data API sometimes answers "not signed in"** when the owner is signed in. Reload. This is being fixed.
+- **Ask cannot answer hour-of-day questions** ("what time are we busiest?").
+- **Anyone on the same Wi-Fi can reach the demo.** Rahul accepts this for today. Use the phone's hotspot, not venue Wi-Fi. Everything is torn down after the demo.
+- **The sign-in service allows about 30 sign-ins every five minutes from this laptop.** Over that, a correct password is shown as "That email and password do not match" (read from the code, not seen). Wait a few minutes.
+
+---
+
 ## 1. What this is and what state it is in today
 
 **Read this first**
 
-- **Most of the demo story is not built yet.** Today you can sign up, sign in, look at a restaurant's menu, staff and locations, and open the maintainer console. Building mini-apps, the Ask agent, Demo POS, publishing and the Marketplace are still to come.
-- **Waves 0 and 1 are done and checkpoint C1 is signed off.** Wave 2 is starting. Waves 3 and 4 are not built.
+- **Most of the demo story is not on screen yet.** Today you can sign up, sign in, look at a restaurant's menu, staff and locations, connect Demo POS and bring in sales, and open the maintainer console. Building mini-apps and Ask are built and in review. Publishing and the Marketplace are still to come. See "Where things stand" above.
+- **Waves 0 and 1 are done and checkpoint C1 is signed off.** Wave 2 is partly merged. Waves 3 and 4 are not built.
 - **The numbers are already in the books.** The reset loads eight weeks of sales, bills, staff cost and stock counts into both restaurants. There is no screen that shows them yet.
 - Anything marked **Not built yet** below says what it **will** do, taken from the plan and the Wave 2 brief. Treat those lines as targets, not facts, until the wave lands.
 
@@ -19,15 +94,15 @@ RMS is a restaurant management system. An owner builds small tools for their res
 
 | Beat | What the audience sees | State today | Delivered by |
 |---|---|---|---|
-| 1 | Owner signs up, answers five questions, lands in RMS with menu, staff and locations already there | **Works now** | Wave 1 (done) |
-| 2 | Owner types "I want to see how much money I'm making", answers up to three questions, sees a plan and a live preview | **Not built yet.** The Build tab exists but only replies "Building is not switched on yet" | Wave 2 (build conversation, sandbox, preview). The accounts mini-app itself: Wave 4 |
-| 3 | Owner connects Demo POS, eight weeks of sales arrive, the P&L fills up | **Not built yet.** The numbers are loaded by the reset instead | Wave 2 (task L) |
-| 4 | Publish. The mini-app shows in the RMS menu and works on a phone | **Not built yet** | Wave 3 |
-| 5 | Owner asks "what was my prime cost last week?" and gets 61.3% | **Not built yet.** The report that will answer it exists and gives 61.3% | Wave 2 (task K) |
-| 6 | Owner asks for the same mini-app again. RMS says "you already have this" | **Not built yet** | Wave 2 (task M) |
-| 7 | Owner shares the mini-app publicly. The maintainer approves it in the console | **Partly.** The console's review queue has Approve and Reject, but nothing can be shared yet, so it is always empty | Wave 3 |
-| 8 | A second restaurant sees the mini-app under "Recommended for you", installs it, sees only its own numbers | **Partly.** A new sign-up gets its own restaurant. The Marketplace page says "Nothing to recommend yet" | Wave 3 |
-| 9 | The console's change feed shows everything that happened, by tier | **Partly.** The feed and its tier filter work. Today it only shows the reset and new sign-ups | Wave 1 (feed), rows from Waves 2 and 3 |
+| 1 | Owner signs up, answers five questions, lands in RMS with menu, staff and locations already there | **Works** | Wave 1 (done) |
+| 2 | Owner types "I want to see how much money I'm making", answers up to three questions, sees a plan and a live preview | **In review.** The build conversation screen is merged; the runner behind it is not, so the Build tab replies "Building is not switched on yet. Nothing was made or changed." | Wave 2 (screen merged, runner in review). The accounts mini-app itself: Wave 4 |
+| 3 | Owner connects Demo POS, eight weeks of sales arrive, the P&L fills up | **Works** for connect, Allow and bring in sales. No screen shows the books yet | Wave 2 (task L, merged) |
+| 4 | Publish. The mini-app shows in the RMS menu and works on a phone | **Not built.** Phone mode (in review) shows RMS itself on the phone | Wave 3 |
+| 5 | Owner asks "what was my prime cost last week?" and gets 61.3% | **In review.** Ask gave 61.3% through the real path | Wave 2 (task K) |
+| 6 | Owner asks for the same mini-app again. RMS says "you already have this" | **In review.** The check is merged; it reaches the screen only through building, which is in review | Wave 2 (task M merged, runner in review) |
+| 7 | Owner shares the mini-app publicly. The maintainer approves it in the console | **Not built.** The console's review queue has Approve and Reject, but nothing can be shared yet, so it is always empty | Wave 3 |
+| 8 | A second restaurant sees the mini-app under "Recommended for you", installs it, sees only its own numbers | **Not built.** A new sign-up gets its own restaurant. The Marketplace page says "Nothing to recommend yet" | Wave 3 |
+| 9 | The console's change feed shows everything that happened, by tier | **Works** for the feed and its filters. Today it shows the reset, new sign-ups and Demo POS connections | Wave 1 (feed), rows from Waves 2 and 3 |
 
 Checkpoints still ahead: **C2** (a vendor list built from a prompt and previewed, end of Wave 2), **C3** (beats 4, 7 and 8, end of Wave 3), **C4** (full run-through with Rahul, end of Wave 4).
 
@@ -109,11 +184,11 @@ In demo order first, then the rest. Each says who, how, what you should see, wha
 
 ### 3.1 Sign up and onboarding (beat 1)
 
-**Built: yes.**
+**Works.**
 
 - **Caveat:** the name the owner types is **not used**. Every new owner gets a fresh copy of one of the two seeded restaurants, which keeps its fictional name, so its menu, staff and licences stay consistent. Only the answer to "How do guests order?" picks which one.
 - **Caveat:** a new sign-up gets its tables but **no sales numbers**. The seeded owners have eight weeks of numbers.
-- **Caveat:** at most 25 restaurants on one database by default. After that: "We are not taking new restaurants right now." Reset to clear.
+- **Caveat:** at most 25 restaurants on one database by default. After that the last question fails with "We could not set up your restaurant just now. Please try again." (the API means "We are not taking new restaurants right now"; the screen hides it, a known bug). Trying again will not help. Reset to clear.
 
 **Who:** a new owner, signed out.
 
@@ -137,11 +212,11 @@ In demo order first, then the rest. Each says who, how, what you should see, wha
 
 **What it proves:** a restaurant is ready to use in seconds with its parent data already filled in, and nothing of anyone else's is visible.
 
-**If it goes wrong:** "Your restaurant is being set up. Give it a moment." means a second press while the first is still working: wait. "We could not set up your restaurant just now" means the API had a problem: check the API terminal, then try again.
+**If it goes wrong:** "Your restaurant is being set up. Give it a moment." means a second press while the first is still working: wait. "We could not set up your restaurant just now" means the API had a problem, or 25 restaurants already exist: check the API terminal, then try again. If it says the same again, reset.
 
 ### 3.2 Looking at parent data: Menu, Staff, Locations (beat 1)
 
-**Built: yes.**
+**Works.**
 
 - **Caveat:** these screens are read-only. There is no edit button, and the database itself refuses any write to them.
 - **Caveat:** licences, equipment and tax rates are seeded but have no screen yet.
@@ -162,13 +237,13 @@ In demo order first, then the rest. Each says who, how, what you should see, wha
 
 ### 3.3 The location switcher
 
-**Built: partly.** It lists All locations, Downtown and Riverside, and changes its own label. **It does not filter anything yet.** Do not demo it as a filter. Slice Yard has one location, so it shows no switcher.
+**Works** as a switch only. It lists All locations, Downtown and Riverside, and changes its own label. **It does not filter anything yet.** Do not demo it as a filter. Slice Yard has one location, so it shows no switcher.
 
 It **will** narrow screens and mini-apps to the chosen location. Which wave does this is not confirmed.
 
 ### 3.4 What a staff user can and cannot see
 
-**Built: yes for parent data. Ask and mini-apps not built yet.**
+**Works** for parent data. Ask is in review; mini-apps are not built yet.
 
 - **Caveat:** staff cannot use the Ask agent at all today (it is owner-only, ADR 0002).
 
@@ -181,7 +256,7 @@ Sign in as `staff@marigold.test`.
 
 ### 3.5 Building a simple mini-app: the vendor list (checkpoint C2)
 
-**Not built yet. Wave 2.**
+**In review.** The screen is merged; the runner behind it is not. The runner built this vendor list from a prompt, end to end, once.
 
 - **Caveat:** the build agent is the part most likely to slip. The plan's fallback is that screens come from ready-made generators and the agent only polishes them.
 - **Caveat:** "Try it on my phone" only works when the web app is reachable from the phone. On `127.0.0.1` the screen will say the link only works on this computer.
@@ -204,7 +279,7 @@ Sign in as `staff@marigold.test`.
 
 ### 3.6 Building the accounts mini-app (beat 2)
 
-**Not built yet.** The build conversation is Wave 2. The accounts mini-app is built through the product in Wave 4.
+**Not built.** The build conversation is in review (Wave 2). The accounts mini-app is built through the product in Wave 4.
 
 - **Caveat:** the preview shows **sample numbers** from the restaurant's draft copy, not the live books. Whether the draft copy is filled with the same eight weeks is planned (Wave 2 brief, task I step 9) but not confirmed.
 - **Caveat:** a "target" for prime cost has no standard place to live today. How the agent will store it (a new small record, or a fixed number on the screen) is not confirmed.
@@ -220,14 +295,14 @@ Sign in as `staff@marigold.test`.
 
 ### 3.7 Connecting Demo POS and watching eight weeks arrive (beat 3)
 
-**Not built yet. Wave 2 (task L).**
+**Works.** Merged (Wave 2, task L). Its author did not click through it in a browser: do it once before the demo.
 
-- **Caveat:** today the reset already loads the numbers. For a true beat 3 the restaurant must start empty (`pnpm reset-demo --no-sales`). Whether the reset changes to that by default is not confirmed.
+- **Caveat:** the reset still loads the numbers by default. For a true beat 3 the restaurant must start empty: `pnpm reset-demo --no-sales`, or a new sign-up. On a restaurant that already has the numbers, **Bring in my sales** only says "Your sales are already up to date."
 - **Caveat:** if the connection is late, the plan's fallback is a Connect button that loads the same eight weeks with the seed loader. Say so in the demo notes if that is what runs.
 
-**Steps (as it will work):** Settings, "Connected systems", **Connect Demo POS**. RMS will list in plain words what it will read (daily sales, payments, and so on). Press **Allow**. Then **Bring in my sales**. A second press will say there is nothing new.
+**Steps:** Settings, under "Connected systems" press **See connected systems**, then **Connect Demo POS**. RMS lists in plain words what it will read (daily sales, payments, and so on), with **Not now** and **Allow**. Press **Allow**. Then **Bring in my sales** ("Bringing in your sales. This takes a few seconds.", about 14 seconds). A second press says "Your sales are already up to date."
 
-**You should see:** eight weeks, 21 September to 15 November 2026, arrive. For Marigold: 112 location-days of sales, 128 supplier bills ($204,129.58 in all), 18 stock counts, 32 delivery payouts. The prime cost for the week of 9 November reads 61.3%.
+**You should see:** "Brought in 8 weeks of sales for 2 locations. Last week's sales: $84,310.00." Behind it, eight weeks, 21 September to 15 November 2026, arrive. For Marigold: 112 location-days of sales, 128 supplier bills ($204,129.58 in all), 18 stock counts, 32 delivery payouts. No screen shows the books yet; the prime cost report behind them reads 61.3% for the week of 9 November (checked by the tests).
 
 **What it proves:** a connected system feeds the restaurant's own books, through one gateway, read-only, with the owner's yes.
 
@@ -235,10 +310,10 @@ Sign in as `staff@marigold.test`.
 
 ### 3.8 Publishing and opening on a phone (beat 4)
 
-**Not built yet. Wave 3.**
+**Not built.** Wave 3.
 
 - **Caveat (ADR 0008):** a mini-app always opens **inside RMS**, including on a phone. Opened on its own it shows "Open this from RMS". A home-screen icon that opens a mini-app directly needs its own sign-in step later.
-- **Caveat:** the phone must be able to reach the web app. On `127.0.0.1` it cannot. Either the demo runs on the deployed web app, or the phone part is shown with the browser's phone-sized view. Which one is used on the day is not confirmed.
+- **Caveat:** the phone must be able to reach the web app. On `127.0.0.1` it cannot. Decided since (ADR 0010, in review): nothing is deployed; phone mode lets an iPhone on the same Wi-Fi open RMS on the laptop. Until Wave 3 it shows RMS itself, not a published mini-app.
 
 **Steps (as it will work):** in the build conversation press **Publish**. RMS will say in one sentence what will happen. Confirm. The mini-app appears in the RMS menu. On the phone: sign in to RMS, open it from the menu.
 
@@ -248,7 +323,7 @@ Sign in as `staff@marigold.test`.
 
 ### 3.9 Asking the agent questions (beat 5)
 
-**Not built yet. Wave 2 (task K).**
+**In review.** Wave 2 (task K). Answered the demo questions correctly through the real path. The screen has not been seen in a browser yet.
 
 - **Caveat:** owner only. Staff get no Ask today.
 - **Caveat:** at most 30 questions an hour per restaurant. The 31st gets a plain "too many" message.
@@ -262,7 +337,7 @@ Sign in as `staff@marigold.test`.
 
 ### 3.10 Asking for the same mini-app twice (beat 6)
 
-**Not built yet. Wave 2 (task M).**
+**In review.** The check is merged (task M). It reaches the screen only through the build conversation, whose runner is in review.
 
 - **Caveat:** type the request **exactly as before**. The same words are matched first, without any model call, which is what makes this certain. A reworded request depends on a similarity score and may or may not match.
 
@@ -274,7 +349,7 @@ Sign in as `staff@marigold.test`.
 
 ### 3.11 Sharing publicly and the maintainer approving it (beat 7)
 
-**Not built yet. Wave 3.** The console's review queue exists today, with Approve, Reject and a note box.
+**Not built.** Wave 3. The console's review queue exists today, with Approve, Reject and a note box.
 
 - **Caveat:** sharing is always private by default. A public share is T3: it waits for a maintainer.
 - **Caveat:** what travels is the screens and table shapes only. No data, no connection, nothing the agent remembered. The listing never names the restaurant.
@@ -285,7 +360,7 @@ Sign in as `staff@marigold.test`.
 
 ### 3.12 The second restaurant: recommended, installed, own numbers only (beat 8)
 
-**Not built yet. Wave 3.** Today the Marketplace tab says "Nothing to recommend yet".
+**Not built.** Wave 3. Today the Marketplace tab says "Nothing to recommend yet".
 
 - **Caveat:** recommendations are rule-based, from the restaurant's profile and what it already has. The exact wording of the reason is not confirmed.
 - **Caveat:** a brand-new sign-up has tables but no numbers. To show numbers after install, either use `owner@sliceyard.test` (seeded with eight weeks) or connect Demo POS for the new restaurant first. Which path the demo uses is not confirmed.
@@ -298,9 +373,9 @@ Sign in as `staff@marigold.test`.
 
 ### 3.13 The maintainer console (beat 9)
 
-**Built: feed and review queue. Rows from beats 2 to 8: not built yet.**
+**Works** for the feed and the review queue. Rows from beats 2 and 4 to 8: not built yet. Connecting Demo POS (beat 3) adds a row.
 
-- **Caveat:** the console is for maintainers only. An owner who signs in there sees "This account is not a maintainer." and nothing else.
+- **Caveat:** the console is for maintainers only. An owner who signs in there sees "This account is not a maintainer." and no rows. The Tier and Status filters still show (a known bug: wording only, no data).
 
 **Steps:** open `http://127.0.0.1:3001/sign-in`, sign in as `maintainer@rms.test`.
 
@@ -321,7 +396,7 @@ Sign in as `staff@marigold.test`.
 
 ### 3.14 Stock counts and how food and drink cost is worked out
 
-**Built: in the books and the reports. No screen yet.**
+**Works** in the books and the reports. No screen yet.
 
 - **Caveat:** a week with no closing count says so. It never passes off purchases as usage.
 - **Caveat:** recipes, theoretical cost, waste log, par levels and purchase orders are out of scope.
@@ -339,13 +414,13 @@ Sign in as `staff@marigold.test`.
 
 ### 3.15 Theme: brand colour and logo
 
-**Not built yet.** Settings shows "Your colour and logo will be set here". Which wave builds it is not confirmed.
+**Not built.** Settings shows "Your colour and logo will be set here". Which wave builds it is not confirmed.
 
 Today each restaurant already has a seeded colour: Marigold Kitchen `#E8892B` (orange), Slice Yard `#C8372D` (tomato red). When built, an owner **will** pick a colour and add a logo, and RMS **will** keep every button readable whatever colour is picked. A theme change **will** show as T0 in the feed.
 
 ### 3.16 Resetting between rehearsals
 
-`pnpm reset-demo` (about 16 seconds). Then sign in again in every browser and on every phone. Check the two numbers it prints ($84,310.00 and 61.3% for Marigold, $28,750.00 and 55.3% for Slice Yard). If anything was built or shared during the rehearsal, the reset removes it.
+**Works.** `pnpm reset-demo` (about 16 seconds). Then sign in again in every browser and on every phone. Check the two numbers it prints ($84,310.00 and 61.3% for Marigold, $28,750.00 and 55.3% for Slice Yard). If anything was built or shared during the rehearsal, the reset removes it.
 
 ---
 
@@ -532,21 +607,22 @@ A good extra test, which **should** add one small optional field (T1 in the feed
 
 **Read this first**
 
-- **Today only beat 1 and parts of beats 7 to 9 can run.** Use this script for rehearsal planning. It becomes the live script as each wave lands.
+- **Today beats 1, 3 and 9 can run.** Beats 2, 5 and 6 are in review. Beats 4, 7 and 8 are not built. Use this script for rehearsal planning. It becomes the live script as each wave lands.
+- For beat 3, start from `pnpm reset-demo --no-sales` (or a new sign-up). Otherwise Demo POS has nothing new to bring in.
 - Times are rough targets, not measured. Build time is not measured yet.
 - Before you start: reset, sign in as `owner@marigold.test` in one browser and `maintainer@rms.test` in the console in another. Have `owner@sliceyard.test` ready in a private window.
 
 | # | Say | Do or type | The audience sees | About | If it fails on the day |
 |---|---|---|---|---|---|
-| 1 | "A new owner signs up and answers five questions. RMS already knows their menu, staff and locations." | Sign up live (answer "Table service"), or sign in as `owner@marigold.test`. Open Menu, Staff, Locations. | Marigold Kitchen: 40 menu items, 24 staff, Downtown and Riverside. | 2 min | Sign in as `owner@marigold.test` instead of signing up. |
-| 2 | "Now the owner asks for what they actually want." | Mini-apps, Build. Type the opening prompt (4.1). Answer the questions. Press **Build it**. Then one or two follow-ups (4.1 steps 1 and 4). | Questions, the plan with what was assumed, steps in plain words, then the live preview with sample numbers. | 5 min | Plan fallback: install the accounts mini-app as a ready-made Marketplace listing and show the build conversation on the vendor list (4.2). |
-| 3 | "They connect their till." | Settings, Connected systems, **Connect Demo POS**, **Allow**, **Bring in my sales**. | Eight weeks arrive. The overview reads $84,310.00 and 61.3% for last week. | 2 min | Plan fallback: the Connect button loads the eight weeks with the seed loader. Say so. |
-| 4 | "Publish, and it's part of RMS, on the phone too." | **Publish**, confirm. Open it from the RMS menu. Show it on the phone. | The mini-app in the menu, then the phone layout inside RMS. | 2 min | Show the phone layout in the browser's phone-sized view. |
-| 5 | "The owner can just ask." | **Ask a question**: "What was my prime cost last week?" | 61.3% for 9 to 15 November, with where it came from. | 1 min | Plan fallback: answers from the ready-made reports only. If Ask is down, point at the prime cost figure in the mini-app. |
-| 6 | "And it doesn't build the same thing twice." | Build tab. Type the exact opening prompt again. | "You already have this" with three choices. | 1 min | Skip, and say it out loud. |
-| 7 | "The owner shares it with other restaurants. We check it first." | Owner: share publicly. Console: Review queue, **Approve**. | The request waiting as T3, then approved. | 2 min | Show the review queue and explain. |
-| 8 | "A pizza place across town." | Private window: `owner@sliceyard.test` (or sign up with "Counter service"). Marketplace. Install. Open. | "Recommended for you" with a reason. Slice Yard's own numbers: $28,750.00, 55.3%. | 3 min | Plan fallback: show the listing without the recommended row, install from there. |
-| 9 | "Everything that just happened, for us." | Console, Change feed. Filter by tier. | The build (T2), the connection (T2), the publish (T2), the share (T3, approved), the install. | 1 min | The feed is built today. Show the filter on whatever rows exist. |
+| 1 | **Works.** "A new owner signs up and answers five questions. RMS already knows their menu, staff and locations." | Sign up live (answer "Table service"), or sign in as `owner@marigold.test`. Open Menu, Staff, Locations. | Marigold Kitchen: 40 menu items, 24 staff, Downtown and Riverside. | 2 min | Sign in as `owner@marigold.test` instead of signing up. |
+| 2 | **In review.** "Now the owner asks for what they actually want." | Mini-apps, Build. Type the opening prompt (4.1). Answer the questions. Press **Build it**. Then one or two follow-ups (4.1 steps 1 and 4). | Questions, the plan with what was assumed, steps in plain words, then the live preview with sample numbers. | 5 min | Plan fallback: install the accounts mini-app as a ready-made Marketplace listing and show the build conversation on the vendor list (4.2). |
+| 3 | **Works.** "They connect their till." | Settings, **See connected systems**, **Connect Demo POS**, **Allow**, **Bring in my sales**. | "Brought in 8 weeks of sales for 2 locations. Last week's sales: $84,310.00." (The overview with 61.3% needs the accounts mini-app, Wave 4.) | 2 min | Plan fallback: the Connect button loads the eight weeks with the seed loader. Say so. |
+| 4 | **Not built.** "Publish, and it's part of RMS, on the phone too." | **Publish**, confirm. Open it from the RMS menu. Show it on the phone. | The mini-app in the menu, then the phone layout inside RMS. | 2 min | Show the phone layout in the browser's phone-sized view. |
+| 5 | **In review.** "The owner can just ask." | **Ask a question**: "What was my prime cost last week?" | 61.3% for 9 to 15 November, with where it came from. | 1 min | Plan fallback: answers from the ready-made reports only. If Ask is down, point at the prime cost figure in the mini-app. |
+| 6 | **In review.** "And it doesn't build the same thing twice." | Build tab. Type the exact opening prompt again. | "You already have this" with three choices. | 1 min | Skip, and say it out loud. |
+| 7 | **Not built.** "The owner shares it with other restaurants. We check it first." | Owner: share publicly. Console: Review queue, **Approve**. | The request waiting as T3, then approved. | 2 min | Show the review queue and explain. |
+| 8 | **Not built.** "A pizza place across town." | Private window: `owner@sliceyard.test` (or sign up with "Counter service"). Marketplace. Install. Open. | "Recommended for you" with a reason. Slice Yard's own numbers: $28,750.00, 55.3%. | 3 min | Plan fallback: show the listing without the recommended row, install from there. |
+| 9 | **Works.** "Everything that just happened, for us." | Console, Change feed. Filter by tier. | The build (T2), the connection (T2), the publish (T2), the share (T3, approved), the install. | 1 min | The feed is built today. Show the filter on whatever rows exist. |
 
 Total: about 19 minutes plus questions.
 
@@ -566,7 +642,7 @@ Total: about 19 minutes plus questions.
 | Building stops working and says it cannot start (Wave 2) | The sandbox allowance is used up. Vercel Hobby gives about 5 CPU hours a month and 45-minute sessions | Plan fix: start the Pro trial on the personal Vercel team (only with Rahul's yes). Meanwhile the local sandbox (`RMS_SANDBOX=local`) builds from generators only, without the build agent. |
 | The agent answers nothing, or every build fails at once (Wave 2) | The OpenRouter key is out of credit (50 dollar limit) or expired (it expires **2026-11-22 at 18:26 UTC**) | Check the key's usage and expiry on the OpenRouter website. Rahul replaces or tops up the key in `.env.local` and restarts the API. Never paste the key in chat. |
 | The numbers look wrong | Leftover changes from a rehearsal, tests ran against the database, or the reset did not finish | `pnpm reset-demo`. It must print $84,310.00 and 61.3% for Marigold, $28,750.00 and 55.3% for Slice Yard. |
-| "We are not taking new restaurants right now" | 25 restaurants already exist (too many sign-ups) | `pnpm reset-demo`. |
+| "We could not set up your restaurant just now" on the last onboarding question, again and again | 25 restaurants already exist (too many sign-ups or test leftovers). The screen hides the real reason, "We are not taking new restaurants right now" | `pnpm reset-demo`. |
 | The checks on GitHub fail | A broken build, type error, failing test, or a red security suite (a red suite blocks merging) | Run `pnpm typecheck`, `pnpm build`, `pnpm test` and `pnpm test:security` locally (not on the demo machine during a rehearsal). Two security tests are known to fail only when the whole suite runs on a shared database: check them on their own before calling it a real failure. |
 
 ---
