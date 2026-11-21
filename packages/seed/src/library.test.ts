@@ -1,17 +1,18 @@
 // Installing the library checks every SQL template first, and installs nothing if one fails.
 import { afterAll, describe, expect, it } from "vitest";
 import { NamedActionDefinition, NamedQueryDefinition } from "@rms/contracts";
-import { adminDb, closeAll } from "@rms/db";
+import { adminDb, closeAll, newStorePrefix } from "@rms/db";
 import { requireTestEnv } from "@rms/db/testing";
 import { LIBRARY, type Library } from "@rms/models";
 import { checkLibraryTemplates, installPlatformLibrary } from "./library.js";
 
 requireTestEnv("DATABASE_ADMIN_URL");
 
-/** Keys only this file uses. Nothing else installs or reads them. */
-const GOOD_QUERY = "integ_lib_good_query";
-const BAD_QUERY = "integ_lib_bad_query";
-const BAD_ACTION = "integ_lib_bad_action";
+/** Keys only this file uses, fresh on every run so parallel runs never see each other's. */
+const RUN = newStorePrefix().slice(2);
+const GOOD_QUERY = `integ_lib_good_query_${RUN}`;
+const BAD_QUERY = `integ_lib_bad_query_${RUN}`;
+const BAD_ACTION = `integ_lib_bad_action_${RUN}`;
 const TEST_KEYS = [GOOD_QUERY, BAD_QUERY, BAD_ACTION];
 
 const goodQuery = NamedQueryDefinition.parse({
