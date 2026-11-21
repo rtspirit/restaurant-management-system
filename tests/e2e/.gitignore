@@ -1,0 +1,5 @@
+# Signed-in browser state made by global-setup.ts. It holds session tokens: never commit it.
+.auth/
+# Playwright output
+test-results/
+results/
