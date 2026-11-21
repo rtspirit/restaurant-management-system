@@ -9,6 +9,8 @@ import {
   confirmByOwner,
   decideByStaff,
   drainOutbox,
+  listFeed,
+  listQueue,
   ownerNotice,
   recordChange,
   safeOwnerSummary,
@@ -146,26 +148,33 @@ describe.skipIf(!hasDb)("change sets against the database", () => {
     expect(cs.decision).toBe("pending_owner");
     expect(ownerNotice(cs).status).toBe("needs_your_ok");
 
-    await expect(confirmByOwner(adminDb(), { orgUuid: ORG_B, changeSetId: cs.id, actor: owner })).rejects.toThrow(GovernanceError);
-    const done = await confirmByOwner(adminDb(), { orgUuid: ORG_A, changeSetId: cs.id, actor: owner });
+    await expect(confirmByOwner(adminDb(), { orgUuid: ORG_B, changeSetId: cs.id, actor: owner, role: "owner" })).rejects.toThrow(GovernanceError);
+    // A staff-role member of the right restaurant cannot confirm.
+    await expect(confirmByOwner(adminDb(), { orgUuid: ORG_A, changeSetId: cs.id, actor: owner, role: "staff" })).rejects.toMatchObject({
+      reason: "not_allowed",
+    });
+    const [still] = await adminDb()<{ decision: string }[]>`select decision from platform.change_sets where id = ${uuidOf(cs.id)}`;
+    expect(still?.decision).toBe("pending_owner");
+    const done = await confirmByOwner(adminDb(), { orgUuid: ORG_A, changeSetId: cs.id, actor: owner, role: "owner" });
     expect(done.decision).toBe("applied");
     expect(ownerNotice(done).status).toBe("done");
-    await expect(confirmByOwner(adminDb(), { orgUuid: ORG_A, changeSetId: cs.id, actor: owner })).rejects.toMatchObject({ reason: "not_pending" });
+    await expect(confirmByOwner(adminDb(), { orgUuid: ORG_A, changeSetId: cs.id, actor: owner, role: "owner" })).rejects.toMatchObject({
+      reason: "not_pending",
+    });
     // A T2 change cannot be decided by a maintainer: it is the owner's call.
     const other = await withOrg(apiDb(), ORG_A, (tx) => recordChange(tx, { orgUuid: ORG_A, origin: "settings", actor: owner, signals: ["role_change"] }));
     await expect(
-      decideByStaff(adminDb(), { changeSetId: other.id, staffUuid: STAFF, staffActor: owner, decision: "approve" }),
+      decideByStaff(adminDb(), { changeSetId: other.id, staffUuid: STAFF, decision: "approve" }),
     ).rejects.toMatchObject({ reason: "not_pending" });
   });
 
   it("T3 is held until a maintainer decides, and the decision is recorded in change_reviews", async () => {
-    const staffActor: Actor = { type: "user", id: toPublicId("usr", staffUserId as string) };
     const a = await withOrg(apiDb(), ORG_A, (tx) => recordChange(tx, { orgUuid: ORG_A, origin: "share", actor: owner, signals: ["public_share"] }));
     const b = await adminDb().begin((tx) => recordChange(tx, { orgUuid: ORG_B, origin: "system", actor: job, signals: ["new_dependency"] }));
     expect([a.tier, a.decision, b.tier, b.decision]).toEqual(["T3", "pending_maintainer", "T3", "pending_maintainer"]);
 
-    const approved = await decideByStaff(adminDb(), { changeSetId: a.id, staffUuid: STAFF, staffActor, decision: "approve", note: "Looks fine" });
-    const rejected = await decideByStaff(adminDb(), { changeSetId: b.id, staffUuid: STAFF, staffActor, decision: "reject" });
+    const approved = await decideByStaff(adminDb(), { changeSetId: a.id, staffUuid: STAFF, decision: "approve", note: "Looks fine" });
+    const rejected = await decideByStaff(adminDb(), { changeSetId: b.id, staffUuid: STAFF, decision: "reject" });
     expect(approved.decision).toBe("approved");
     expect(approved.decidedAt).not.toBeNull();
     expect(rejected.decision).toBe("rejected");
@@ -178,9 +187,24 @@ describe.skipIf(!hasDb)("change sets against the database", () => {
       { change_set_id: uuidOf(a.id), decision: "approved", note: "Looks fine", staff_id: STAFF },
       { change_set_id: uuidOf(b.id), decision: "rejected", note: null, staff_id: STAFF },
     ]);
-    await expect(decideByStaff(adminDb(), { changeSetId: a.id, staffUuid: STAFF, staffActor, decision: "reject" })).rejects.toMatchObject({
+    await expect(decideByStaff(adminDb(), { changeSetId: a.id, staffUuid: STAFF, decision: "reject" })).rejects.toMatchObject({
       reason: "not_pending",
     });
+
+    // The audit row under the restaurant's org says a maintainer decided, and nothing about who.
+    const audit = await adminDb()<{ actor: string; meta: Record<string, unknown> }[]>`
+      select actor, meta from platform.audit_log where target_id = ${uuidOf(a.id)} and action = 'change.approve'`;
+    expect(audit).toEqual([{ actor: "system:maintainer", meta: { decision: "approved" } }]);
+    expect(JSON.stringify(audit)).not.toContain(STAFF);
+    expect(JSON.stringify(audit)).not.toContain(staffUserId as string);
+    // Outbox payloads carry no signal names.
+    const payloads = await adminDb()<{ payload: Record<string, unknown> }[]>`
+      select payload from platform.outbox where change_set_id in (${uuidOf(a.id)}, ${uuidOf(b.id)})`;
+    expect(payloads.length).toBe(4);
+    for (const { payload } of payloads) {
+      expect(payload).not.toHaveProperty("signals");
+      for (const sig of ChangeSignal.options) expect(JSON.stringify(payload)).not.toContain(sig);
+    }
   });
 
   it("writes the outbox and audit rows in the caller's transaction: roll back and they are gone", async () => {
@@ -237,6 +261,64 @@ describe.skipIf(!hasDb)("change sets against the database", () => {
     expect(pending[0]?.n).toBe(0);
     // Draining again sends nothing new.
     expect(await drainOutbox(adminDb(), { orgUuids: [ORG_A, ORG_B] })).toEqual({ sent: 0, failed: 0, notifications: 0 });
+  });
+
+  it("notifications describe each event, even if the change moved on before the drain", async () => {
+    await drainOutbox(adminDb(), { orgUuids: [ORG_A, ORG_B] });
+    const t2 = await withOrg(apiDb(), ORG_A, (tx) => recordChange(tx, { orgUuid: ORG_A, origin: "settings", actor: owner, signals: ["role_change"] }));
+    await confirmByOwner(adminDb(), { orgUuid: ORG_A, changeSetId: t2.id, actor: owner, role: "owner" });
+    const t3 = await withOrg(apiDb(), ORG_B, (tx) => recordChange(tx, { orgUuid: ORG_B, origin: "share", actor: owner, signals: ["public_share"] }));
+    await decideByStaff(adminDb(), { changeSetId: t3.id, staffUuid: STAFF, decision: "approve" });
+
+    // Drain after the decisions; two drains at once never notify twice.
+    const [r1, r2] = await Promise.all([
+      drainOutbox(adminDb(), { orgUuids: [ORG_A, ORG_B] }),
+      drainOutbox(adminDb(), { orgUuids: [ORG_A, ORG_B] }),
+    ]);
+    expect(r1.sent + r2.sent).toBe(4);
+    expect(r1.notifications + r2.notifications).toBe(8);
+
+    const owners = async (id: string) =>
+      (
+        await adminDb()<{ kind: string; body: string }[]>`
+          select kind, body from platform.notifications where change_set_id = ${uuidOf(id)} and audience = 'owner' order by created_at, kind`
+      ).map((n) => `${n.kind} | ${n.body}`);
+    expect((await owners(t2.id)).sort()).toEqual([
+      "change_set.created | Please look at this change and confirm it.",
+      "change_set.decided | This change is now live.",
+    ]);
+    expect((await owners(t3.id)).sort()).toEqual([
+      "change_set.created | Our team is checking this change. We will tell you when it is done.",
+      "change_set.decided | Our team approved this change. It is now live.",
+    ]);
+    const [maint] = await adminDb()<{ n: number }[]>`
+      select count(*)::int as n from platform.notifications where change_set_id in (${uuidOf(t2.id)}, ${uuidOf(t3.id)}) and audience = 'maintainer'`;
+    expect(maint?.n).toBe(4);
+  });
+
+  it("a stored row whose tier disagrees with its signals does not break the feed, the queue or the drain", async () => {
+    await drainOutbox(adminDb(), { orgUuids: [ORG_A, ORG_B] });
+    const bad = "0193a3c0-0000-7000-8000-0000000000fa";
+    const sql = adminDb();
+    // Hand-made, as an old fixture would be: T0 with a T3 signal, held for a maintainer.
+    await sql`insert into platform.change_sets (id, org_id, origin, actor, signals, tier, summary, decision)
+              values (${bad}, ${ORG_B}, 'system', 'system:fixture', ${["public_share"]}::text[], 'T0', 'hand-made', 'pending_maintainer')`;
+    await sql`insert into platform.outbox (topic, org_id, change_set_id, payload)
+              values ('change_set.created', ${ORG_B}, ${bad}, ${sql.json({ tier: "T0", decision: "pending_maintainer" })})`;
+
+    const feed = await listFeed(sql, { orgUuid: ORG_B, limit: 100 });
+    const item = feed.items.find((i) => i.id === toPublicId("chg", bad));
+    expect(item).toMatchObject({ mismatch: true, tier: "T0", signals: ["public_share"], restaurantName: "Governance Test B" });
+    expect(feed.items.filter((i) => i.id !== toPublicId("chg", bad)).every((i) => i.mismatch === undefined)).toBe(true);
+    const queue = await listQueue(sql, { orgUuid: ORG_B });
+    expect(queue.find((i) => i.id === toPublicId("chg", bad))?.mismatch).toBe(true);
+
+    expect(await drainOutbox(sql, { orgUuids: [ORG_A, ORG_B] })).toEqual({ sent: 1, failed: 0, notifications: 1 });
+    const notes = await sql<{ audience: string; severity: string; kind: string }[]>`
+      select audience, severity, kind from platform.notifications where change_set_id = ${bad}`;
+    expect(notes).toEqual([{ audience: "maintainer", severity: "urgent", kind: "change_set.needs_a_look" }]);
+    const [ob] = await sql<{ status: string; attempts: number }[]>`select status, attempts from platform.outbox where change_set_id = ${bad}`;
+    expect(ob).toEqual({ status: "sent", attempts: 1 });
   });
 
   it("the restaurant-facing login cannot mark outbox rows sent or create notifications", async () => {

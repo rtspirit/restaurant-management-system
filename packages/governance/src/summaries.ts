@@ -26,7 +26,7 @@ const OWNER_PHRASE: Record<ChangeSignal, string> = {
 
 /** Signals, strongest first, without repeats. */
 export const sortSignals = (signals: readonly ChangeSignal[]): ChangeSignal[] =>
-  [...new Set(signals)].sort((a, b) => (SIGNAL_TIER[b] > SIGNAL_TIER[a] ? 1 : SIGNAL_TIER[b] < SIGNAL_TIER[a] ? -1 : a.localeCompare(b)));
+  [...new Set(signals)].filter((s) => s in SIGNAL_TIER).sort((a, b) => (SIGNAL_TIER[b] > SIGNAL_TIER[a] ? 1 : SIGNAL_TIER[b] < SIGNAL_TIER[a] ? -1 : a.localeCompare(b)));
 
 /** Maintainer summary: origin plus signal names, strongest first. */
 export const maintainerSummary = (origin: string, signals: readonly ChangeSignal[]): string => {

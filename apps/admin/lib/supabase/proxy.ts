@@ -8,8 +8,16 @@ const PUBLIC_PATHS = ["/sign-in"];
 
 export async function updateSession(request: NextRequest): Promise<NextResponse> {
   let response = NextResponse.next({ request });
+  const path = request.nextUrl.pathname;
   const env = supabaseEnv();
-  if (!env) return response;
+  // Fail closed: without sign-in settings nobody is signed in, so only the sign-in page loads.
+  if (!env) {
+    if (PUBLIC_PATHS.includes(path)) return response;
+    const url = request.nextUrl.clone();
+    url.pathname = "/sign-in";
+    url.search = "";
+    return NextResponse.redirect(url);
+  }
 
   const supabase = createServerClient(env.url, env.key, {
     cookieOptions: { name: AUTH_COOKIE_NAME },
@@ -29,7 +37,6 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
   // Do not run code between creating the client and getClaims(): it refreshes the session.
   const { data } = await supabase.auth.getClaims();
   const signedIn = Boolean(data?.claims);
-  const path = request.nextUrl.pathname;
 
   if (!signedIn && !PUBLIC_PATHS.includes(path)) {
     const url = request.nextUrl.clone();

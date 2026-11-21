@@ -17,6 +17,8 @@ export type FeedItem = {
   createdAt: string;
   decidedAt: string | null;
   restaurantName: string;
+  /** The stored row does not match the rules (for example tier and signals disagree). */
+  mismatch?: true;
 };
 
 export class ApiError extends Error {

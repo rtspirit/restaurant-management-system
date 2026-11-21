@@ -1,13 +1,24 @@
 // Outbox delivery. A job, admin connection only: `rms_api` can neither update the outbox nor
 // create notifications. Today's only channel is the notifications table (console feed and the
 // owner's notices). Slack, email and digests come later.
-import { type Sql, newUuid } from "@rms/db";
-import type { Tier } from "@rms/contracts";
-import { type ChangeRow, type Decision, ownerNotice, toChangeSet } from "./changes.js";
+//
+// Each notification describes the EVENT (the outbox row's payload: tier and decision at the time
+// it was written), not the change set's current state. So a T2 change confirmed before the next
+// drain still yields "please confirm" followed by "now live".
+import { ChangeDecision, Tier as TierSchema, type Tier } from "@rms/contracts";
+import { type Sql, type Tx, newUuid } from "@rms/db";
+import { type ChangeRow, type Decision, OWNER_STATUS, ownerNotice, toChangeSet } from "./changes.js";
 
 const MAX_ATTEMPTS = 5;
 
-type OutboxRow = { id: string; topic: string; org_id: string; change_set_id: string | null; attempts: number };
+type OutboxRow = {
+  id: string;
+  topic: string;
+  org_id: string;
+  change_set_id: string | null;
+  attempts: number;
+  payload: Record<string, unknown>;
+};
 type Severity = "info" | "attention" | "urgent";
 
 const MAINTAINER_SEVERITY: Record<Tier, Severity> = { T0: "info", T1: "info", T2: "attention", T3: "urgent" };
@@ -29,9 +40,18 @@ const ownerBody = (decision: Decision): string => {
 
 export type DrainResult = { sent: number; failed: number; notifications: number };
 
+const insertNote = (
+  sp: Tx,
+  n: { audience: "owner" | "maintainer"; orgId: string; changeSetId: string | null; kind: string; title: string; body: string; severity: Severity },
+) => sp`
+  insert into platform.notifications (id, audience, org_id, change_set_id, kind, title, body, severity)
+  values (${newUuid()}, ${n.audience}, ${n.orgId}, ${n.changeSetId}, ${n.kind}, ${n.title.slice(0, 200)}, ${n.body}, ${n.severity})`;
+
 /**
  * Delivers pending outbox rows: maintainer notification always, owner notification for T2 and
  * T3 changes. Each row is handled in its own savepoint so one bad row cannot block the rest.
+ * A change set row that fails the contract (for example tier and signals disagree) is not
+ * retried: it gets ONE urgent maintainer notification saying it needs a look, and no owner notice.
  * `orgUuids` narrows the drain (tests, and later per-cell workers).
  */
 export const drainOutbox = async (adminSql: Sql, opts: { orgUuids?: string[]; limit?: number } = {}): Promise<DrainResult> => {
@@ -40,11 +60,11 @@ export const drainOutbox = async (adminSql: Sql, opts: { orgUuids?: string[]; li
   await adminSql.begin(async (tx) => {
     const rows = opts.orgUuids
       ? await tx<OutboxRow[]>`
-          select id, topic, org_id, change_set_id, attempts from platform.outbox
+          select id, topic, org_id, change_set_id, attempts, payload from platform.outbox
           where status = 'pending' and org_id = any(${opts.orgUuids}::uuid[])
           order by id limit ${limit} for update skip locked`
       : await tx<OutboxRow[]>`
-          select id, topic, org_id, change_set_id, attempts from platform.outbox
+          select id, topic, org_id, change_set_id, attempts, payload from platform.outbox
           where status = 'pending' order by id limit ${limit} for update skip locked`;
 
     for (const row of rows) {
@@ -60,28 +80,44 @@ export const drainOutbox = async (adminSql: Sql, opts: { orgUuids?: string[]; li
             : [];
 
           if (!cs) {
-            await sp`
-              insert into platform.notifications (id, audience, org_id, change_set_id, kind, title, body, severity)
-              values (${newUuid()}, 'maintainer', ${row.org_id}, null, ${row.topic}, ${`${orgName}: ${row.topic}`}, '', 'info')`;
+            await insertNote(sp, {
+              audience: "maintainer", orgId: row.org_id, changeSetId: null, kind: row.topic,
+              title: `${orgName}: ${row.topic}`, body: "", severity: "info",
+            });
             count += 1;
           } else {
             const change = toChangeSet(cs);
-            const decided = row.topic === "change_set.decided";
-            const title = `${orgName}: ${change.summary}`.slice(0, 200);
-            const body = `${change.tier}, ${decided ? "decided" : "recorded"} as ${change.decision}`;
-            await sp`
-              insert into platform.notifications (id, audience, org_id, change_set_id, kind, title, body, severity)
-              values (${newUuid()}, 'maintainer', ${row.org_id}, ${cs.id}, ${row.topic}, ${title}, ${body},
-                      ${MAINTAINER_SEVERITY[change.tier]})`;
-            count += 1;
-            if (change.tier === "T2" || change.tier === "T3") {
-              const notice = ownerNotice(change);
-              const severity: Severity = notice.status === "needs_your_ok" ? "attention" : "info";
-              await sp`
-                insert into platform.notifications (id, audience, org_id, change_set_id, kind, title, body, severity)
-                values (${newUuid()}, 'owner', ${row.org_id}, ${cs.id}, ${row.topic}, ${notice.summary},
-                        ${ownerBody(change.decision)}, ${severity})`;
+            if (change.mismatch) {
+              await insertNote(sp, {
+                audience: "maintainer", orgId: row.org_id, changeSetId: cs.id, kind: "change_set.needs_a_look",
+                title: `${orgName}: a recorded change needs a look`,
+                body: `Stored tier ${String(cs.tier)} does not match its signals (${(cs.signals ?? []).join(", ")}). No owner notice was sent.`,
+                severity: "urgent",
+              });
               count += 1;
+            } else {
+              // The event's own tier and decision; fall back to the row for older payloads.
+              const tierP = TierSchema.safeParse(row.payload?.tier);
+              const decisionP = ChangeDecision.safeParse(row.payload?.decision);
+              const tier = tierP.success ? tierP.data : change.tier;
+              const decision = decisionP.success ? decisionP.data : change.decision;
+              const decided = row.topic === "change_set.decided";
+              await insertNote(sp, {
+                audience: "maintainer", orgId: row.org_id, changeSetId: cs.id, kind: row.topic,
+                title: `${orgName}: ${change.summary}`,
+                body: `${tier}, ${decided ? "decided" : "recorded"} as ${decision}`,
+                severity: MAINTAINER_SEVERITY[tier],
+              });
+              count += 1;
+              if (tier === "T2" || tier === "T3") {
+                const status = OWNER_STATUS[decision];
+                await insertNote(sp, {
+                  audience: "owner", orgId: row.org_id, changeSetId: cs.id, kind: row.topic,
+                  title: ownerNotice(change).summary, body: ownerBody(decision),
+                  severity: status === "needs_your_ok" ? "attention" : "info",
+                });
+                count += 1;
+              }
             }
           }
           await sp`update platform.outbox set status = 'sent', sent_at = now(), attempts = attempts + 1 where id = ${row.id}`;

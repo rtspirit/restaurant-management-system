@@ -29,7 +29,10 @@ export function ChangeTable({ items, caption, actions }: { items: FeedItem[]; ca
             </td>
             <td>{item.restaurantName}</td>
             <td>{item.tier}</td>
-            <td>{item.decision}</td>
+            <td>
+              {item.decision}
+              {item.mismatch ? <strong> (needs a look: tier does not match its signals)</strong> : null}
+            </td>
             <td>{item.origin}</td>
             <td>{item.summary}</td>
             <td>{item.signals.join(", ")}</td>

@@ -54,15 +54,25 @@ export const listFeed = async (adminSql: Sql, filter: FeedFilter = {}): Promise<
   return { items: page, nextBefore: rows.length > limit && page.length > 0 ? (page[page.length - 1] as FeedItem).id : null };
 };
 
-/** Changes held for a maintainer, oldest first. */
-export const listQueue = async (adminSql: Sql, limit = 100): Promise<FeedItem[]> => {
-  const rows = await adminSql.unsafe<FeedRow[]>(
-    `select ${COLUMNS}
-       from platform.change_sets c join platform.organizations o on o.id = c.org_id
-      where c.decision = 'pending_maintainer'
-      order by c.created_at asc, c.id asc
-      limit $1`,
-    [Math.min(Math.max(limit, 1), 200)],
-  );
+/** Changes held for a maintainer, oldest first. `orgUuid` is an optional maintainer filter. */
+export const listQueue = async (adminSql: Sql, opts: { orgUuid?: string | undefined; limit?: number | undefined } = {}): Promise<FeedItem[]> => {
+  const limit = Math.min(Math.max(opts.limit ?? 100, 1), 200);
+  const rows = opts.orgUuid
+    ? await adminSql.unsafe<FeedRow[]>(
+        `select ${COLUMNS}
+           from platform.change_sets c join platform.organizations o on o.id = c.org_id
+          where c.decision = 'pending_maintainer' and c.org_id = $2::uuid
+          order by c.created_at asc, c.id asc
+          limit $1`,
+        [limit, asUuid(opts.orgUuid, "org")],
+      )
+    : await adminSql.unsafe<FeedRow[]>(
+        `select ${COLUMNS}
+           from platform.change_sets c join platform.organizations o on o.id = c.org_id
+          where c.decision = 'pending_maintainer'
+          order by c.created_at asc, c.id asc
+          limit $1`,
+        [limit],
+      );
   return rows.map(toItem);
 };

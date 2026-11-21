@@ -22,6 +22,8 @@ const supabase = () => (process.env.SUPABASE_URL ?? "").replace(/\/$/, "");
 const users: string[] = [];
 let staffToken = "";
 let memberToken = "";
+let strangerToken = "";
+const BAD = "0193a3c0-0000-7000-8000-0000000000f8";
 
 const signUp = async (): Promise<{ id: string; token: string }> => {
   const res = await fetch(`${supabase()}/auth/v1/signup`, {
@@ -62,14 +64,16 @@ const owner: Actor = { type: "user", id: toPublicId("usr", MEMBER) };
 const record = (org: string, signals: Parameters<typeof recordChange>[1]["signals"]) =>
   withOrg(apiDb(), org, (tx) => recordChange(tx, { orgUuid: org, origin: "build", actor: owner, signals }));
 
-const ROUTES: Array<{ method: string; path: () => string; body?: unknown }> = [
-  { method: "GET", path: () => "/admin/feed" },
-  { method: "GET", path: () => "/admin/queue" },
-  { method: "POST", path: () => `/admin/changes/${toPublicId("chg", "0193a3c0-0000-7000-8000-0000000000ff")}/decision`, body: { decision: "approve" } },
-];
+const UNKNOWN_CHANGE = toPublicId("chg", "0193a3c0-0000-7000-8000-0000000000ff");
 
 describe.skipIf(!hasDb)("maintainer console API", () => {
   const created: Record<string, { id: string }> = {};
+  // The POST targets a real change held for a maintainer, so a refusal is meaningful.
+  const ROUTES: Array<{ method: string; path: () => string; body?: unknown }> = [
+    { method: "GET", path: () => "/admin/feed" },
+    { method: "GET", path: () => "/admin/queue" },
+    { method: "POST", path: () => `/admin/changes/${created.t3a?.id}/decision`, body: { decision: "approve" } },
+  ];
 
   beforeAll(async () => {
     process.env.ADMIN_URL = ADMIN_ORIGIN;
@@ -83,12 +87,17 @@ describe.skipIf(!hasDb)("maintainer console API", () => {
     const member = await signUp();
     memberToken = member.token;
     await sql`insert into platform.members (id, org_id, user_id, role) values (${MEMBER}, ${ORG_A}, ${member.id}, 'owner')`;
+    // Signed in, but neither a maintainer nor a member of any restaurant.
+    strangerToken = (await signUp()).token;
 
     created.t0 = await record(ORG_A, ["theme_change"]);
     created.t1 = await record(ORG_B, ["new_model"]);
     created.t2 = await record(ORG_A, ["new_connection"]);
     created.t3a = await record(ORG_A, ["public_share"]);
     created.t3b = await record(ORG_B, ["new_dependency"]);
+    // A hand-made row whose tier disagrees with its signals, as an old fixture would be.
+    await sql`insert into platform.change_sets (id, org_id, origin, actor, signals, tier, summary, decision)
+              values (${BAD}, ${ORG_B}, 'system', 'system:fixture', ${["public_share"]}::text[], 'T1', 'hand-made', 'pending_maintainer')`;
   });
 
   afterAll(async () => {
@@ -99,35 +108,50 @@ describe.skipIf(!hasDb)("maintainer console API", () => {
     await closeAll();
   });
 
-  it("refuses every route without a valid token (401) and for a restaurant member (403)", async () => {
+  it("refuses every route without a valid token (401), for a restaurant member and for a user with no restaurant (403)", async () => {
     for (const r of ROUTES) {
       expect((await call(r.path(), { method: r.method, body: r.body })).status).toBe(401);
       expect((await call(r.path(), { method: r.method, body: r.body, token: "not-a-token" })).status).toBe(401);
       expect((await call(r.path(), { method: r.method, body: r.body, token: `${staffToken.slice(0, -4)}AAAA` })).status).toBe(401);
-      const res = await call(r.path(), { method: r.method, body: r.body, token: memberToken });
-      expect(res.status).toBe(403);
-      expect(JSON.stringify(await res.json())).not.toMatch(/Admin Test/);
+      for (const token of [memberToken, strangerToken]) {
+        const res = await call(r.path(), { method: r.method, body: r.body, token });
+        expect(res.status).toBe(403);
+        expect(JSON.stringify(await res.json())).not.toMatch(/Admin Test/);
+      }
     }
-    // The member's decision attempt changed nothing.
-    const [row] = await adminDb()<{ n: number }[]>`select count(*)::int as n from platform.change_reviews where staff_id = ${STAFF}`;
-    expect(row?.n).toBe(0);
+    // The refused decision attempts changed nothing.
+    const [row] = await adminDb()<{ decision: string; decided_at: Date | null; reviews: number }[]>`
+      select decision, decided_at, (select count(*)::int from platform.change_reviews r where r.change_set_id = c.id) as reviews
+      from platform.change_sets c where c.org_id = ${ORG_A} and c.tier = 'T3'`;
+    expect(row).toEqual({ decision: "pending_maintainer", decided_at: null, reviews: 0 });
   });
 
-  it("shows every restaurant's changes, newest first, with the restaurant name, without the client naming a restaurant", async () => {
+  it("serves the feed without the client naming a restaurant, with restaurant names", async () => {
+    // Other tasks share this database: the unfiltered call only checks the shape.
     const res = await call("/admin/feed?limit=100", { token: staffToken });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { items: Item[] };
-    const ours = mine(body.items);
-    expect(ours.map((i) => i.id)).toEqual([created.t3b, created.t3a, created.t2, created.t1, created.t0].map((c) => c?.id));
-    expect(ours.map((i) => [i.tier, i.decision])).toEqual([
-      ["T3", "pending_maintainer"],
-      ["T3", "pending_maintainer"],
-      ["T2", "pending_owner"],
-      ["T1", "applied"],
-      ["T0", "applied"],
+    for (const i of body.items) expect(typeof i.restaurantName).toBe("string");
+    for (const i of mine(body.items)) expect(["Admin Test Kitchen", "Admin Test Pizza"]).toContain(i.restaurantName);
+  });
+
+  it("shows one restaurant's changes newest first, flagging a malformed row instead of failing", async () => {
+    const a = (await (await call(`/admin/feed?org=${toPublicId("org", ORG_A)}`, { token: staffToken })).json()) as { items: Item[] };
+    expect(a.items.map((i) => i.id)).toEqual([created.t3a, created.t2, created.t0].map((c) => c?.id));
+    expect(a.items.map((i) => [i.tier, i.decision, i.restaurantName])).toEqual([
+      ["T3", "pending_maintainer", "Admin Test Kitchen"],
+      ["T2", "pending_owner", "Admin Test Kitchen"],
+      ["T0", "applied", "Admin Test Kitchen"],
     ]);
-    expect(ours[0]?.restaurantName).toBe("Admin Test Pizza");
-    expect(ours[1]?.restaurantName).toBe("Admin Test Kitchen");
+    const bRes = await call(`/admin/feed?org=${toPublicId("org", ORG_B)}`, { token: staffToken });
+    expect(bRes.status).toBe(200);
+    const b = (await bRes.json()) as { items: Array<Item & { mismatch?: boolean }> };
+    expect(b.items.map((i) => [i.id, i.mismatch ?? false])).toEqual([
+      [toPublicId("chg", BAD), true],
+      [created.t3b?.id, false],
+      [created.t1?.id, false],
+    ]);
+    expect(b.items[0]?.restaurantName).toBe("Admin Test Pizza");
   });
 
   it("filters by tier, decision and (optionally) restaurant, and pages with a cursor", async () => {
@@ -156,8 +180,17 @@ describe.skipIf(!hasDb)("maintainer console API", () => {
   });
 
   it("lists held changes oldest first and records a maintainer's decision", async () => {
-    const q = (await (await call("/admin/queue", { token: staffToken })).json()) as { items: Item[] };
-    expect(mine(q.items).map((i) => i.id)).toEqual([created.t3a?.id, created.t3b?.id]);
+    const qa = (await (await call(`/admin/queue?org=${toPublicId("org", ORG_A)}`, { token: staffToken })).json()) as { items: Item[] };
+    expect(qa.items.map((i) => i.id)).toEqual([created.t3a?.id]);
+    const qbRes = await call(`/admin/queue?org=${toPublicId("org", ORG_B)}`, { token: staffToken });
+    expect(qbRes.status).toBe(200);
+    const qb = (await qbRes.json()) as { items: Array<Item & { mismatch?: boolean }> };
+    expect(qb.items.map((i) => [i.id, i.mismatch ?? false])).toEqual([
+      [created.t3b?.id, false],
+      [toPublicId("chg", BAD), true],
+    ]);
+    expect((await call("/admin/queue", { token: staffToken })).status).toBe(200);
+    expect((await call("/admin/queue?org=bad", { token: staffToken })).status).toBe(400);
 
     const ok = await call(`/admin/changes/${created.t3a?.id}/decision`, { method: "POST", token: staffToken, body: { decision: "approve", note: "Fine to share" } });
     expect(ok.status).toBe(200);
@@ -173,13 +206,13 @@ describe.skipIf(!hasDb)("maintainer console API", () => {
       select count(*)::int as n from platform.change_sets where decided_by_staff_id = ${STAFF} and decided_at is not null`;
     expect(staffDecided?.n).toBe(2);
 
-    const after = (await (await call("/admin/queue", { token: staffToken })).json()) as { items: Item[] };
-    expect(mine(after.items)).toEqual([]);
+    const after = (await (await call(`/admin/queue?org=${toPublicId("org", ORG_A)}`, { token: staffToken })).json()) as { items: Item[] };
+    expect(after.items).toEqual([]);
 
     // Already decided, owner's call (T2), unknown, malformed, bad body.
     expect((await call(`/admin/changes/${created.t3a?.id}/decision`, { method: "POST", token: staffToken, body: { decision: "reject" } })).status).toBe(409);
     expect((await call(`/admin/changes/${created.t2?.id}/decision`, { method: "POST", token: staffToken, body: { decision: "approve" } })).status).toBe(409);
-    expect((await call(ROUTES[2]?.path() ?? "", { method: "POST", token: staffToken, body: { decision: "approve" } })).status).toBe(404);
+    expect((await call(`/admin/changes/${UNKNOWN_CHANGE}/decision`, { method: "POST", token: staffToken, body: { decision: "approve" } })).status).toBe(404);
     expect((await call("/admin/changes/not-an-id/decision", { method: "POST", token: staffToken, body: { decision: "approve" } })).status).toBe(404);
     expect((await call(`/admin/changes/${created.t2?.id}/decision`, { method: "POST", token: staffToken, body: { decision: "maybe" } })).status).toBe(400);
     expect(

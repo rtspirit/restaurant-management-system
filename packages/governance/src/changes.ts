@@ -10,6 +10,7 @@ import {
   ChangeSignal as ChangeSignalSchema,
   type OutboxMessage,
   type OwnerChangeNotice,
+  type Role,
   type Tier,
   toPublicId,
   toUuid,
@@ -31,13 +32,18 @@ export const INITIAL_DECISION: Record<Tier, Decision> = {
 };
 
 export class GovernanceError extends Error {
-  constructor(readonly reason: "not_found" | "not_pending") {
+  constructor(readonly reason: "not_found" | "not_pending" | "not_allowed") {
     super(reason);
   }
 }
 
-/** A change set plus the governance-only columns the console and owner notices need. */
-export type RecordedChange = ChangeSet & { ownerSummary: string; actor: string };
+/**
+ * A change set plus the governance-only columns the console and owner notices need.
+ * `mismatch` is true when the stored row does not pass the ChangeSet contract (for example its
+ * tier disagrees with its signals). Such a row is still returned, with its stored values, so the
+ * console can show it as "needs a look" instead of failing.
+ */
+export type RecordedChange = ChangeSet & { ownerSummary: string; actor: string; mismatch?: true };
 
 export type ChangeRow = {
   id: string;
@@ -54,8 +60,9 @@ export type ChangeRow = {
   created_at: Date;
 };
 
+/** Maps a stored row. Never throws on a malformed row: it is flagged with `mismatch: true`. */
 export const toChangeSet = (r: ChangeRow): RecordedChange => {
-  const cs = ChangeSetSchema.parse({
+  const raw = {
     id: toPublicId("chg", r.id),
     orgId: toPublicId("org", r.org_id),
     appId: r.app_id ? toPublicId("app", r.app_id) : null,
@@ -66,8 +73,10 @@ export const toChangeSet = (r: ChangeRow): RecordedChange => {
     decision: r.decision,
     createdAt: r.created_at.toISOString(),
     decidedAt: r.decided_at ? r.decided_at.toISOString() : null,
-  });
-  return { ...cs, ownerSummary: r.owner_summary, actor: r.actor };
+  };
+  const parsed = ChangeSetSchema.safeParse(raw);
+  if (parsed.success) return { ...parsed.data, ownerSummary: r.owner_summary, actor: r.actor };
+  return { ...(raw as unknown as ChangeSet), ownerSummary: r.owner_summary, actor: r.actor, mismatch: true };
 };
 
 const changeUuidOf = (id: string): string => (id.startsWith("chg_") ? toUuid(id) : id);
@@ -124,7 +133,7 @@ export const recordChange = async (tx: Tx, input: RecordChangeInput): Promise<Re
     topic: "change_set.created",
     orgId: toPublicId("org", orgUuid),
     changeSetId: toPublicId("chg", id),
-    payload: { tier, decision, origin, signals },
+    payload: { tier, decision, origin },
   });
   await writeAudit(tx, {
     orgUuid,
@@ -142,13 +151,14 @@ const RETURNING = "id, org_id, app_id, origin, actor, signals, tier, summary, ow
 
 /**
  * The owner says yes to a change waiting for them (T2). Admin connection only: the database
- * refuses change set updates from `rms_api`. `orgUuid` MUST come from the owner's verified
- * session, so an owner can only confirm their own restaurant's changes.
+ * refuses change set updates from `rms_api`. `orgUuid` and `role` MUST come from the caller's
+ * verified session, so only an owner, and only of that restaurant, can confirm.
  */
 export const confirmByOwner = async (
   adminSql: Sql,
-  input: { orgUuid: string; changeSetId: string; actor: Actor; requestId?: string | null },
+  input: { orgUuid: string; changeSetId: string; actor: Actor; role: Role; requestId?: string | null },
 ): Promise<RecordedChange> => {
+  if (input.role !== "owner") throw new GovernanceError("not_allowed");
   const orgUuid = orgUuidOf(input.orgUuid);
   const id = changeUuidOf(input.changeSetId);
   return adminSql.begin(async (tx) => {
@@ -190,8 +200,6 @@ export const decideByStaff = async (
   input: {
     changeSetId: string;
     staffUuid: string;
-    /** The maintainer's own sign-in, for the audit actor. */
-    staffActor: Actor;
     decision: "approve" | "reject";
     note?: string | null;
     requestId?: string | null;
@@ -222,20 +230,23 @@ export const decideByStaff = async (
       changeSetId: toPublicId("chg", id),
       payload: { tier: row.tier, decision, by: "maintainer" },
     });
+    // This audit row sits under the restaurant's org, which the restaurant-facing login can
+    // read: it says a maintainer decided, nothing more. Who decided, and the note, stay in
+    // change_reviews (maintainer-only).
     await writeAudit(tx, {
       orgUuid: current.org_id,
-      actor: input.staffActor,
+      actor: { type: "system", id: "maintainer" },
       action: decision === "approved" ? "change.approve" : "change.reject",
       targetType: "change_set",
       targetId: id,
-      meta: { tier: row.tier, staffId: input.staffUuid, hasNote: note !== null },
+      meta: { decision: decision === "approved" ? "approved" : "declined" },
       requestId: input.requestId ?? null,
     });
     return toChangeSet(row);
   }) as Promise<RecordedChange>;
 };
 
-const OWNER_STATUS: Record<Decision, OwnerChangeNotice["status"]> = {
+export const OWNER_STATUS: Record<Decision, OwnerChangeNotice["status"]> = {
   applied: "done",
   pending_owner: "needs_your_ok",
   pending_maintainer: "waiting_for_rms",

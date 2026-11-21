@@ -4,7 +4,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { z } from "zod";
-import { ChangeDecision, ChangeSetId, OrgId, Tier, toPublicId } from "@rms/contracts";
+import { ChangeDecision, ChangeSetId, OrgId, Tier } from "@rms/contracts";
 import { type StaffEnv, requireStaff } from "@rms/auth";
 import { adminDb } from "@rms/db";
 import { GovernanceError, decideByStaff, listFeed, listQueue } from "@rms/governance";
@@ -64,7 +64,13 @@ adminRoutes.get("/feed", async (c) => {
   return c.json(page);
 });
 
-adminRoutes.get("/queue", async (c) => c.json({ items: await listQueue(adminDb()) }));
+const QueueQuery = z.strictObject({ org: OrgId.optional() });
+
+adminRoutes.get("/queue", async (c) => {
+  const q = QueueQuery.safeParse(c.req.query());
+  if (!q.success) return fail(400, "bad_request", "Those filters are not valid.");
+  return c.json({ items: await listQueue(adminDb(), { orgUuid: q.data.org }) });
+});
 
 const DecisionBody = z.strictObject({
   decision: z.enum(["approve", "reject"]),
@@ -80,7 +86,6 @@ adminRoutes.post("/changes/:id/decision", async (c) => {
     const change = await decideByStaff(adminDb(), {
       changeSetId: id.data,
       staffUuid: c.var.staff.staffUuid,
-      staffActor: { type: "user", id: toPublicId("usr", c.var.user.userUuid) },
       decision: body.data.decision,
       note: body.data.note ?? null,
     });
