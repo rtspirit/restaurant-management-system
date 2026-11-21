@@ -37,6 +37,13 @@ export const devPolicy = (shellOrigin: string | null): string =>
     "connect-src 'self'",
     "form-action 'none'",
     "base-uri 'none'",
+    // Nothing else may load: no plugins, frames, workers, media, manifests or peer connections.
+    "object-src 'none'",
+    "frame-src 'none'",
+    "worker-src 'none'",
+    "media-src 'none'",
+    "manifest-src 'none'",
+    "webrtc 'block'",
     `frame-ancestors ${shellOrigin ?? "'none'"}`,
   ].join("; ");
 

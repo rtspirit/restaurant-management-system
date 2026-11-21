@@ -239,7 +239,7 @@ describe("the app template and the build agent's tools", () => {
   });
 
   it("mini-app code may import only React, the design system and the SDK", () => {
-    expect([...c.ALLOWED_APP_IMPORTS].sort()).toEqual(["@rms/sdk", "@rms/ui", "react", "react/jsx-runtime"]);
+    expect([...c.ALLOWED_APP_IMPORTS].sort()).toEqual(["@rms/sdk", "@rms/ui", "react"]);
     const all = [...c.ALLOWED_APP_DEPENDENCIES.dependencies, ...c.ALLOWED_APP_DEPENDENCIES.devDependencies] as string[];
     for (const banned of ["postgres", "pg", "@supabase/supabase-js", "axios", "tailwindcss", "@rms/db", "@rms/auth", "@rms/data"]) expect(all).not.toContain(banned);
   });

@@ -118,17 +118,17 @@ describe("check refuses", () => {
   it.each([
     ["toString", "const n = 3; void n.toString();"],
     ["valueOf", "const n = 3; void n.valueOf();"],
-    ["hasOwnProperty", 'const o = { a: 1 }; void Object.prototype.hasOwnProperty.call(o, "a");'],
-    ["constructor", "const o = {}; void o.constructor;"],
-    ["a bare toString", "void toString;"],
-    ["a state named open", "const [open, setOpen] = [false, (v: boolean) => v]; void open; void setOpen;"],
-    ["a prop named top", "const box = { top: 1 }; void box.top;"],
+    ["a field named hasOwnProperty", "const o = { hasOwnProperty: 1 }; void o.hasOwnProperty;"],
+    ["toLocaleString", "const n = 3; void n.toLocaleString();"],
+    ["a local named toString", "const toString = 1; void toString;"],
+    ["a state named shown", "const [shown, setShown] = [false, (v: boolean) => v]; void shown; void setShown;"],
+    ["a field read with a fixed key", 'const box: Record<string, number> = { height: 1 }; void box["height"];'],
   ])("passes ordinary code: %s", async (_name, body) => {
     await withFile("src/screens/ok/index.tsx", screenWith(body), ["safety"], (out) => expect(result(out, "safety")?.problems).toEqual([]));
   });
 
-  it("passes an in-page link and a spread onto a component", async () => {
-    await withFile("src/components/ok.tsx", 'import { Button } from "@rms/ui";\nconst p = { variant: "quiet" as const };\nexport const X = () => <><a href="#/vendors">Vendors</a><Button {...p}>Go</Button></>;\n', ["safety"], (out) => expect(result(out, "safety")?.problems).toEqual([]));
+  it("passes an in-page link", async () => {
+    await withFile("src/components/ok.tsx", 'import { Button } from "@rms/ui";\nexport const X = () => <><a href="#/vendors">Vendors</a><Button variant="quiet">Go</Button></>;\n', ["safety"], (out) => expect(result(out, "safety")?.problems).toEqual([]));
   });
 
   it("a stylesheet file (safety)", async () => {
@@ -171,6 +171,112 @@ describe("check refuses", () => {
       expect(result(out, "types")?.problems[0]).toMatchObject({ file: "src/components/x.tsx", line: 1 });
     });
   }, 60_000);
+});
+
+// ------------------------------------------------------------------ security review, round 2
+
+const handler = (body: string): string =>
+  `import { TextField } from "@rms/ui";\nexport function Bad() {\n  return <TextField label="x" onChange={(e) => { ${body} }} />;\n}\n`;
+
+describe("check refuses (review round 2)", () => {
+  it.each([
+    ["react/jsx-runtime", 'import { jsx } from "react/jsx-runtime";\nexport const X = () => jsx("iframe", { src: "https://example.com" });\n'],
+    ["a namespace import of an allowed package", 'import * as UI from "@rms/ui";\nexport const X = UI;\n'],
+    ["a namespace import of react", 'import * as R from "react";\nexport const X = R;\n'],
+  ])("%s (imports)", async (_name, text) => {
+    await withFile("src/components/x.tsx", text, ["imports"], (out) => expect(result(out, "imports")?.ok).toBe(false));
+  });
+
+  it.each([
+    ["a local named location unlocking the real one", 'function a() { const location = 1; return location; }\nexport function b() { location.href = "https://example.com"; return a(); }\n'],
+    ["a local named parent unlocking the real one", 'function a() { const parent = 1; return parent; }\nexport function b() { (parent as unknown as { postMessage(m: string): void }).postMessage("x"); return a(); }\n'],
+    ["declaring window", "export function b() { const window = 1; return window; }\n"],
+  ])("%s (safety)", async (_name, text) => {
+    await withFile("src/components/x.tsx", text, ["safety"], (out) => expect(result(out, "safety")?.ok).toBe(false));
+  });
+
+  it.each([
+    ["ref on a host element", 'import { useRef } from "react";\nexport function X() { const r = useRef<HTMLDivElement>(null); return <div ref={r} />; }\n'],
+    ["ref on a component", 'import { useRef } from "react";\nimport { TextField } from "@rms/ui";\nexport function X() { const r = useRef<HTMLInputElement>(null); return <TextField label="x" ref={r} />; }\n'],
+    ["a spread onto a component", 'import { TextField } from "@rms/ui";\nconst p = { label: "x" };\nexport const X = () => <TextField {...p} />;\n'],
+  ])("%s (safety)", async (_name, text) => {
+    await withFile("src/components/x.tsx", text, ["safety"], (out) => expect(result(out, "safety")?.ok).toBe(false));
+  });
+
+  it.each([
+    ["e.view", "void e.view;"],
+    ["e.nativeEvent", "void e.nativeEvent;"],
+    ["e.target.ownerDocument", "void e.target.ownerDocument;"],
+    ["e.currentTarget.ownerDocument.defaultView", "void e.currentTarget.ownerDocument.defaultView;"],
+    ["e.target.parentNode", "void e.target.parentNode;"],
+    ["e.target used on its own", "const t = e.target; void t;"],
+    ["a computed key that is not a fixed name", 'const k = "vi" + "ew"; void e[k as "type"];'],
+    ["a wide string key", 'const r: Record<string, unknown> = { ...e }; const k: string = "vi" + "ew"; void r[k];'],
+    ["a literal banned key", 'void e["nativeEvent"];'],
+    ["a computed destructuring key", 'const k = "view"; const { [k]: v } = e; void v;'],
+    ["a cast to any", "void (e as any);"],
+    ["Object.values", "void Object.values(e);"],
+    ["Object.entries", "void Object.entries(e);"],
+    ["Reflect", 'void Reflect.get(e, "view");'],
+    [".constructor", 'void (() => 1).constructor;'],
+    [".call", "const f = () => 1; void f.call(null);"],
+  ])("reaching the page through an event: %s (safety)", async (_name, body) => {
+    await withFile("src/components/x.tsx", handler(body), ["safety"], (out) => expect(result(out, "safety")?.ok).toBe(false));
+  });
+
+  it.each([
+    ["RTCPeerConnection", "void new RTCPeerConnection();"],
+    ["Worker", 'void new Worker("x.js");'],
+    ["SharedWorker", 'void new SharedWorker("x.js");'],
+    ["ServiceWorker", "void ServiceWorker;"],
+    ["navigator.serviceWorker", "void navigator.serviceWorker;"],
+    ["BroadcastChannel", 'void new BroadcastChannel("x");'],
+    ["MessageChannel", "void new MessageChannel();"],
+    ["URL.createObjectURL", "void URL.createObjectURL(new Blob([]));"],
+    ["Blob", "void new Blob([]);"],
+    ["Image", "void new Image();"],
+    ["Audio", "void new Audio();"],
+  ])("%s (safety)", async (_name, body) => {
+    await withFile("src/screens/bad/index.tsx", screenWith(body), ["safety"], (out) => expect(result(out, "safety")?.ok).toBe(false));
+  });
+
+  it.each([
+    ["img with an outside src", '<img alt="" src="https://example.com/x.png" />'],
+    ["img with a protocol-relative src", '<img alt="" src="//example.com/x.png" />'],
+    ["img with a computed src", '<img alt="" src={"https://" + "example.com"} />'],
+    ["video", '<video src="x.mp4" />'],
+    ["audio", '<audio src="x.mp3" />'],
+    ["source", '<source src="x.mp4" />'],
+    ["object", '<object data="x" />'],
+    ["embed", '<embed src="x" />'],
+    ["link", '<link rel="prefetch" href="x" />'],
+    ["script", "<script />"],
+    ["svg image", '<svg><image href="https://example.com/x.png" /></svg>'],
+    ["svg use", '<svg><use href="https://example.com/x.svg#a" /></svg>'],
+    ["a host element that is not on the list", "<marquee>x</marquee>"],
+  ])("%s (safety)", async (_name, el) => {
+    await withFile("src/components/x.tsx", `export const X = () => ${el};\n`, ["safety"], (out) => expect(result(out, "safety")?.ok).toBe(false));
+  });
+
+  it.each([["src/components/x.TSX"], ["src/components/x.js"], ["src/components/x.jsx"], ["src/components/x.mts"], ["src/components/data.json"], ["src/screens/a/notes.md"]])(
+    "a file that is not .ts or .tsx: %s (locked)",
+    async (rel) => {
+      await withFile(rel, "export {};\n", ["locked"], (out) => expect(result(out, "locked")?.problems.map((p) => p.file)).toContain(rel));
+    },
+  );
+
+  it.each([["vite.config.js"], [".env.development.local"], [".npmrc"], [".env"], ["postcss.config.js"]])("a new root file: %s (locked)", async (rel) => {
+    await withFile(rel, "x=1\n", ["locked"], (out) => expect(result(out, "locked")?.problems.map((p) => p.file)).toContain(rel));
+  });
+
+  it("still passes ordinary handlers and a relative image", async () => {
+    await withFile(
+      "src/components/ok.tsx",
+      'import { TextField } from "@rms/ui";\nimport { useState } from "react";\nexport function Ok() {\n  const [v, setV] = useState("");\n  const keys = Object.keys({ a: 1 });\n  return <div><img alt="" src="logo.png" /><TextField label={keys.join()} value={v} onChange={(e) => setV(e.target.value)} /></div>;\n}\n',
+      ["imports", "safety"],
+      (out) => expect(out.results.flatMap((r) => r.problems)).toEqual([]),
+    );
+  });
 });
 
 describe("the locked rule", () => {

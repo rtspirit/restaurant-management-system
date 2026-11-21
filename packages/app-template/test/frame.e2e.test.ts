@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { type Browser, chromium } from "@playwright/test";
 import { createServer, type ViteDevServer } from "vite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { TEMPLATE_DIR, freePort, makeTempApp } from "./helpers.js";
+import { KNOWN_UNSUPPORTED, TEMPLATE_DIR, freePort, makeTempApp } from "./helpers.js";
 import { shellPage, testContext } from "./shell-page.js";
 
 const SHOTS = join(TEMPLATE_DIR, "test-output");
@@ -80,6 +80,8 @@ describe("the template's dev server inside the shell's frame", () => {
     expect(policy).not.toMatch(/ws:|wss:/);
     expect(policy).toContain("form-action 'none'");
     expect(policy).toContain("base-uri 'none'");
+    for (const d of ["object-src 'none'", "frame-src 'none'", "worker-src 'none'", "media-src 'none'", "manifest-src 'none'", "webrtc 'block'"]) expect(policy).toContain(d);
+    expect(policy).not.toContain("unsafe-eval");
     expect(policy).toContain("default-src 'self'");
     // Never a meta tag: browsers ignore frame-ancestors there.
     expect(await res.text()).not.toMatch(/http-equiv=["']?content-security-policy/i);
@@ -89,6 +91,7 @@ describe("the template's dev server inside the shell's frame", () => {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     const problems: string[] = [];
     page.on("console", (m) => {
+      if (KNOWN_UNSUPPORTED.test(m.text())) return;
       if (m.type() === "error" || /content security policy|refused/i.test(m.text())) problems.push(m.text());
     });
     page.on("pageerror", (e) => problems.push(e.message));
@@ -121,6 +124,7 @@ describe("the template's dev server inside the shell's frame", () => {
     const page = await browser.newPage();
     const problems: string[] = [];
     page.on("console", (m) => {
+      if (KNOWN_UNSUPPORTED.test(m.text())) return;
       if (m.type() === "error" || /content security policy|refused/i.test(m.text())) problems.push(m.text());
     });
     await page.goto(shellUrl);

@@ -7,7 +7,7 @@ import { type Browser, chromium, type Page } from "@playwright/test";
 import { runGenerator, writeLockedHashes } from "@rms/generators";
 import { createServer, type ViteDevServer } from "vite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { TEMPLATE_DIR, VENDOR_SCREENS, freePort, makeTempApp, prepareApp } from "./helpers.js";
+import { KNOWN_UNSUPPORTED, TEMPLATE_DIR, VENDOR_SCREENS, freePort, makeTempApp, prepareApp } from "./helpers.js";
 import { shellPage, testContext } from "./shell-page.js";
 
 const SHOTS = join(TEMPLATE_DIR, "test-output");
@@ -67,7 +67,8 @@ const open = async (width: number, height: number): Promise<{ page: Page; proble
   const page = await browser.newPage({ viewport: { width, height } });
   const problems: string[] = [];
   page.on("console", (m) => {
-    if (m.type() === "error" || /content security policy|refused/i.test(m.text())) problems.push(m.text());
+    if (KNOWN_UNSUPPORTED.test(m.text())) return;
+      if (m.type() === "error" || /content security policy|refused/i.test(m.text())) problems.push(m.text());
   });
   page.on("pageerror", (e) => problems.push(e.message));
   await page.goto(shellUrl);

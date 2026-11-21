@@ -8,7 +8,7 @@ const QUERY = "sales_by_day";
 const COLUMNS = [{ key: "business_date", label: "Business date", format: "date", align: "start" }, { key: "net_sales", label: "Net sales", format: "money", align: "end" }, { key: "gross_sales", label: "Gross sales", format: "money", align: "end" }, { key: "discounts", label: "Discounts", format: "money", align: "end" }, { key: "comps", label: "Comps", format: "money", align: "end" }, { key: "sales_tax", label: "Sales tax collected", format: "money", align: "end" }, { key: "tips", label: "Tips", format: "money", align: "end" }, { key: "guests", label: "Guests", format: "number", align: "end" }, { key: "checks", label: "Checks", format: "number", align: "end" }] as const;
 const TOTALS = ["net_sales", "gross_sales", "discounts", "comps", "sales_tax", "tips", "guests", "checks"] as const;
 
-const sum = (rows: Record<string, unknown>[], key: string): number =>
+const sum = (rows: Record<string, unknown>[], key: (typeof TOTALS)[number]): number =>
   rows.reduce<number>((total, row) => {
     const value = row[key];
     return total + (typeof value === "number" ? value : 0);
