@@ -85,8 +85,10 @@ describe("Wave 2: no request, tool input or frame message can name a restaurant,
 
   it("has an example for every Wave 2 request and input shape", () => {
     const wave1 = new Set(["QueryRequest", "BatchRequest", "NamedQueryRequest", "NamedActionRequest", "AskQueryToolInput", "StartRunRequest", "RunReply", "OnboardingAnswers", "AppManifestInput"]);
+    // Wave 3 request shapes have their own examples and the same test in wave3.test.ts.
+    const wave3 = new Set(["PublishRequest", "RollbackRequest", "ConfirmChangeRequest", "DecideChangeRequest", "ShareRequest", "InstallRequest"]);
     const exported = Object.entries(c)
-      .filter(([name, v]) => /(Request|Input|Reply|Answers)$/.test(name) && typeof (v as { safeParse?: unknown }).safeParse === "function" && !wave1.has(name))
+      .filter(([name, v]) => /(Request|Input|Reply|Answers)$/.test(name) && typeof (v as { safeParse?: unknown }).safeParse === "function" && !wave1.has(name) && !wave3.has(name))
       .map(([name]) => name);
     const covered = new Set(Object.keys(WAVE2_SAMPLES).map((k) => k.replace(/ \(.*\)$/, "")));
     expect(exported.filter((name) => !covered.has(name))).toEqual([]);
@@ -447,5 +449,5 @@ describe("memory and duplicates", () => {
 });
 
 describe("version", () => {
-  it("is bumped for Wave 2", () => expect(c.CONTRACTS_VERSION).toBe("0.4.2"));
+  it("is at least the Wave 2 version", () => expect(Number(c.CONTRACTS_VERSION.split(".")[1])).toBeGreaterThanOrEqual(4));
 });

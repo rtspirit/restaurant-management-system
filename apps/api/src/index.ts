@@ -6,11 +6,14 @@ import { adminRoutes } from "./routes/admin.js";
 import { agentRoutes } from "./routes/agent.js";
 import { askRoutes } from "./routes/ask.js";
 import { authRoutes } from "./routes/auth.js";
+import { changesRoutes } from "./routes/changes.js";
 import { connectionRoutes, sweepLoaderAtStartup } from "./routes/connections.js";
 import { dataRoutes } from "./routes/data.js";
+import { marketplaceRoutes } from "./routes/marketplace.js";
 import { demoPosRoutes } from "./routes/mcp-demo-pos.js";
 import { memoryRoutes } from "./routes/memory.js";
 import { parentRoutes } from "./routes/parent.js";
+import { publishRoutes } from "./routes/publish.js";
 
 const app = new Hono();
 
@@ -34,6 +37,11 @@ app.route("/ask", askRoutes);
 app.route("/connections", connectionRoutes);
 app.route("/memory", memoryRoutes);
 app.route("/mcp/demo-pos", demoPosRoutes);
+
+// Wave 3
+app.route("/publish", publishRoutes);
+app.route("/changes", changesRoutes);
+app.route("/marketplace", marketplaceRoutes);
 
 // Never leak internals. Routes turn known failures into plain-word errors themselves.
 app.onError((err, c) => {

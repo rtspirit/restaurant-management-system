@@ -7,7 +7,10 @@
 // Request and result shapes are unchanged.
 // 0.4.2 (task L, approved by the lead): `ToolsVersion`; `ConnectionView.toolsVersion`; it is
 // required in `ApproveToolsRequest`; `TOKEN_TTL.connection` is 60 seconds.
-export const CONTRACTS_VERSION = "0.4.2";
+// 0.5.0 (Wave 3): where mini-app code is kept, publish and the apps host, change detectors and
+// the owner's side of a change, held actions, sharing, listings, installing, recommendations,
+// and the origin rule for published mini-apps on a laptop and a phone (ADR 0012).
+export const CONTRACTS_VERSION = "0.5.0";
 
 export * from "./ids.js";
 export * from "./auth.js";
@@ -21,5 +24,9 @@ export * from "./mcp.js";
 export * from "./ask.js";
 export * from "./memory.js";
 export * from "./governance.js";
+export * from "./objects.js";
+export * from "./publish.js";
+export * from "./changes.js";
+export * from "./marketplace.js";
 export * from "./platform.js";
 export * from "./storage.js";

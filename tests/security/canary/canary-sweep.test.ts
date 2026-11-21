@@ -80,9 +80,18 @@ describe("1. the canaries are really there", () => {
       if ((row as Row).marked === 0) without.push(t.table);
       else withCanary++;
     }
-    // The only tables with no canary are the ones with no free text to put it in.
-    expect(without.sort()).toEqual(["app_models", "member_locations", "members", "parent_sync_state"]);
+    // The only tables with no canary are the ones with no free text to put it in. `objects`
+    // holds its canary as bytes, which this text search does not see: the test below reads it.
+    expect(without.sort()).toEqual(["app_models", "member_locations", "members", "objects", "parent_sync_state"]);
     expect(withCanary).toBeGreaterThanOrEqual(36);
+  });
+
+  it.each(["a", "b"] as const)("restaurant %s has its canary in its stored mini-app code, and the other restaurant's is not there", async (k) => {
+    const other = k === "a" ? "b" : "a";
+    const rows = await platform().unsafe("select convert_from(bytes, 'UTF8') as text from platform.objects where org_id = $1", [ORG[k].uuid]);
+    expect(rows.length).toBeGreaterThan(0);
+    expect(holds(rows, CANARY[k])).toBe(true);
+    expect(holds(rows, CANARY[other])).toBe(false);
   });
 
   it.each(["a", "b"] as const)("restaurant %s has its canary in every parent table, every live table and every draft table", async (k) => {

@@ -18,6 +18,12 @@
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["--filter", "@rms/admin", "start"],
       "port": 3001
+    },
+    {
+      "name": "rms-apps-host",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@rms/apps-host", "start"],
+      "port": 3002
     }
   ]
 }

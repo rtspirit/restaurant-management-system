@@ -124,6 +124,135 @@ export const isSeparateSite = (frameOrigin: string, shellOrigin: string): boolea
   return !frame.endsWith(`.${shell}`) && !shell.endsWith(`.${frame}`);
 };
 
+// ------------------------------------------------------------------ local and phone demo origins (ADR 0012)
+
+/**
+ * The demo runs on one laptop, and on a phone on the same Wi-Fi. There a PUBLISHED mini-app is
+ * served by the apps host on the same machine as the RMS web app, over plain http. The rule
+ * that matters does not change: the frame and the shell are on DIFFERENT HOSTS, because cookies
+ * ignore the port and the sign-in cookies can be read by page script. One machine has more than
+ * one name, and a cookie set for one name is never sent to, or readable from, another:
+ *
+ *   on the laptop   shell http://127.0.0.1:3000             apps host http://localhost:3002
+ *   on the phone    shell http://<laptop-name>.local:3000   apps host http://<network address>:3002
+ *
+ * (either way round is as safe: what counts is that the two hosts differ.)
+ *
+ * The laptop pair needs nothing new: both are loopback origins, which `Origin` already accepts.
+ *
+ * The phone pair is plain http on a network address. That is allowed ONLY in local demo mode,
+ * and ONLY for the exact origins written in the local demo list. There is no pattern: not "any
+ * private address", not "any `.local` name". An origin that is not on the list, letter for
+ * letter, is not an origin.
+ *
+ * Build previews are not part of this: `PreviewGrant` and `isSeparateSite` keep the strict
+ * rule, in every mode.
+ */
+
+/**
+ * A plain-http origin, written exactly as a browser reports it. This is only a SHAPE. On its
+ * own it allows nothing: see `originAllowed`.
+ */
+export const HttpOrigin = z
+  .string()
+  .max(200)
+  .regex(/^http:\/\/[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:\d{1,5})?$/)
+  // An address a browser would rewrite (a short or zero-padded number, a default port) is not
+  // an origin anyone will ever send.
+  .refine((o) => {
+    try {
+      return new URL(o).origin === o;
+    } catch {
+      return false;
+    }
+  }, "Not written the way a browser reports an origin");
+export type HttpOrigin = z.infer<typeof HttpOrigin>;
+
+/**
+ * Well-formed: an `Origin`, or a plain-http origin. This says an address is SHAPED like one RMS
+ * could use. It never says the address may be used: that is `originAllowed` and `canFrameApp`.
+ * Used where an origin was already decided on by the server: an app grant's frame origin, the
+ * shell origin a mini-app was built with, the origin a message is compared with.
+ */
+export const AnyOrigin = z.union([Origin, HttpOrigin]);
+export type AnyOrigin = z.infer<typeof AnyOrigin>;
+
+/**
+ * The switch and the list.
+ *   RMS_LOCAL_DEMO=1            switches local demo mode on. Server-side. Never set for a deployed
+ *                               server, and a deployed server ignores it anyway (`hostedMarkers`
+ *                               are settings the hosting platforms set themselves).
+ *   RMS_LOCAL_DEMO_ORIGINS      the exact plain-http origins allowed in that mode, comma-separated.
+ * The web app is BUILT with the two `NEXT_PUBLIC_` copies for the demo, and without them otherwise.
+ */
+export const LOCAL_DEMO = {
+  flagEnv: "RMS_LOCAL_DEMO",
+  originsEnv: "RMS_LOCAL_DEMO_ORIGINS",
+  publicFlagEnv: "NEXT_PUBLIC_RMS_LOCAL_DEMO",
+  publicOriginsEnv: "NEXT_PUBLIC_RMS_LOCAL_DEMO_ORIGINS",
+  on: "1",
+  hostedMarkers: ["VERCEL", "RAILWAY_ENVIRONMENT"],
+  maxOrigins: 8,
+} as const;
+
+/**
+ * Which origins count. `localOrigins` is empty unless local demo mode is on, and then it holds
+ * exactly the listed plain-http origins. Make one with `originRules` or `originRulesFrom`,
+ * never by hand in product code.
+ */
+export type OriginRules = { readonly localDemo: boolean; readonly localOrigins: readonly string[] };
+
+export const STRICT_ORIGINS: OriginRules = { localDemo: false, localOrigins: [] };
+
+/**
+ * The rules from a flag and a list, as text. Local demo mode is on only when the flag is exactly
+ * "1" and `hosted` is false. Each list entry must be a plain-http origin exactly as a browser
+ * reports it: anything else (a wildcard, a path, https, a typo) is dropped, never guessed at.
+ */
+export const originRulesFrom = (flag: string | undefined, list: string | undefined, hosted = false): OriginRules => {
+  if (flag !== LOCAL_DEMO.on || hosted) return STRICT_ORIGINS;
+  const localOrigins: string[] = [];
+  for (const part of (list ?? "").split(",")) {
+    const text = part.trim();
+    if (HttpOrigin.safeParse(text).success && !localOrigins.includes(text)) localOrigins.push(text);
+  }
+  return { localDemo: true, localOrigins: localOrigins.slice(0, LOCAL_DEMO.maxOrigins) };
+};
+
+/** The rules for a server, from its own environment. */
+export const originRules = (env: Record<string, string | undefined>): OriginRules =>
+  originRulesFrom(env[LOCAL_DEMO.flagEnv], env[LOCAL_DEMO.originsEnv], LOCAL_DEMO.hostedMarkers.some((m) => Boolean(env[m])));
+
+/** True when `origin` may be used at all: an `Origin` always, anything else only when it is on the local demo list, exactly. */
+export const originAllowed = (origin: string, rules: OriginRules): boolean =>
+  Origin.safeParse(origin).success || (rules.localDemo && HttpOrigin.safeParse(origin).success && rules.localOrigins.includes(origin));
+
+/** Different hosts, and neither a parent domain of the other: no cookie set for one is sent to, or readable from, the other. */
+const hostsAreSeparate = (a: string, b: string): boolean => {
+  const x = hostOf(a);
+  const y = hostOf(b);
+  if (x === null || y === null || x === y) return false;
+  return !x.endsWith(`.${y}`) && !y.endsWith(`.${x}`);
+};
+
+/**
+ * May a shell at `shellOrigin` show a PUBLISHED mini-app from `frameOrigin`? The one rule for
+ * published mini-apps, used by the server when it makes an `AppGrant` and by the shell before
+ * it loads the frame. All of:
+ *   - both origins may be used at all (`originAllowed`)
+ *   - the frame origin is EXACTLY one of the configured apps-host origins (`appsOrigins`, from settings)
+ *   - the hosts differ, and neither is a parent domain of the other (a different port is not enough)
+ *   - no step down: a shell on https only ever frames https
+ * Build previews do not use this. They keep `isSeparateSite`.
+ */
+export const canFrameApp = (input: { frameOrigin: string; shellOrigin: string; appsOrigins: readonly string[]; rules: OriginRules }): boolean => {
+  const { frameOrigin, shellOrigin, appsOrigins, rules } = input;
+  if (!originAllowed(frameOrigin, rules) || !originAllowed(shellOrigin, rules)) return false;
+  if (!appsOrigins.includes(frameOrigin)) return false;
+  if (shellOrigin.startsWith("https://") && !frameOrigin.startsWith("https://")) return false;
+  return hostsAreSeparate(frameOrigin, shellOrigin);
+};
+
 const grantShape = {
   appId: AppId,
   appName: z.string().max(40),
@@ -155,21 +284,44 @@ const GRANT_RULE = "frameOrigin must be the origin of url, and a frame is never 
 export const PreviewGrant = z.object({ kind: z.literal("preview"), ...grantShape, runId: RunId }).refine(grantHolds, GRANT_RULE);
 export type PreviewGrant = z.infer<typeof PreviewGrant>;
 
+const appGrantHolds = (g: { url: string; frameOrigin: string }): boolean => {
+  try {
+    return new URL(g.url).origin === g.frameOrigin;
+  } catch {
+    return false;
+  }
+};
+
 /**
  * The same hand-off for a PUBLISHED mini-app (Wave 3). The token is an app token: live store,
- * one mini-app, one published version. `url` is on the apps host. Everything else, including
- * every message in this file, is the same, so the shell's frame code does not change.
+ * one mini-app, one published version. `url` is on the apps host. Every message in this file
+ * is the same.
+ *
+ * What differs is the origin rule (ADR 0012). A preview grant's shape refuses a `localhost`
+ * frame, because a preview is checked without knowing the shell's address and the web app was
+ * assumed to be on `localhost`. An app grant has no such shortcut: its frame origin may be any
+ * well-formed origin (`AnyOrigin`), and whether it may be LOADED is `canFrameApp`, which takes
+ * the shell's own origin, the configured apps-host origins and the mode. The server checks it
+ * before it makes the grant. The shell checks it again before it loads the frame. A shell
+ * that loads an app grant without `canFrameApp` is a bug.
  */
-export const AppGrant = z.object({ kind: z.literal("app"), ...grantShape, versionId: AppVersionId }).refine(grantHolds, GRANT_RULE);
+export const AppGrant = z
+  .object({ kind: z.literal("app"), ...grantShape, frameOrigin: AnyOrigin, versionId: AppVersionId })
+  .refine(appGrantHolds, "frameOrigin must be the origin of url");
 export type AppGrant = z.infer<typeof AppGrant>;
 
 /** Either grant. The shell's frame host takes this. */
 export const FrameGrant = z.union([PreviewGrant, AppGrant]);
 export type FrameGrant = z.infer<typeof FrameGrant>;
 
-/** True only for a message the given side may act on. One implementation of the origin rule for both sides. */
+/**
+ * True only for a message the given side may act on. One implementation of the origin rule for both sides.
+ * `expectedOrigin` must be well-formed (`AnyOrigin`): this is an exact comparison with an origin the
+ * caller already decided to trust (a grant that passed its own rule, or the shell origin a mini-app
+ * was built with). It is not the place that decides trust.
+ */
 export const fromExpectedOrigin = (event: { origin: string; source: unknown }, expectedOrigin: string, expectedSource: unknown): boolean =>
-  event.source !== null && event.source === expectedSource && Origin.safeParse(expectedOrigin).success && event.origin === expectedOrigin;
+  event.source !== null && event.source === expectedSource && AnyOrigin.safeParse(expectedOrigin).success && event.origin === expectedOrigin;
 
 /**
  * Settings baked into a mini-app when it is built or served. Public values only.
