@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
+import { SignedOutError } from "@/lib/api";
 import { createClient } from "@/lib/supabase/client";
 import { goToNextStep } from "../next-step";
 
@@ -27,7 +28,13 @@ export default function SignInPage() {
       }
       try {
         await goToNextStep(router);
-      } catch {
+      } catch (e) {
+        if (e instanceof SignedOutError) {
+          // The API refused this session: do not keep it, or the proxy would loop.
+          await createClient().auth.signOut({ scope: "local" });
+          setError("We could not sign you in with this account. Please try again or contact support.");
+          return;
+        }
         setError("You are signed in, but we could not open RMS just now. Please try again.");
       }
     } catch {

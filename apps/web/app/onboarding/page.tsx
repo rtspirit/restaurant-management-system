@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import type { OnboardingAnswers, ServiceStyle } from "@rms/contracts";
-import { SignedOutError, apiFetch } from "@/lib/api";
+import { SignedOutError, apiFetch, signOutAndGoToSignIn } from "@/lib/api";
 
 const STYLES: { value: ServiceStyle; label: string }[] = [
   { value: "full_service", label: "Table service: guests order from a server" },
@@ -69,7 +69,7 @@ export default function OnboardingPage() {
       router.refresh();
     } catch (e) {
       if (e instanceof SignedOutError) {
-        router.replace("/sign-in");
+        await signOutAndGoToSignIn();
         return;
       }
       setError("We could not set up your restaurant just now. Please try again.");

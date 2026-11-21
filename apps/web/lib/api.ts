@@ -8,7 +8,7 @@ export class SignedOutError extends Error {
   }
 }
 
-/** fetch() to the API as the signed-in user. Throws SignedOutError when there is no session. */
+/** fetch() to the API as the signed-in user. Throws SignedOutError when there is no session or the API refuses it. */
 export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const { data } = await createClient().auth.getSession();
   const token = data.session?.access_token;
@@ -19,4 +19,13 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
   const res = await fetch(`${apiUrl()}${path}`, { ...init, headers, cache: "no-store" });
   if (res.status === 401) throw new SignedOutError();
   return res;
+}
+
+/**
+ * The API refused the session while the browser still holds one (for example a deleted user).
+ * Clear it on the server and go to sign-in, so the proxy does not bounce between /sign-in and /.
+ */
+export async function signOutAndGoToSignIn(): Promise<void> {
+  await fetch("/sign-out", { method: "POST", redirect: "manual" }).catch(() => undefined);
+  window.location.assign("/sign-in");
 }

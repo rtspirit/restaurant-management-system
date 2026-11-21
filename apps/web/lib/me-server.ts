@@ -7,6 +7,8 @@ import { createClient } from "./supabase/server";
 /**
  * The signed-in user and their restaurant, or null when signed out. The access token comes
  * from the session cookie and is verified by the API, which decides who this is.
+ * Null on a page behind sign-in means the API refused the session: render `SignOutNow` from
+ * `@/lib/sign-out` rather than redirecting to /sign-in (the proxy would send the user back).
  */
 export async function getMe(): Promise<MeResponse | null> {
   const supabase = await createClient();
