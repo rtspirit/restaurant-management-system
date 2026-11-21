@@ -8,8 +8,9 @@ This file covers the first build and the fixes after the code review and the sec
 
 - **It has never talked to the real stream.** Task I is not merged. The signed-in Build tab now uses the real API always, so until I's routes exist a first message there answers "Building is not switched on yet. Nothing was made or changed." The real client (`realAgentApi` in `apps/web/lib/agent/client.ts`) is typechecked and its Data API call is tested. Expect small mismatches when I merges.
 - **"Try again" has no call to make on the real API** (below, "Needed from task I"). Until it exists the button is not shown on the signed-in screen: the owner types what to do next. It works on the practice routes.
-- **A real sandbox preview will be refused by the new `frame-src` rule.** The rule takes exact origins only, and a real sandbox gets a new address each time. It works for the local preview (`PREVIEW_URL=http://127.0.0.1:5173`). The lead has to decide what goes in the list for real sandboxes (one fixed preview host in front of them, or their parent domain as a pattern).
-- **`PREVIEW_URL` must be set when the web app is BUILT**, or it frames nothing (`frame-src 'none'`) and the preview pane ends on "The preview is taking longer than it should".
+- **The sandbox domain is not written down where I was told to look.** `docs/reference/verified-apis.md` and the two spike notes do not give the address a sandbox preview gets. Task H's notes say its dev server allows the host `.vercel.run`, so the value is most likely `PREVIEW_FRAME_SUFFIX=vercel.run`. Confirm it against a real preview address from task I's first step before setting it. It is in no code.
+- **`PREVIEW_URL`, `APPS_URL` and `PREVIEW_FRAME_SUFFIX` must be set when the web app is BUILT**, or it frames nothing (`frame-src 'none'`) and the preview pane ends on "The preview is taking longer than it should".
+- **`vercel.run` is shared by every Vercel customer's sandboxes.** The pattern lets the browser load any of them in the pane. That gives a frame nothing (no token, no answers), but a narrower domain of our own would be better later.
 - **The preview frame in the gallery is a stand-in page, not the real app template** (task H). It does not take the restaurant's brand colour.
 - **A step that did not finish still has no shape of its own.** It is drawn as the hollow ring with the words "Did not finish". One function (`stepperProps` in `components/build/build-thread.tsx`) holds that: when `Stepper` gains `stopped`, it becomes `return { steps };`.
 - **"Open it" on "You already have this" only sends the reply.** There is no mini-app page to go to until Wave 3.
@@ -54,7 +55,7 @@ This file covers the first build and the fixes after the code review and the sec
 9. Tests for 5 to 8 on the two React-free modules (`session.test.ts`, `preview.test.ts`).
 10. "Did not finish" sits behind `stepperProps`.
 
-Security list: C. `frame-src` from `PREVIEW_URL` (one or several, comma-separated) and `APPS_URL`, exact origins, wildcards and anything that is not an http or https address left out. D. A body JSON cannot hold (a big integer, a value that contains itself) is answered with a plain 400 and never throws. The two known-gap attack tests are now plain passing tests.
+Security list: C. `frame-src` from `PREVIEW_URL` (one or several, comma-separated) and `APPS_URL` as exact origins, plus ONE pattern, `https://*.<suffix>`, from `PREVIEW_FRAME_SUFFIX` (https only, one leading wildcard label, a suffix of two labels or more, checked by `frameWildcard` when the app is built). Any other wildcard, and anything that is not an http or https address, is left out. D. A body JSON cannot hold (a big integer, a value that contains itself) is answered with a plain 400 and never throws. The two known-gap attack tests are now plain passing tests.
 
 ## Needed from task I
 
@@ -69,10 +70,14 @@ A new run in the same session that repeats the failed run's own input. It stores
 
 Also from I: the grant route must answer while a run is `running` (the screen asks right after `run.started`), and the event stream must let the web origin send `authorization`.
 
+## A line for ADR 0008
+
+> The web app's content policy names the only sites it will frame (`frame-src`): the exact preview and apps origins, and one pattern for build sandboxes, `https://*.<sandbox domain>`, because each sandbox has a new address. The pattern only lets the browser load the frame. The grant check stays exact: the shell listens to and answers the one origin the server named in the grant, so a frame on any other sandbox gets no token, no answer and no data.
+
 ## Needed from the lead
 
-1. What `frame-src` should list for real sandbox previews (above).
-2. `PREVIEW_URL` and `APPS_URL` in the settings files, present at build time.
+1. Confirm the sandbox domain and set `PREVIEW_FRAME_SUFFIX` (above). Add the line above to ADR 0008.
+2. `PREVIEW_URL`, `APPS_URL` and `PREVIEW_FRAME_SUFFIX` in the settings files, present at build time (their names are in `.env.example`).
 3. `Stepper`: the `stopped` status.
 4. `MiniAppSummary` has no `kind`. `BuildHome` drops `kind === "system"`, but the loader must filter it when it is wired to data.
 
@@ -89,7 +94,7 @@ Also from I: the grant route must answer while a run is `running` (the screen as
 | `pnpm install` | up to date |
 | `pnpm typecheck` | 36 of 36 tasks |
 | `pnpm build` | 20 of 20 tasks |
-| `pnpm --filter @rms/web test` | 113 tests in 7 files: reducer 22, stream 17, session 12, preview 13, frame host 29, frame policy 5, practice run 15 |
+| `pnpm --filter @rms/web test` | 118 tests in 7 files: reducer 22, stream 17, session 12, preview 13, frame host 31, frame policy 8, practice run 15 |
 | `pnpm --filter @rms/web build` | passes |
 | `vitest --config vitest.security.config.ts tests/security/web/frame-relay.test.ts` | 19 of 19 |
 | Browser walkthrough | 182 checks, 0 failed, at 1440x900 and 390x844 |

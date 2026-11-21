@@ -195,6 +195,39 @@ describe("one grant, one frame, one origin", () => {
   });
 });
 
+describe("one sandbox among many", () => {
+  // The content policy lets the browser load any sandbox under one domain (`https://*.<suffix>`).
+  // That grants nothing: the shell still talks to the one origin the server named, exactly.
+  const ONE = "https://sb-one.sandbox.example";
+  const TWO = "https://sb-two.sandbox.example";
+
+  it("a frame on another sandbox under the same domain gets no answer, even from the frame's own window", async () => {
+    const t = setup({ grant: grant({ url: `${ONE}/`, frameOrigin: ONE }), shellOrigin: "https://rms.example" });
+    expect(t.made).toBe(true);
+    t.deliver({ rms: 1, type: "rms.ready" }, { origin: TWO });
+    t.deliver({ rms: 1, type: "rms.data", id: "aaaaaaaa0001", route: "query", body: {} }, { origin: TWO });
+    t.deliver({ rms: 1, type: "rms.ready" }, { origin: "https://sandbox.example" });
+    t.deliver({ rms: 1, type: "rms.ready" }, { origin: "https://sb-one.sandbox.example.evil.example" });
+    await t.settle();
+    expect(t.posted).toEqual([]);
+    expect(t.calls).toEqual([]);
+    expect(t.ready).not.toHaveBeenCalled();
+    // The honest one is still heard, and answered at its own origin only.
+    t.deliver({ rms: 1, type: "rms.ready" }, { origin: ONE });
+    expect(t.posted).toHaveLength(1);
+    expect(t.posted[0]?.to).toBe(ONE);
+  });
+
+  it("a grant for another sandbox cannot be slipped under a host: its token is never used for this frame", async () => {
+    const t = setup({ grant: grant({ url: `${ONE}/`, frameOrigin: ONE }), shellOrigin: "https://rms.example" });
+    t.deliver({ rms: 1, type: "rms.ready" }, { origin: ONE });
+    expect(t.host.replaceGrant(grant({ url: `${TWO}/`, frameOrigin: TWO, token: "token-for-the-other-sandbox-0123" }))).toBe(false);
+    t.deliver({ rms: 1, type: "rms.data", id: "aaaaaaaa0001", route: "query", body: {} }, { origin: ONE });
+    await t.settle();
+    expect(t.calls.map((c) => c.token)).toEqual([RUN_TOKEN]);
+  });
+});
+
 describe("separate sites", () => {
   it("a grant for a localhost frame is not loaded", () => {
     const local = { ...grant(), url: "http://localhost:5173/", frameOrigin: "http://localhost:5173" };
