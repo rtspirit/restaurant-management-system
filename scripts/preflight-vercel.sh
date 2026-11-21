@@ -75,7 +75,7 @@ TEAMS="$(vercel teams ls 2>&1)" || stop "could not list teams"
 printf '%s\n' "$TEAMS" | grep -Eq "(^|[[:space:]])$EXPECTED_SLUG([[:space:]]|$)" \
   || stop "team $EXPECTED_SLUG is not visible to '$WHO'. Wrong account?"
 if printf '%s' "$TEAMS" | tr '[:upper:]' '[:lower:]' | grep -Eq "$BANNED"; then
-  stop "this login can see a TradeEngage team. Log in with the personal account only"
+  stop "the login '$WHO' can see a TradeEngage team. Log in with the personal account only"
 fi
 
 echo "preflight ok: user=$WHO team=$EXPECTED_SLUG ($EXPECTED_ID)" >&2
