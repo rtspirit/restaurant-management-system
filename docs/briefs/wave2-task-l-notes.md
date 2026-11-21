@@ -18,6 +18,19 @@ Branch `worktree-agent-af196bf9c0e288990` (fast-forwarded to `main` at `965830d`
 | Host check | Kept mine (the SDK's check is Hono middleware for its own app, not a route mounted inside ours). Tests: another host on the right port, a sub-domain, upper case and another port, a trailing dot. A userinfo address cannot even be built into a request. | API test |
 | Money format | `$84,310.00`. No progress messages during the sync (not quick to do with one plain request). | API test |
 
+## Last round (lead-approved changes in lead-owned files)
+
+- `packages/contracts` 0.4.2: `ToolsVersion` (64 lowercase hex); `ConnectionView.toolsVersion` (nullable); `ApproveToolsRequest.toolsVersion` required; `TOKEN_TTL.connection` = 60 seconds. Contract tests updated. The route and the screen workarounds are gone.
+- The Demo POS keeps its own 60-second age check as well. It is now the same as the token lifetime, kept as a second lock in case the lifetime is ever raised.
+- `apps/api/src/index.ts`: two lines. One import changed; `sweepLoaderAtStartup()` runs once at start-up, not awaited. A failure is logged in plain words and never stops the server.
+- A test for "the change could not be recorded": the connection ends in `error` with no grants, Allow is refused, and the next press records the change.
+
+## Before real users
+
+- A real demo flag on the restaurant (a schema change). Today demo numbers depend on the restaurant profile (name, concept and cuisine all a template's), which only the platform writes.
+- Connect by address and token (`kind: "custom"`).
+- A loader that takes rows from the connected system instead of regenerating the template.
+
 ## Not done, or not proven
 
 - **Connect by address and token (`kind: "custom"`) is not built.** The route answers "Connecting your own system is not available yet." (503). No secret is ever stored, so `RMS_SECRETS_KEY` is not needed yet. `disconnect` already deletes a stored secret if one exists.

@@ -31,7 +31,8 @@ export const TOKEN = {
 } as const;
 
 /** Token lifetimes in seconds. */
-export const TOKEN_TTL = { app: 10 * 60, run: 45 * 60, connection: 60 * 60 } as const;
+// A connection token is minted fresh by the gateway for every call, so one minute is plenty (0.4.2).
+export const TOKEN_TTL = { app: 10 * 60, run: 45 * 60, connection: 60 } as const;
 
 const baseClaims = {
   iss: z.literal(TOKEN.issuer),

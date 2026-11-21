@@ -6,6 +6,7 @@
 import { ApproveToolsRequest, ConnectRequest, SyncRequest, toUuid } from "@rms/contracts";
 import { type SessionEnv, requireSession } from "@rms/auth";
 import { adminDb } from "@rms/db";
+import { sweepBooksLoader } from "@rms/seed";
 import { GovernanceError, confirmByOwner, recordChange, writeAudit } from "@rms/governance";
 import {
   GatewayError,
@@ -36,6 +37,11 @@ connectionRoutes.use("*", async (c, next) => {
 let gatewayOptions: GatewayOptions = {};
 export const setGatewayOptionsForTests = (opts: GatewayOptions): void => {
   gatewayOptions = opts;
+};
+/** Test seam: make recording a new connection's change fail. Never set outside tests. */
+let failRecordingForTests = false;
+export const setFailRecordingForTests = (fail: boolean): void => {
+  failRecordingForTests = fail;
 };
 
 const gatewayFailure = (c: Context, e: unknown) => {
@@ -80,6 +86,7 @@ connectionRoutes.post("/v1", async (c) => {
   // read nothing until Allow; if the change cannot be recorded it is marked `error` (no grants),
   // so it never works unrecorded and the next press records it again.
   try {
+    if (failRecordingForTests) throw new Error("recording refused (test)");
     const change = await adminDb().begin((tx) =>
       recordChange(tx, {
         orgUuid: tenant.orgId,
@@ -103,16 +110,10 @@ connectionRoutes.post("/v1", async (c) => {
 });
 
 connectionRoutes.post("/v1/:connectionId/approve", async (c) => {
-  // `toolsVersion` is the hash of the list the owner was shown (from the connection view). It is
-  // taken out before the shared, strict `ApproveToolsRequest` shape is checked. (Asked of the lead:
-  // add it to the contract.)
-  const body = await readJson(c);
-  if (body === null || typeof body !== "object" || Array.isArray(body)) return apiError(c, "invalid_request", "That request was not understood.");
-  const { toolsVersion, ...rest } = body as Record<string, unknown>;
-  const parsed = ApproveToolsRequest.safeParse(rest);
-  if (!parsed.success || typeof toolsVersion !== "string" || !/^[0-9a-f]{64}$/.test(toolsVersion)) {
-    return apiError(c, "invalid_request", "That request was not understood.");
-  }
+  // The names AND the version of the list the owner was shown (`toolsVersion` from the view).
+  const parsed = ApproveToolsRequest.safeParse(await readJson(c));
+  if (!parsed.success) return apiError(c, "invalid_request", "That request was not understood.");
+  const { toolsVersion } = parsed.data;
   const tenant = c.get("tenant");
   const requestId = crypto.randomUUID();
   try {
@@ -162,3 +163,14 @@ connectionRoutes.post("/v1/:connectionId/disconnect", async (c) => {
     return gatewayFailure(c, e);
   }
 });
+
+/**
+ * Called once when the API starts (src/index.ts), not awaited: switches off any demo loader a
+ * crashed load left on. A failure is logged in plain words and never stops the server; the Demo
+ * POS sync runs the same sweep before every load anyway.
+ */
+export const sweepLoaderAtStartup = (): void => {
+  void Promise.resolve()
+    .then(() => sweepBooksLoader(adminDb()))
+    .catch(() => logLine({ at: "startup", note: "Could not check for a demo loader left switched on. It is checked again before every sync." }));
+};

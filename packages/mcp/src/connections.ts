@@ -80,14 +80,7 @@ const statusText = (r: Row): string => {
   }
 };
 
-/**
- * A connection as the owner sees it, plus `toolsVersion`: the hash of the tool list shown, which
- * Allow must send back so the owner can only allow the list they saw. (Not yet in the shared
- * `ConnectionView` contract: asked of the lead.)
- */
-export type ConnectionViewWithVersion = ConnectionView & { toolsVersion: string | null };
-
-const toView = (r: Row): ConnectionViewWithVersion => {
+const toView = (r: Row): ConnectionView => {
   const granted = new Set(r.granted ?? []);
   return {
     id: toPublicId("con", r.id),
@@ -111,14 +104,14 @@ const readRow = async (tx: Tx, orgUuid: string, connectionUuid: string): Promise
 };
 
 /** One connection as the owner sees it. */
-export const connectionView = async (tenant: GatewayTenant, connectionId: string): Promise<ConnectionViewWithVersion> => {
+export const connectionView = async (tenant: GatewayTenant, connectionId: string): Promise<ConnectionView> => {
   const conn = await loadConnection(tenant, connectionId);
   const orgUuid = orgUuidOf(tenant);
   return toView(await withOrg(apiDb(), orgUuid, (tx) => readRow(tx, orgUuid, conn.id)));
 };
 
 /** Every connection of this restaurant that is not switched off, newest first. */
-export const listConnections = async (tenant: GatewayTenant): Promise<ConnectionViewWithVersion[]> => {
+export const listConnections = async (tenant: GatewayTenant): Promise<ConnectionView[]> => {
   const orgUuid = orgUuidOf(tenant);
   const rows = await withOrg(apiDb(), orgUuid, (tx) =>
     tx.unsafe<Row[]>(`${ROW_SELECT} where c.org_id = $1 and c.status <> 'disconnected' order by c.created_at desc limit 50`, [orgUuid]),
@@ -143,7 +136,7 @@ export const catalogEntries = async (tenant: GatewayTenant): Promise<McpCatalogE
 };
 
 export type ConnectOutcome = {
-  view: ConnectionViewWithVersion;
+  view: ConnectionView;
   /** True when this press made (or remade) the connection, so a change must be recorded. False when it was already there. */
   created: boolean;
   tools: McpToolInfo[];
@@ -207,7 +200,7 @@ export const approveTools = async (
   connectionId: string,
   names: readonly string[],
   toolsVersion: string,
-): Promise<ConnectionViewWithVersion> => {
+): Promise<ConnectionView> => {
   const conn = await loadConnection(tenant, connectionId);
   if (conn.status === "disconnected" || conn.status === "error") throw new GatewayError("denied", "This connection is switched off. Connect it again first.");
   const tools = storedTools(conn.tools);
@@ -234,7 +227,7 @@ export const approveTools = async (
 };
 
 /** Switches a connection off: no grants, no stored secret. The row stays, so its history does too. */
-export const disconnect = async (tenant: GatewayTenant, connectionId: string): Promise<ConnectionViewWithVersion> => {
+export const disconnect = async (tenant: GatewayTenant, connectionId: string): Promise<ConnectionView> => {
   const conn = await loadConnection(tenant, connectionId);
   const orgUuid = orgUuidOf(tenant);
   const secretId = await withOrg(apiDb(), orgUuid, async (tx) => {

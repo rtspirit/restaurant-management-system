@@ -15,7 +15,7 @@ import { requireTestEnv } from "@rms/db/testing";
 import { callTool, demoPosUrl } from "@rms/mcp";
 import { createDemoRestaurant, installPlatformLibrary, removeRestaurants, seedDemoBooks } from "@rms/seed";
 import app from "../index.js";
-import { setGatewayOptionsForTests } from "./connections.js";
+import { setFailRecordingForTests, setGatewayOptionsForTests } from "./connections.js";
 
 requireTestEnv("DATABASE_URL", "DATABASE_ADMIN_URL", "SUPABASE_URL", "SUPABASE_PUBLISHABLE_KEY", "SUPABASE_SECRET_KEY", "RMS_TOKEN_SECRET", "API_URL");
 const env = process.env;
@@ -219,6 +219,28 @@ describe("Demo POS: connect, allow, bring in the sales", () => {
     const list = ok(await call("GET", "/connections/v1", ownerA.token));
     expect(list.connections[0].statusText).toMatch(/^Connected\. Last brought in sales /);
   }, 300_000);
+
+  it("if the change cannot be recorded, the connection ends in error with nothing allowed, and the next press records it", async () => {
+    const changes = async () =>
+      (await adminDb()<{ n: number }[]>`select count(*)::int as n from platform.change_sets where org_id = ${B.org} and 'new_connection' = any(signals)`)[0]?.n;
+    setFailRecordingForTests(true);
+    try {
+      expect((await call("POST", "/connections/v1", ownerB.token, { kind: "catalog", key: "demo_pos" })).status).toBe(500);
+    } finally {
+      setFailRecordingForTests(false);
+    }
+    expect(await changes()).toBe(0);
+    const [row] = await adminDb()<{ status: string; grants: number }[]>`
+      select c.status, (select count(*)::int from platform.mcp_tool_grants g where g.connection_id = c.id) as grants
+        from platform.mcp_connections c where c.org_id = ${B.org}`;
+    expect(row).toEqual({ status: "error", grants: 0 });
+    const view = ok(await call("GET", "/connections/v1", ownerB.token)).connections[0];
+    expect(view.status).toBe("error");
+    expect((await call("POST", `/connections/v1/${view.id}/approve`, ownerB.token, { tools: [...DEMO_POS_TOOL_NAMES], toolsVersion: view.toolsVersion })).status).toBe(409);
+    const again = ok(await call("POST", "/connections/v1", ownerB.token, { kind: "catalog", key: "demo_pos" }));
+    expect(again).toMatchObject({ id: view.id, status: "needs_approval" });
+    expect(await changes()).toBe(1);
+  });
 
   describe("the Demo POS server", () => {
     it("refuses no token, a forged token, an expired token and a data token", async () => {

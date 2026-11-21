@@ -11,17 +11,7 @@ import { SignedOutError, apiFetch, signOutAndGoToSignIn } from "@/lib/api";
 const DEMO_POS_KEY = "demo_pos";
 const SOMETHING_WRONG = "Something went wrong. Please try again.";
 
-/**
- * A connection plus `toolsVersion`, the version of the tool list on screen. Allow sends it back,
- * so the owner can only ever allow the list they were shown. (Not yet in the shared contract.)
- */
-type View = ConnectionView & { toolsVersion: string | null };
-const parseView = (body: unknown): View => {
-  const raw = (body ?? {}) as { toolsVersion?: unknown };
-  return { ...ConnectionView.parse(body), toolsVersion: typeof raw.toolsVersion === "string" ? raw.toolsVersion : null };
-};
-
-type Loaded = { entries: McpCatalogEntry[]; connections: View[] };
+type Loaded = { entries: McpCatalogEntry[]; connections: ConnectionView[] };
 
 const path = (route: string, connectionId: string) => route.replace(":connectionId", encodeURIComponent(connectionId));
 
@@ -39,10 +29,7 @@ async function send<T>(route: string, parse: (body: unknown) => T, init: Request
 const loadAll = async (): Promise<Loaded> => {
   const [catalog, list] = await Promise.all([
     send(CONNECTION_ROUTES.catalog, (b) => McpCatalogEntry.array().parse((b as { entries: unknown }).entries)),
-    send(CONNECTION_ROUTES.list, (b) => {
-      const list = (b as { connections: unknown }).connections;
-      return (Array.isArray(list) ? list : []).map(parseView);
-    }),
+    send(CONNECTION_ROUTES.list, (b) => ConnectionView.array().parse((b as { connections: unknown }).connections)),
   ]);
   return { entries: catalog, connections: list };
 };
@@ -98,9 +85,9 @@ export function ConnectionsScreen() {
       setResult(null);
       await refresh();
     });
-  const allow = (c: View) =>
+  const allow = (c: ConnectionView) =>
     run("allow", async () => {
-      await send(path(CONNECTION_ROUTES.approve, c.id), parseView, {
+      await send(path(CONNECTION_ROUTES.approve, c.id), ConnectionView.parse, {
         method: "POST",
         body: JSON.stringify({ tools: c.tools.map((t) => t.name), toolsVersion: c.toolsVersion }),
       });

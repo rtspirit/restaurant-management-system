@@ -6,7 +6,7 @@ import { adminRoutes } from "./routes/admin.js";
 import { agentRoutes } from "./routes/agent.js";
 import { askRoutes } from "./routes/ask.js";
 import { authRoutes } from "./routes/auth.js";
-import { connectionRoutes } from "./routes/connections.js";
+import { connectionRoutes, sweepLoaderAtStartup } from "./routes/connections.js";
 import { dataRoutes } from "./routes/data.js";
 import { demoPosRoutes } from "./routes/mcp-demo-pos.js";
 import { memoryRoutes } from "./routes/memory.js";
@@ -42,4 +42,5 @@ app.onError((err, c) => {
   return c.json({ error: { code: "internal", message: "Something went wrong on our side. Please try again.", requestId } }, 500);
 });
 
+sweepLoaderAtStartup(); // task L: a demo loader left on by a crash is switched off; never blocks or crashes start-up
 export default app;
