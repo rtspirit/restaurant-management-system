@@ -1,0 +1,125 @@
+/*
+ * @rms/ui tokens: "Front of House".
+ * One rule: if it has colour, you can press it. Everything else is ground, card, ink and line.
+ * The neutrals are one family: the ground's hue (OKLCH 250) at six lightness steps.
+ * Proposed by the designer (task E). The lead owns this file from here on.
+ */
+
+:root {
+  /* Surfaces and ink. Fixed for every restaurant. */
+  --rms-ground: #dee7f2; /* slate page ground: the blue-grey of a menu board */
+  --rms-card: #ffffff; /* anything you read sits on white */
+  --rms-ink: #1e2420; /* text, figures, state shapes */
+  --rms-line: #cad6e2; /* dividers, quiet labels, your own messages */
+  --rms-bar: #8896a6; /* chart bars that are not the current one: 3 to 1 against a card */
+  --rms-field-line: #76828e; /* edge of a text field: 3 to 1 against card and ground */
+  --rms-muted-on-card: #616c77; /* secondary text on white */
+  --rms-muted-on-ground: #4c5661; /* secondary text on the ground or on line */
+  --rms-muted: var(--rms-muted-on-ground); /* switches to the on-card value inside a card */
+  --rms-surface: var(--rms-ground); /* what is behind the content: switches to card inside a card */
+
+  /*
+   * The action colour. The only colour in the system, and only on pressable things.
+   * These five are replaced per restaurant by themeFromBrand() in theme.ts.
+   * The values here are themeFromBrand("#12804A"), and a test keeps them in step.
+   */
+  --rms-action: #12804a; /* filled buttons */
+  --rms-action-ink: #007742; /* coloured text and icons */
+  --rms-action-pressed: #006d3c; /* filled button, hovered or held */
+  --rms-action-wash: #ecf5f1; /* outlined or quiet button, hovered */
+  --rms-on-action: #ffffff; /* text on a filled button */
+
+  /* Depth. One quiet lift for cards, one real lift for things that float. */
+  --rms-shadow: 0 1px 2px rgb(30 36 32 / 0.06);
+  --rms-shadow-raised: 0 16px 40px -12px rgb(30 36 32 / 0.28), 0 2px 6px rgb(30 36 32 / 0.08);
+  --rms-scrim: rgb(30 36 32 / 0.45);
+
+  /* Type. One family. Fixed sizes, no fluid scaling. */
+  --rms-font: "Nunito Sans Variable", "Nunito Sans", ui-rounded, system-ui, sans-serif;
+  --rms-text-xs: 0.875rem; /* 14: smallest text allowed, chart and bottom-bar labels */
+  --rms-text-s: 0.9375rem; /* 15: secondary labels, table data in compact */
+  --rms-text-m: 1rem; /* 16: body */
+  --rms-text-l: 1.125rem; /* 18: card headings */
+  --rms-text-xl: 1.1875rem; /* 19: tabs, large buttons */
+  --rms-text-2xl: 1.5rem; /* 24: mini-app title */
+  --rms-text-3xl: 1.75rem; /* 28: page title */
+  --rms-text-stat: 1.625rem; /* 26: a figure */
+  --rms-text-hero: 2.75rem; /* 44: the one lead figure on a screen */
+  --rms-weight-body: 400;
+  --rms-weight-label: 600;
+  --rms-weight-strong: 700;
+  --rms-weight-heavy: 800;
+  --rms-weight-logo: 900;
+
+  /* Space: a 4px step. */
+  --rms-space-1: 0.25rem;
+  --rms-space-2: 0.5rem;
+  --rms-space-3: 0.75rem;
+  --rms-space-4: 1rem;
+  --rms-space-5: 1.25rem;
+  --rms-space-6: 1.5rem;
+  --rms-space-8: 2rem;
+  --rms-space-10: 2.5rem;
+
+  /* Shape. Fully rounded means you can press it. 8 to 16px corners mean you read it. */
+  --rms-radius-pill: 999px;
+  --rms-radius-label: 0.5rem; /* 8: tags and notes */
+  --rms-radius-field: 0.75rem; /* 12: text fields, answer chips */
+  --rms-radius-card: 1rem; /* 16: cards, dialogs */
+  --rms-radius-chip: 0.625rem; /* 10: answered-question chips */
+  --rms-radius-bubble: 1.25rem; /* 20: speech bubbles */
+  --rms-radius-tail: 0.375rem; /* 6: the corner a speech bubble speaks from */
+  --rms-radius-composer: 1.875rem; /* 30: the composer, a pill at one line that keeps its corners when it grows */
+  --rms-radius-foot: 0.1875rem; /* 3: the foot of an upright bar, the bottom-bar marker */
+
+  /* Touch. Nothing pressable is smaller than this. */
+  --rms-target: 2.75rem; /* 44 */
+  --rms-target-nav: 3rem; /* 48 */
+  --rms-target-large: 3.25rem; /* 52 */
+
+  /* Press feedback: the only motion. Quick in, soft spring back. */
+  --rms-press-scale: 0.965;
+  --rms-press-in: 90ms cubic-bezier(0.2, 0, 0, 1);
+  --rms-press-out: 420ms linear(0, 0.36 9%, 0.8 19%, 1.05 31%, 1.08 39%, 1.04 51%, 0.996 66%, 1);
+  --rms-fade: 160ms cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Layout. Card padding is the same in both densities, so card edges always line up. */
+  --rms-card-y: 1.25rem;
+  --rms-card-x: 1.5rem;
+  --rms-rail: 14rem; /* 224 */
+  --rms-page-x: 2rem;
+  --rms-page-y: 1.25rem;
+  --rms-bottom-bar: 4rem; /* 60 plus the 4px foot */
+}
+
+/*
+ * Density. Comfortable is the default. Compact is for report rows, charts and the
+ * maintainer change feed: set data-density="compact" on any container.
+ */
+:root,
+[data-density="comfortable"] {
+  --rms-row: 3.25rem; /* 52: table row */
+  --rms-cell-x: 1rem;
+  --rms-gap: 1rem;
+  --rms-text-data: var(--rms-text-m);
+  --rms-bar-row: 2.25rem; /* 36: one horizontal bar */
+  --rms-bar-thick: 0.75rem;
+}
+
+[data-density="compact"] {
+  --rms-row: 2.25rem; /* 36 */
+  --rms-cell-x: 0.75rem;
+  --rms-gap: 0.75rem;
+  --rms-text-data: var(--rms-text-s);
+  --rms-bar-row: 1.875rem; /* 30 */
+  --rms-bar-thick: 0.625rem;
+}
+
+/* Phones and upright tablets: tighter page edge, cards keep 20px inside. */
+@media (max-width: 56.24rem) {
+  :root {
+    --rms-page-x: 1rem;
+    --rms-page-y: 0.75rem;
+    --rms-card-x: 1.25rem;
+  }
+}

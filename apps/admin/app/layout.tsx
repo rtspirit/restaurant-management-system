@@ -1,29 +1,17 @@
-import Link from "next/link";
 import type { ReactNode } from "react";
-import { SignOutButton } from "@/components/sign-out-button";
+// The one stylesheet for the whole console. Screens are composed from @rms/ui and write no CSS.
+import "@rms/ui/styles.css";
+import { ConsoleFrame } from "@/components/console-frame";
 
 export const metadata = { title: "RMS maintainer console" };
 
-// Unstyled on purpose: plain semantic HTML until the designer skins the console.
+export const viewport = { width: "device-width", initialScale: 1, themeColor: "#DEE7F2" };
+
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
       <body>
-        <header>
-          <p>RMS maintainer console</p>
-          <nav aria-label="Console">
-            <ul>
-              <li>
-                <Link href="/">Change feed</Link>
-              </li>
-              <li>
-                <Link href="/queue">Review queue</Link>
-              </li>
-            </ul>
-          </nav>
-          <SignOutButton />
-        </header>
-        {children}
+        <ConsoleFrame>{children}</ConsoleFrame>
       </body>
     </html>
   );

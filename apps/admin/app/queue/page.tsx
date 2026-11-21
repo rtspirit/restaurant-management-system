@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
+import { Button, FieldGroup, Heading, Notice, Row, Text, TextArea } from "@rms/ui";
 import { ChangeTable } from "@/components/change-table";
 import { ApiError, type FeedItem, apiFetch } from "@/lib/api";
 
@@ -44,45 +45,41 @@ export default function QueuePage() {
   };
 
   return (
-    <main>
-      <h1>Review queue</h1>
-      <p>Changes held until a maintainer approves them, oldest first.</p>
-      {status ? <p role="status">{status}</p> : null}
-      {error ? <p role="alert">{error}</p> : null}
-      {!error && !loading && items.length === 0 ? <p>Nothing is waiting for review.</p> : null}
+    <>
+      <Heading level={1} size="page">
+        Review queue
+      </Heading>
+      <Text>Changes held until a maintainer approves them, oldest first.</Text>
+      {status ? <Notice kind="status">{status}</Notice> : null}
+      {error ? <Notice kind="problem">{error}</Notice> : null}
+      {!error && !loading && items.length === 0 ? <Text>Nothing is waiting for review.</Text> : null}
       {items.length > 0 ? (
         <ChangeTable
           items={items}
           caption="Waiting for a maintainer"
           actions={(item) => (
-            <fieldset disabled={busy !== null}>
-              <legend>Decide on this change</legend>
-              <label htmlFor={`note-${item.id}`}>Note (optional)</label>
-              <br />
-              <textarea
+            <FieldGroup legend="Decide on this change" disabled={busy !== null}>
+              <TextArea
                 id={`note-${item.id}`}
+                label="Note (optional)"
                 maxLength={1000}
                 value={notes[item.id] ?? ""}
                 onChange={(e) => setNotes((n) => ({ ...n, [item.id]: e.target.value }))}
               />
-              <br />
-              {item.mismatch ? (
-                <p>This change does not match its rules, so it can only be rejected.</p>
-              ) : (
-                <>
-                  <button type="button" onClick={() => void decide(item, "approve")}>
+              {item.mismatch ? <Text strong>This change does not match its rules, so it can only be rejected.</Text> : null}
+              <Row>
+                {item.mismatch ? null : (
+                  <Button variant="primary" onClick={() => void decide(item, "approve")}>
                     Approve
-                  </button>{" "}
-                </>
-              )}
-              <button type="button" onClick={() => void decide(item, "reject")}>
-                Reject
-              </button>
-            </fieldset>
+                  </Button>
+                )}
+                <Button onClick={() => void decide(item, "reject")}>Reject</Button>
+              </Row>
+            </FieldGroup>
           )}
         />
       ) : null}
-      {loading ? <p aria-live="polite">Loading...</p> : null}
-    </main>
+      {loading ? <Notice kind="status">Loading...</Notice> : null}
+    </>
   );
 }

@@ -1,8 +1,9 @@
 "use client";
-// Unstyled on purpose: the designer skins this after task E merges.
+// Skinned with @rms/ui only. The sign-up logic is task A's and is unchanged.
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
+import { Button, Canvas, FormLayout, Heading, Logo, Notice, Text, TextField } from "@rms/ui";
 import { createClient } from "@/lib/supabase/client";
 
 const MIN_PASSWORD = 8;
@@ -50,46 +51,43 @@ export default function SignUpPage() {
   }
 
   return (
-    <main>
-      <h1>Create your account</h1>
+    <Canvas narrow header={<Logo />}>
       {notice ? (
-        <p role="status">{notice}</p>
+        <>
+          <Heading level={1} size="page">
+            Create your account
+          </Heading>
+          <Notice kind="status">{notice}</Notice>
+        </>
       ) : (
-        <form onSubmit={onSubmit}>
-          <p>
-            <label htmlFor="email">Email</label>
-            <br />
-            <input id="email" name="email" type="email" autoComplete="email" required />
-          </p>
-          <p>
-            <label htmlFor="password">Password</label>
-            <br />
-            <input
-              id="password"
-              name="password"
-              type="password"
-              autoComplete="new-password"
-              minLength={MIN_PASSWORD}
-              required
-              aria-describedby="password-hint"
-            />
-            <br />
-            <span id="password-hint">At least {MIN_PASSWORD} characters.</span>
-          </p>
-          <p>
-            <label htmlFor="confirm">Type the password again</label>
-            <br />
-            <input id="confirm" name="confirm" type="password" autoComplete="new-password" minLength={MIN_PASSWORD} required />
-          </p>
-          {error ? <p role="alert">{error}</p> : null}
-          <button type="submit" disabled={busy}>
-            {busy ? "Creating your account…" : "Create account"}
-          </button>
-        </form>
+        <FormLayout
+          title="Create your account"
+          titleLevel={1}
+          onSubmit={onSubmit}
+          message={error ? <Notice kind="problem">{error}</Notice> : null}
+          actions={
+            <Button type="submit" variant="primary" size="l" block busy={busy}>
+              {busy ? "Creating your account…" : "Create account"}
+            </Button>
+          }
+        >
+          <TextField id="email" name="email" type="email" label="Email" autoComplete="email" required />
+          <TextField
+            id="password"
+            name="password"
+            type="password"
+            label="Password"
+            hint={`At least ${MIN_PASSWORD} characters.`}
+            autoComplete="new-password"
+            minLength={MIN_PASSWORD}
+            required
+          />
+          <TextField id="confirm" name="confirm" type="password" label="Type the password again" autoComplete="new-password" minLength={MIN_PASSWORD} required />
+        </FormLayout>
       )}
-      <p>
+      <Text>
         Already have an account? <Link href="/sign-in">Sign in</Link>
-      </p>
-    </main>
+      </Text>
+    </Canvas>
   );
 }
