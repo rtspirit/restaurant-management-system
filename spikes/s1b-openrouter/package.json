@@ -1,0 +1,9 @@
+{
+  "name": "s1b-openrouter-spike",
+  "private": true,
+  "type": "module",
+  "description": "Throwaway spike S1b: Codex inside a Vercel Sandbox, model calls through OpenRouter, key injected by the firewall. Not part of the workspace.",
+  "dependencies": {
+    "@vercel/sandbox": "4.1.0"
+  }
+}
