@@ -51,7 +51,8 @@ afterAll(async () => {
   await closeAll();
 });
 
-describe("installPlatformLibrary", () => {
+// Shared local database: under parallel runs the library install waits on other runs. Give it time.
+describe("installPlatformLibrary", { timeout: 60_000 }, () => {
   it("every real library template passes the Data API's checker", async () => {
     expect(LIBRARY.namedQueries.length).toBeGreaterThanOrEqual(8);
     expect(LIBRARY.namedActions.length).toBeGreaterThanOrEqual(6);

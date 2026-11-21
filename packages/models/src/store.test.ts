@@ -99,7 +99,8 @@ const expectedColumns = (def: ModelDefinition) => {
   return [...system, ...def.fields.flatMap(columnsForField)].map((c) => ({ name: c.name, type: catalogType(c.sqlType), notnull: !c.nullable }));
 };
 
-describe("model tables in a restaurant's store", () => {
+// Shared local database: under parallel runs these wait on other runs. Give them time.
+describe("model tables in a restaurant's store", { timeout: 60_000 }, () => {
   let first: Awaited<ReturnType<typeof ensureModels>>;
 
   beforeAll(async () => {

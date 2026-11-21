@@ -18,7 +18,8 @@ const cleanup = async () => {
   await sql`delete from platform.organizations where id = ${ORG}`;
 };
 
-describe("the real library on a real store", () => {
+// Shared local database: under parallel runs these wait on other runs. Give them time.
+describe("the real library on a real store", { timeout: 60_000 }, () => {
   beforeAll(async () => {
     await adminDb()`insert into platform.organizations (id, slug, name, store_prefix) values (${ORG}, ${`libtest-${PREFIX.slice(2)}`}, 'Library Test', ${PREFIX})`;
     await provisionStore(adminDb(), ORG);
