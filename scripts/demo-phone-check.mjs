@@ -16,7 +16,13 @@ const root = new URL("..", import.meta.url).pathname;
 const phone = parseEnv(readFileSync(`${root}.env.phone`, "utf8"));
 const password = parseEnv(readFileSync(`${root}.env.local`, "utf8")).DEMO_PASSWORD;
 if (!password) throw new Error("DEMO_PASSWORD is not set in .env.local");
-const origin = phone.RMS_PHONE_WEB_ORIGIN;
+const origin = phone.WEB_URL;
+const apiUrl = phone.NEXT_PUBLIC_API_URL;
+// The other name of this laptop: where the mini-app host lives. Cookies set on the shell's host
+// must not be readable there. The web server answers on every name, so its own pages stand in
+// for the mini-app host when that is not built yet.
+const otherHost = phone.APPS_URL ? new URL(phone.APPS_URL).hostname : null;
+const otherPage = otherHost ? `http://${otherHost}:${new URL(origin).port}/gallery` : null;
 if (!origin || /127\.0\.0\.1|localhost/.test(origin)) throw new Error("Phone mode is not running (no phone address in .env.phone)");
 const consolePort = process.env.CONSOLE_PORT ?? "3001";
 
@@ -47,6 +53,7 @@ for (const name of wanted) {
     });
     const page = await context.newPage();
     const consoleHits = [];
+    let probing = false;
     page.on("request", (r) => {
       const u = new URL(r.url());
       if (u.port === consolePort) consoleHits.push(r.url());
@@ -54,7 +61,8 @@ for (const name of wanted) {
     });
     page.on("pageerror", (e) => problems.push(`page error: ${e.message}`));
     page.on("console", (m) => {
-      if (m.type() === "error") problems.push(`console: ${m.text().slice(0, 160)}`);
+      // The deliberate no-token probe below logs its own 401.
+      if (m.type() === "error" && !(probing && m.text().includes("401"))) problems.push(`console: ${m.text().slice(0, 160)}`);
     });
 
     await page.goto(origin, { waitUntil: "networkidle" });
@@ -67,6 +75,25 @@ for (const name of wanted) {
     await page.waitForURL((u) => u.pathname === "/", { timeout: 30_000 });
     await page.waitForLoadState("networkidle");
     steps.push(`signed in, home: "${(await page.locator("h1").first().textContent())?.trim()}"`);
+
+    probing = true;
+    const apiStatus = await page.evaluate(async (u) => (await fetch(`${u}/auth/me`)).status, apiUrl);
+    await page.waitForTimeout(200);
+    probing = false;
+    steps.push(`API from the shell page: answers ${apiStatus} without a token (cross-origin allowed)`);
+    if (apiStatus !== 401) problems.push(`the API did not answer the shell page as expected (${apiStatus})`);
+
+    const shellCookies = (await context.cookies(origin)).filter((c) => c.name.startsWith("sb-")).length;
+    if (otherPage) {
+      const other = await context.newPage();
+      await other.goto(otherPage, { waitUntil: "domcontentloaded" });
+      const seen = await other.evaluate(() => document.cookie.split(";").filter((c) => c.trim().startsWith("sb-")).length);
+      const sent = (await context.cookies(`http://${otherHost}/`)).filter((c) => c.name.startsWith("sb-")).length;
+      await other.close();
+      steps.push(`sign-in cookies: ${shellCookies} on the shell's host, ${seen} readable and ${sent} sent on ${otherHost}`);
+      if (shellCookies === 0) problems.push("no sign-in cookie on the shell's host (the test proves nothing)");
+      if (seen + sent > 0) problems.push(`sign-in cookies reach ${otherHost}`);
+    }
 
     await page.getByRole("link", { name: "Menu", exact: true }).filter({ visible: true }).first().click();
     await page.waitForURL((u) => u.pathname === "/menu", { timeout: 30_000 });

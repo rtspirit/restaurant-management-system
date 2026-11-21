@@ -9,7 +9,7 @@ Nothing is deployed for the demo. Everything runs on Rahul's laptop. The phone p
 ## What phone mode changes
 
 - **Addresses.** The web app is rebuilt with the API and sign-in addresses set to the laptop's network name (`<mac>.local`, which an iPhone opens), or its network address with `PHONE_ADDRESS=ip`. The web build bakes these in, so phone mode builds its own copy and `stop` rebuilds the normal one.
-- **Where the settings live.** In `.env.phone` (git-ignored, nothing secret). `.env.local` is not touched.
+- **Where the settings live.** In `.env.phone` (git-ignored, nothing secret): `RMS_LOCAL_DEMO=1`, `WEB_URL` (the phone's shell on the `.local` name), `APPS_URL` (the mini-app host on the IP address), `RMS_LOCAL_DEMO_ORIGINS` (exactly those two). `.env.local` is not touched. The API alone keeps `WEB_URL` on the laptop address, so the build preview stays on the laptop.
 - **Allowed origins.** The API accepts browser calls from `WEB_URL` and from a short list in `WEB_EXTRA_ORIGINS` (at most four). Exact match only, no wildcard, the request's origin is never echoed unless listed (`apps/api/src/lib/origins.ts`). Phone mode puts the phone address there. Nothing else in the API changes.
 - **Sign-out** answers with a relative address. It used to build an absolute one from the server's own idea of its address, which is `0.0.0.0` or `localhost`, and a phone cannot open either.
 - **Listening.** The API and web app listen on every address. The console listens on the laptop only: it is not needed on the phone.

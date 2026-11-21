@@ -95,7 +95,7 @@ stop_all() {
 
 status() {
   if [ ! -f "$ENV_PHONE" ]; then say "Phone mode is not running."; return 0; fi
-  say "Phone mode settings:"; sed -n 's/^\(RMS_PHONE_WEB_ORIGIN\|RMS_APPS_PUBLIC_URL\)=/  \1=/p' "$ENV_PHONE"
+  say "Phone mode settings:"; sed -n 's/^\(WEB_URL\|APPS_URL\)=/  \1=/p' "$ENV_PHONE"
   local f
   for f in "$STATE"/*.port; do [ -f "$f" ] || continue; local p; p="$(cat "$f")"; say "  $(basename "${f%.port}"): port $p $([ -n "$(listener "$p")" ] && echo up || echo DOWN)"; done
 }
@@ -151,13 +151,17 @@ start() {
   web_origin="http://$web_host:$WEB_PORT"
   api_url="http://$web_host:$API_PORT"
 
-  # 4. The overlay. Addresses only: nothing secret.
+  # 4. The overlay. Addresses only: nothing secret. Two different hosts for the laptop: the web
+  # app (shell) on one, the mini-app host on the other, because cookies ignore the port.
+  local apps_origin=""
+  [ -n "$apps_host" ] && apps_origin="http://$apps_host:$APPS_PORT"
   umask 077
   {
     echo "# Phone mode, written by scripts/demo-phone.sh at $(date -u +%Y-%m-%dT%H:%M:%SZ). Removed by 'stop'. Not secret."
-    echo "RMS_PHONE_WEB_ORIGIN=$web_origin"
-    [ -n "$apps_host" ] && echo "RMS_APPS_PUBLIC_URL=http://$apps_host:$APPS_PORT"
-    echo "WEB_EXTRA_ORIGINS=$web_origin"
+    echo "RMS_LOCAL_DEMO=1"
+    echo "WEB_URL=$web_origin"
+    [ -n "$apps_origin" ] && echo "APPS_URL=$apps_origin"
+    echo "RMS_LOCAL_DEMO_ORIGINS=$web_origin${apps_origin:+,$apps_origin}"
     echo "NEXT_PUBLIC_API_URL=$api_url"
     echo "NEXT_PUBLIC_SUPABASE_URL=http://$web_host:$sb_port"
   } >"$ENV_PHONE"
@@ -176,17 +180,19 @@ start() {
   fi
 
   # 6. Start. API and web listen on every address; the console on this laptop only.
-  WEB_URL="http://$laptop_host:$WEB_PORT" ADMIN_URL="http://$console_host:$CONSOLE_PORT" API_PORT="$API_PORT" \
+  # The API keeps WEB_URL on the laptop address: the build preview (ADR 0008) takes its shell
+  # origin from it and stays on this laptop. The phone address reaches the API as an extra origin.
+  WEB_URL="http://$laptop_host:$WEB_PORT" WEB_EXTRA_ORIGINS="$web_origin" ADMIN_URL="http://$console_host:$CONSOLE_PORT" API_PORT="$API_PORT" \
     start_bg api "$API_PORT" "$ROOT/apps/api" "$ROOT/apps/api/node_modules/.bin/tsx" --env-file=../../.env.local src/dev.ts
   start_bg web "$WEB_PORT" "$ROOT/apps/web" "$ROOT/apps/web/node_modules/.bin/next" start --port "$WEB_PORT" --hostname 0.0.0.0
   if [ "$CONSOLE_PORT" != off ]; then
     NEXT_PUBLIC_API_URL="http://127.0.0.1:$API_PORT" NEXT_PUBLIC_SUPABASE_URL="$sb_local" \
       start_bg console "$CONSOLE_PORT" "$ROOT/apps/admin" "$ROOT/apps/admin/node_modules/.bin/next" start --port "$CONSOLE_PORT" --hostname "$console_host"
   fi
-  if [ -f "$APPS_DIR/package.json" ] && [ -n "$apps_host" ]; then
-    PORT="$APPS_PORT" HOSTNAME=0.0.0.0 start_bg apps "$APPS_PORT" "$APPS_DIR" pnpm start
+  if [ -z "$apps_host" ]; then
+    say "This laptop has only one name on the network, so published mini-apps cannot open on the phone (they need a host of their own). RMS itself works."
   elif [ -f "$APPS_DIR/package.json" ]; then
-    say "Not starting the mini-app host: it needs a second name for this laptop (a mini-app must never share the web app's host). Published mini-apps open on the laptop only."
+    PORT="$APPS_PORT" HOSTNAME=0.0.0.0 start_bg apps "$APPS_PORT" "$APPS_DIR" pnpm start
   fi
 
   wait_for "$api_url/health" 60 || { stop_all >/dev/null 2>&1 || true; die "the API did not start. See .phone-mode/api.log"; }
