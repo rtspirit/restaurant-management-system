@@ -13,7 +13,20 @@ for (const key of ["NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_PUBLISHABLE
   if (value) publicEnv[key] = value;
 }
 
+
+// Never allow these pages to be shown inside another site's frame (clickjacking), and keep
+// sign-in pages out of caches. Applies to every route.
+const securityHeaders = [
+  { key: "Content-Security-Policy", value: "frame-ancestors 'none'" },
+  { key: "X-Frame-Options", value: "DENY" },
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+];
+
 const config: NextConfig = {
+  async headers() {
+    return [{ source: "/:path*", headers: securityHeaders }];
+  },
   env: publicEnv,
   // Workspace packages that ship TypeScript or TSX source.
   transpilePackages: ["@rms/ui"],

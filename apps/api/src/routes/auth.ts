@@ -7,7 +7,7 @@ import { cors } from "hono/cors";
 import { type DemoTemplate, type MeResponse, type MyRestaurant, OnboardingAnswers, type ServiceStyle, toPublicId } from "@rms/contracts";
 import { type Sql, adminDb, apiDb, newUuid, withOrg } from "@rms/db";
 import { type SignedInUser, type UserEnv, membershipsFor, requireUser } from "@rms/auth";
-import * as seed from "@rms/seed";
+import { createDemoRestaurant } from "@rms/seed";
 
 /** The interface task B exports from `@rms/seed` (wave 1 brief, task A section). */
 export type CreateDemoRestaurant = (
@@ -201,8 +201,7 @@ export const createAuthRoutes = (deps: AuthRouteDeps) => {
   return routes;
 };
 
-// Task B's `createDemoRestaurant` is picked up once `@rms/seed` exports it. Until then
-// onboarding answers 503 in plain words. The lead switches this to a direct import at integration.
+// The real seed function from @rms/seed (task B), wired by the lead at integration.
 export const authRoutes = createAuthRoutes({
-  createDemoRestaurant: (seed as Partial<{ createDemoRestaurant: CreateDemoRestaurant }>).createDemoRestaurant,
+  createDemoRestaurant,
 });
