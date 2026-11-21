@@ -147,12 +147,8 @@ describe("KNOWN LIMIT (ADR 0002): the Ask login is all-or-nothing inside its own
   });
 });
 
-describe("KNOWN LIMIT (ADR 0004): the tier of a change is not re-derived by the database", () => {
-  it("KNOWN LIMIT: a change that carries the public-share signal can be recorded as the lowest tier, already applied", async () => {
-    const sql = `insert into platform.change_sets (id, org_id, origin, actor, signals, tier, summary, decision) values (gen_random_uuid(), '${ORG.a.uuid}', 'share', 'user:x', '{public_share}', 'T0', 's', 'applied') returning id`;
-    expect(await orgSql("a", sql)).toHaveLength(1);
-  });
-});
+// "The tier of a change is not re-derived by the database" was a known limit until migration
+// 20261121120300. It is closed: see "the tier of a change is derived by the database" in governance.test.ts.
 
 // One more known limit lives with the token tests: a captured token can be replayed until it expires
 // (tests/security/tokens/data-token.test.ts).

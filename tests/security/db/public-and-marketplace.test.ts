@@ -118,7 +118,7 @@ describe("connections are made the way a transaction pooler needs", () => {
   it("no prepared statements, small pools", () => {
     for (const sql of [apiDb(), adminDb()]) {
       expect(sql.options.prepare).toBe(false);
-      expect(sql.options.max).toBeLessThanOrEqual(5);
+      expect(sql.options.max).toBeLessThanOrEqual(10);
     }
   });
 

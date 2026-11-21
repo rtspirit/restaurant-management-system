@@ -25,6 +25,8 @@ const linksFromMigrations = (): Link[] => {
 
 const LINKS = linksFromMigrations();
 const name = (l: Link) => `${l.child}.${l.col} -> ${l.parent}`;
+/** [title, link] pairs for it.each. */
+const NAMED: [string, Link][] = LINKS.map((l) => [`${l.child}.${l.col}`, l]);
 
 /** A row that is valid for restaurant A in every way, except that `col` names restaurant B's row. */
 const crossRow = (l: Link) => {
@@ -53,20 +55,20 @@ describe("the list of links", () => {
 describe("fk_cross_org: the platform login itself cannot link A's row to B's row", () => {
   // The platform login has every grant and passes every row-security policy, so the only thing
   // left to refuse the row is the (restaurant, id) link. That isolates the wall being tested.
-  it.each(LINKS)("$child.$col cannot point at another restaurant's $parent", async (l) => {
+  it.each(NAMED)("%s cannot point at another restaurant's row", async (_title, l) => {
     const r = await refusal(asPlatform((tx) => insertRow(tx, l.child, crossRow(l).cross)));
     expect(r.code).toBe(FK);
     expect(r.constraint).toBe(`${l.child}_${l.col}_same_org_fkey`);
   });
 
-  it.each(LINKS)("control: $child.$col may point at its own restaurant's $parent", async (l) => {
+  it.each(NAMED)("control: %s may point at its own restaurant's row", async (_title, l) => {
     // Same row, same login, pointing at A's own row. If this failed, the refusal above would prove nothing.
     expect(await outcome(asPlatform((tx) => insertRow(tx, l.child, crossRow(l).own)))).toBe("allowed");
   });
 });
 
 describe("fk_cross_org: the restaurant-facing server login, fenced to A", () => {
-  it.each(LINKS)("$child.$col cannot point at another restaurant's $parent", async (l) => {
+  it.each(NAMED)("%s cannot point at another restaurant's row", async (_title, l) => {
     const r = await refusal(asOrg("a", (tx) => insertRow(tx, l.child, crossRow(l).cross)));
     // 23503: the link check. 42501: this login may not insert into that table at all, or row security refused first.
     expect([FK, DENIED]).toContain(r.code);

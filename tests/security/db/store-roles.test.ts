@@ -33,7 +33,7 @@ const holdings = async (role: string): Promise<Record<string, string>> => {
      union all
      select n.nspname || '.' || c.relname, 'sequence'
      from pg_catalog.pg_class c join pg_catalog.pg_namespace n on n.oid = c.relnamespace
-     where c.relkind = 'S' and n.nspname not in ('pg_catalog', 'information_schema') and has_sequence_privilege($1, c.oid, 'usage,select,update')`,
+     where n.nspname not in ('pg_catalog', 'information_schema') and case when c.relkind = 'S' then has_sequence_privilege($1, c.oid, 'usage,select,update') else false end`,
     [role],
   );
   return Object.fromEntries((rows as Row[]).filter((r) => r.held !== "").map((r) => [String(r.obj), String(r.held)]));
@@ -327,8 +327,9 @@ describe("the draft role and the live store", () => {
 
   it("the draft role reads exactly the staff columns it was given", async () => {
     const rows = await platform().unsafe(
-      `select a.attname from pg_catalog.pg_attribute a where a.attrelid = $1::regclass and a.attnum > 0 and not a.attisdropped and has_column_privilege($2, a.attrelid, a.attnum, 'select') order by a.attnum`,
-      [`${A.parent}.staff`, roles("a").draftRw],
+      `select a.attname from pg_catalog.pg_attribute a join pg_catalog.pg_class c on c.oid = a.attrelid join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+       where n.nspname = $1 and c.relname = 'staff' and a.attnum > 0 and not a.attisdropped and has_column_privilege($2, a.attrelid, a.attnum, 'select')`,
+      [A.parent, roles("a").draftRw],
     );
     expect(rows.map((r) => (r as Row).attname).sort()).toEqual(["currency", "full_name", "id", "job_id", "location_id", "started_on", "status", "updated_at"]);
     const names = await storeSql("a", `select full_name from ${A.parent}.staff`, draft);

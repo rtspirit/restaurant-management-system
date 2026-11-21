@@ -7,14 +7,16 @@ import { DENIED, type Row, asNoOrg, asOrg, asPlatform, noOrgSql, orgSql, outcome
 import { TEMPLATES, insertRow } from "../helpers/rows.js";
 import { CANARY, ORG, ids, orgScopedTables, roles, schemas } from "../helpers/world.js";
 
-type TableInfo = { table: string; orgColumn: string | null; canSelect: boolean; canInsert: boolean; canDelete: boolean; updatableColumn: string | null };
+/** `readable`: the columns the server login may read. Empty means it may not read the table at all. */
+type TableInfo = { table: string; orgColumn: string | null; readable: string[]; canInsert: boolean; canDelete: boolean; updatableColumn: string | null };
 let tables: TableInfo[] = [];
 
 beforeAll(async () => {
   const scoped = new Map((await orgScopedTables(platform())).map((t) => [t.table, t.column]));
-  const rows = await platform()<{ table: string; can_select: boolean; can_insert: boolean; can_delete: boolean; updatable: string | null }[]>`
+  const rows = await platform()<{ table: string; readable: string[] | null; can_insert: boolean; can_delete: boolean; updatable: string | null }[]>`
     select c.relname as table,
-           has_table_privilege('rms_api', c.oid, 'select') as can_select,
+           (select array_agg(a.attname::text order by a.attnum) from pg_catalog.pg_attribute a
+             where a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped and has_column_privilege('rms_api', c.oid, a.attnum, 'select')) as readable,
            has_table_privilege('rms_api', c.oid, 'insert') or has_any_column_privilege('rms_api', c.oid, 'insert') as can_insert,
            has_table_privilege('rms_api', c.oid, 'delete') as can_delete,
            (select a.attname from pg_catalog.pg_attribute a
@@ -22,15 +24,17 @@ beforeAll(async () => {
              order by a.attnum limit 1) as updatable
     from pg_catalog.pg_class c join pg_catalog.pg_namespace n on n.oid = c.relnamespace
     where n.nspname = 'platform' and c.relkind = 'r' order by c.relname`;
-  tables = rows.map((r) => ({ table: r.table, orgColumn: scoped.get(r.table) ?? null, canSelect: r.can_select, canInsert: r.can_insert, canDelete: r.can_delete, updatableColumn: r.updatable }));
+  tables = rows.map((r) => ({ table: r.table, orgColumn: scoped.get(r.table) ?? null, readable: r.readable ?? [], canInsert: r.can_insert, canDelete: r.can_delete, updatableColumn: r.updatable }));
 });
 
 const SHARED_READ = ["mcp_catalog", "model_template_versions", "model_templates", "named_actions", "named_queries"];
-const ADMIN_ONLY = ["change_reviews", "listing_versions", "secrets", "staff_users"];
+const ADMIN_ONLY = ["change_reviews", "listing_versions", "onboarding_claims", "secrets", "staff_users"];
+/** Tables a restaurant may add to but never read back. */
+const WRITE_ONLY = ["outbox"];
 
 describe("server login: what it can see", () => {
   it("the catalog lists the platform tables this suite expects (so the generated checks below are not empty)", () => {
-    expect(tables.length).toBeGreaterThanOrEqual(49);
+    expect(tables.length).toBeGreaterThanOrEqual(50);
     expect(tables.filter((t) => t.orgColumn).length).toBeGreaterThanOrEqual(40);
   });
 
@@ -40,16 +44,20 @@ describe("server login: what it can see", () => {
   });
 
   it("with no restaurant set it sees zero rows in every restaurant-owned table", async () => {
-    for (const t of tables.filter((x) => x.orgColumn && x.canSelect)) {
-      const rows = await noOrgSql(`select * from platform.${t.table}`);
+    for (const t of tables.filter((x) => x.orgColumn && x.readable.length > 0)) {
+      const rows = await noOrgSql(`select ${t.readable.join(", ")} from platform.${t.table}`);
       expect(rows.length, t.table).toBe(0);
     }
   });
 
+  it("the tables it may not read at all are exactly the ones meant to be closed", () => {
+    expect(tables.filter((x) => x.readable.length === 0).map((x) => x.table).sort()).toEqual([...ADMIN_ONLY, ...WRITE_ONLY].sort());
+  });
+
   it("fenced to A it sees A's rows only, in every restaurant-owned table", async () => {
     let tablesWithRows = 0;
-    for (const t of tables.filter((x) => x.orgColumn && x.canSelect)) {
-      const rows = await orgSql("a", `select * from platform.${t.table}`);
+    for (const t of tables.filter((x) => x.orgColumn && x.readable.length > 0)) {
+      const rows = await orgSql("a", `select ${t.readable.join(", ")} from platform.${t.table}`);
       for (const r of rows) expect(r[t.orgColumn as string], t.table).toBe(ORG.a.uuid);
       if (rows.length > 0) tablesWithRows++;
     }
@@ -74,14 +82,16 @@ describe("server login: what it can see", () => {
   });
 
   it("the tables only the platform may read are refused outright", async () => {
-    for (const t of ADMIN_ONLY) {
+    for (const t of [...ADMIN_ONLY, ...WRITE_ONLY]) {
       expect(await outcome(orgSql("a", `select * from platform.${t}`)), t).toBe(DENIED);
+      expect(await outcome(orgSql("a", `select count(*) from platform.${t}`)), t).toBe(DENIED);
       expect(await outcome(noOrgSql(`select * from platform.${t}`)), t).toBe(DENIED);
     }
   });
 
-  it("control: the platform login can read those tables", async () => {
-    for (const t of ADMIN_ONLY) expect((await platform().unsafe(`select count(*)::int as n from platform.${t}`))[0]?.n, t).toBeGreaterThan(0);
+  it("control: the platform login can read those tables, and the fixture put rows in them", async () => {
+    for (const t of [...ADMIN_ONLY, ...WRITE_ONLY]) expect(await outcome(platform().unsafe(`select count(*) from platform.${t}`)), t).toBe("allowed");
+    for (const t of ["change_reviews", "listing_versions", "secrets", "staff_users", "outbox"]) expect((await platform().unsafe(`select count(*)::int as n from platform.${t}`))[0]?.n, t).toBeGreaterThan(0);
   });
 
   it("a restaurant id that is empty or malformed fails closed", async () => {
@@ -194,6 +204,33 @@ describe("server login: what it can become or call", () => {
     expect(await outcome(noOrgSql(`select platform.provision_store('${ORG.a.uuid}')`))).toBe(DENIED);
     expect(await outcome(noOrgSql(`select platform.drop_store('${ORG.b.uuid}')`))).toBe(DENIED);
     expect(await outcome(noOrgSql(`select platform.set_ask_login('${ORG.b.uuid}', 'SCRAM-SHA-256$4096:AAAA$AAAA:AAAA')`))).toBe(DENIED);
+  });
+
+  it("cannot use the onboarding helpers or count restaurants and users: those are for the platform login", async () => {
+    for (const sql of [
+      "select platform.claim_onboarding(gen_random_uuid())",
+      "select platform.release_onboarding(gen_random_uuid())",
+      "select platform.user_exists(gen_random_uuid())",
+      "select platform.restaurant_count()",
+      "select * from platform.onboarding_claims",
+      "insert into platform.onboarding_claims (user_id) values (gen_random_uuid())",
+      "delete from platform.onboarding_claims",
+    ]) {
+      expect(await outcome(noOrgSql(sql)), sql).toBe(DENIED);
+      expect(await outcome(orgSql("a", sql)), sql).toBe(DENIED);
+    }
+  });
+
+  it("control: the platform login can call them", async () => {
+    expect(await outcome(asPlatform((tx) => tx.unsafe("select platform.restaurant_count(), platform.user_exists(gen_random_uuid()), platform.claim_onboarding(gen_random_uuid())")))).toBe("allowed");
+  });
+
+  it("the platform functions it may call are exactly two", async () => {
+    // A new function in the platform schema shows up here the day it is granted to the restaurant-facing login.
+    const rows = await platform().unsafe(
+      `select p.proname from pg_catalog.pg_proc p join pg_catalog.pg_namespace n on n.oid = p.pronamespace where n.nspname = 'platform' and has_function_privilege('rms_api', p.oid, 'execute')`,
+    );
+    expect(rows.map((r) => String((r as Row).proname)).sort()).toEqual(["memberships_for", "tier_for_signals"]);
   });
 
   it("may switch only into restaurants' Data API roles (and the empty group they share), never anything stronger", async () => {

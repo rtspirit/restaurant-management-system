@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -u
-set -a; . ./.env.local; set +a
+# Settings come from ./.env.local, or from RMS_ENV_FILE (a git worktree has no .env.local of its own).
+set -a; . "${RMS_ENV_FILE:-./.env.local}"; set +a
 A=0193a3c0-0000-7000-8000-00000000000a; B=0193a3c0-0000-7000-8000-00000000000b
 ASKPW="$(openssl rand -hex 24)"
 ASKVER="$(node -e 'const c=require("node:crypto");const pw=process.argv[1];const salt=c.randomBytes(16);const s=c.pbkdf2Sync(pw,salt,4096,32,"sha256");const ck=c.createHmac("sha256",s).update("Client Key").digest();const sk=c.createHash("sha256").update(ck).digest();const sv=c.createHmac("sha256",s).update("Server Key").digest();process.stdout.write("SCRAM-SHA-256$4096:"+salt.toString("base64")+"$"+sk.toString("base64")+":"+sv.toString("base64"))' "$ASKPW")"

@@ -81,6 +81,7 @@ export const ids = (k: OrgKey) => ({
   changeSet: rid(`${k}:change_set`),
   changeReview: rid(`${k}:change_review`),
   notification: rid(`${k}:notification`),
+  maintainerNotification: rid(`${k}:notification:maintainer`),
   listingPublic: rid(`${k}:listing:public`),
   listingDraft: rid(`${k}:listing:draft`),
   listingFranchise: rid(`${k}:listing:franchise`),
@@ -339,10 +340,13 @@ export const createWorld = async (admin: Sql, users: WorldUsers): Promise<void> 
       (${i.mcpCall}, ${o.uuid}, ${i.connection}, 'app', 'list_sales', ${admin.json({ note: c })}, 'ok')`;
 
     // Governance.
-    await admin`insert into platform.change_sets (id, org_id, app_id, origin, actor, tier, summary, decision) values
-      (${i.changeSet}, ${o.uuid}, ${i.app}, 'share', 'user:fixture', 'T3', ${`Wants to share ${c}`}, 'pending_maintainer')`;
+    // The database derives the tier from the signals, so the fixture carries real signals.
+    await admin`insert into platform.change_sets (id, org_id, app_id, origin, actor, signals, tier, summary, owner_summary, decision) values
+      (${i.changeSet}, ${o.uuid}, ${i.app}, 'share', 'user:fixture', '{public_share}', 'T3', ${`Wants to share ${c}`}, ${`You asked to share a mini-app ${c}`}, 'pending_maintainer')`;
     await admin`insert into platform.change_reviews (id, change_set_id, staff_id, decision, note) values (${i.changeReview}, ${i.changeSet}, ${STAFF_USER_ID}, 'rejected', ${`review ${c}`})`;
-    await admin`insert into platform.notifications (id, audience, org_id, change_set_id, kind, title) values (${i.notification}, 'owner', ${o.uuid}, ${i.changeSet}, 'change', ${`Notice ${c}`})`;
+    await admin`insert into platform.notifications (id, audience, org_id, change_set_id, kind, title) values
+      (${i.notification}, 'owner', ${o.uuid}, ${i.changeSet}, 'change', ${`Notice ${c}`}),
+      (${i.maintainerNotification}, 'maintainer', ${o.uuid}, ${i.changeSet}, 'change', ${`For maintainers only ${c}`})`;
 
     // Marketplace: one listing other restaurants may see (no canary in it), three they may not.
     await admin`insert into platform.listings (id, source_app_id, publisher_org_id, visibility, status, title, summary, category) values
