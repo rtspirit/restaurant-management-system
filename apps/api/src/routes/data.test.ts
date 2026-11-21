@@ -2,23 +2,17 @@
 // They run against the shared local database with two fictional restaurants (A and B) made
 // by the test-only helper in @rms/data. Tokens are real ones from mintAppToken / mintRunToken
 // and every request goes through the real app, so `requireDataToken` is part of what is tested.
-import { existsSync } from "node:fs";
-import { resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { mintAppToken, mintRunToken } from "@rms/auth";
 import { DATA_ERROR_STATUS, DATA_ROUTES, type DataErrorCode, toPublicId } from "@rms/contracts";
 import { readOnlyStore, run } from "@rms/data";
+import { ACTION_KEYS, CANARY_A, CANARY_B, QUERY_KEYS, RUNS, T, type Who, cleanupData, setupData, tenantFor } from "@rms/data/testing";
 import { adminDb, closeAll, newUuid, withStore } from "@rms/db";
-import { ACTION_KEYS, CANARY_A, CANARY_B, QUERY_KEYS, T, type Who, cleanupData, setupData, tenantFor } from "../../../../packages/data/src/testing/fixtures.js";
+import { requireTestEnv } from "@rms/db/testing";
+import app from "../index.js";
 
-for (const f of [resolve(import.meta.dirname, "../../../../.env.local"), "/Users/rahultiwari/github/restaurant-management-system/.env.local"]) {
-  if (existsSync(f)) {
-    process.loadEnvFile(f);
-    break;
-  }
-}
-const hasDb = Boolean(process.env.DATABASE_URL && process.env.DATABASE_ADMIN_URL && process.env.RMS_TOKEN_SECRET);
-const { default: app } = hasDb ? await import("../index.js") : { default: null };
+// These tests need the local database. Without it they fail, they do not skip.
+requireTestEnv("DATABASE_URL", "DATABASE_ADMIN_URL", "RMS_TOKEN_SECRET");
 
 type Reply = { status: number; body: any; text: string };
 type Caller = { token: string | null; org: "A" | "B" };
@@ -41,13 +35,13 @@ const live = async (w: Who = {}): Promise<Caller> => ({
   org: w.org ?? "A",
   token: await mintAppToken({ ...ids(w), kind: "app", aud: "data", ver: toPublicId("ver", w.version ?? (w.org === "B" ? T.verB : T.verA)), env: "live" }),
 });
-const draft = async (w: Who = {}): Promise<Caller> => ({
+const draft = async (w: Who = {}, run: string = RUNS.live): Promise<Caller> => ({
   org: w.org ?? "A",
-  token: await mintRunToken({ ...ids(w), kind: "run", aud: "data", run: toPublicId("run", newUuid()), env: "draft" }),
+  token: await mintRunToken({ ...ids(w), kind: "run", aud: "data", run: toPublicId("run", run), env: "draft" }),
 });
 
 const call = async (route: keyof typeof DATA_ROUTES, who: Caller, body: unknown, extra: { headers?: Record<string, string>; query?: string } = {}): Promise<Reply> => {
-  const res = await app!.request(`${DATA_ROUTES[route]}${extra.query ?? ""}`, {
+  const res = await app.request(`${DATA_ROUTES[route]}${extra.query ?? ""}`, {
     method: "POST",
     headers: { "content-type": "application/json", ...(who.token ? { authorization: `Bearer ${who.token}` } : {}), ...extra.headers },
     body: typeof body === "string" ? body : JSON.stringify(body),
@@ -78,9 +72,10 @@ const count = async (table: string, org: "A" | "B" = "A", env: "live" | "draft" 
 const audits = async (org: string, action: string) =>
   adminDb().unsafe("select action, target_type, target_id, meta::text as meta, request_id, actor from platform.audit_log where org_id = $1::uuid and action = $2::text order by at", [org, action]);
 
-describe.skipIf(!hasDb)("Data API", () => {
+describe("Data API", () => {
   let ownerA: Caller, staffA: Caller, staffA1: Caller, ownerA1: Caller, ownerB: Caller, viewerA: Caller, runA: Caller;
-  const P: Record<string, string> = {};
+  /** Ids of the rows planted in beforeAll: Downtown d1 to d3, Riverside r1 and r2, restaurant B's b1. */
+  const P = { d1: "", d2: "", d3: "", r1: "", r2: "", b1: "" };
 
   beforeAll(async () => {
     await setupData();
@@ -115,7 +110,7 @@ describe.skipIf(!hasDb)("Data API", () => {
     it("refuses a request with no token, a forged token or a token in the wrong place", async () => {
       refused(await call("query", { token: null, org: "A" }, { model: "tip_pool" }), "unauthenticated");
       refused(await call("query", { token: `${ownerA.token!.slice(0, -4)}AAAA`, org: "A" }, { model: "tip_pool" }), "unauthenticated");
-      const res = await app!.request(`${DATA_ROUTES.query}?token=${ownerA.token}`, { method: "POST", body: JSON.stringify({ model: "tip_pool" }) });
+      const res = await app.request(`${DATA_ROUTES.query}?token=${ownerA.token}`, { method: "POST", body: JSON.stringify({ model: "tip_pool" }) });
       expect(res.status).toBe(401);
     });
 
@@ -127,11 +122,35 @@ describe.skipIf(!hasDb)("Data API", () => {
       refused(await call("batch", await live({ app: T.appB, version: T.verB }), { ops: [pool("x", 1, { location_id: T.locA1 })] }), "unauthenticated");
     });
 
-    it("a paused mini-app stops working at once", async () => {
-      await adminDb().unsafe("update platform.apps set status = 'paused' where id = $1::uuid", [T.appViewer]);
-      refused(await call("query", viewerA, { model: "tip_pool" }), "unauthenticated");
-      await adminDb().unsafe("update platform.apps set status = 'published' where id = $1::uuid", [T.appViewer]);
-      ok(await call("query", viewerA, { model: "tip_pool" }));
+    it("a paused or deleted mini-app stops working at once, for both kinds of token", async () => {
+      const set = (status: string) => adminDb().unsafe("update platform.apps set status = $2::text where id = $1::uuid", [T.appA, status]);
+      try {
+        for (const status of ["paused", "deleted"]) {
+          await set(status);
+          refused(await call("query", ownerA, { model: "tip_pool" }), "unauthenticated");
+          refused(await call("query", runA, { model: "tip_pool" }), "unauthenticated");
+          refused(await call("batch", runA, { ops: [pool("x", 1, { location_id: T.locA1 })] }), "unauthenticated");
+          refused(await call("catalog", ownerA, {}), "unauthenticated");
+        }
+      } finally {
+        await set("published");
+      }
+      ok(await call("query", ownerA, { model: "tip_pool" }));
+      ok(await call("query", runA, { model: "tip_pool" }));
+    });
+
+    it("a run token only works while its own run of that mini-app is going", async () => {
+      ok(await call("query", runA, { model: "tip_pool" }));
+      refused(await call("query", await draft({}, newUuid()), { model: "tip_pool" }), "unauthenticated"); // made-up run id
+      refused(await call("query", await draft({}, RUNS.ended), { model: "tip_pool" }), "unauthenticated"); // a run that has ended
+      refused(await call("query", await draft({ app: T.appViewer }, RUNS.live), { model: "tip_pool" }), "unauthenticated"); // another mini-app's run
+      refused(await call("query", await draft({ org: "B" }, RUNS.live), { model: "tip_pool" }), "unauthenticated"); // another restaurant's run
+      await adminDb().unsafe("update platform.agent_runs set status = 'cancelled' where id = $1::uuid", [RUNS.live]);
+      try {
+        refused(await call("query", runA, { model: "tip_pool" }), "unauthenticated");
+      } finally {
+        await adminDb().unsafe("update platform.agent_runs set status = 'running' where id = $1::uuid", [RUNS.live]);
+      }
     });
   });
 
@@ -163,6 +182,23 @@ describe.skipIf(!hasDb)("Data API", () => {
       expect(await labels({ where: { or: [{ field: "share", op: "gt", value: "10" }, { field: "headcount", op: "eq", value: 3 }] }, sort: [{ field: "amount" }] })).toEqual(["Lunch:4000", "Dinner:12000"]);
       expect(await labels({ where: { field: "counted_at", op: "lte", value: "2026-11-15T03:10:00.123Z" } })).toEqual(["Dinner:12000"]);
       expect(Object.keys((await pools(ownerA, { fields: ["label"] })).rows[0])).toEqual(["label"]);
+    });
+
+    it("counts a row with no value as \"not equal\" and as \"not\"", async () => {
+      const labels = async (where: unknown) => (await pools(ownerA, { fields: ["label", "amount"], where, sort: [{ field: "amount" }] })).rows.map((r: any) => `${r.label}:${r.amount}`);
+      // statuses: Dinner 12000 open, Lunch closed, Bar none, Dinner 7000 open, Late none
+      expect(await labels({ field: "status", op: "ne", value: "closed" })).toEqual(["Late:500", "Dinner:7000", "Bar:9000", "Dinner:12000"]);
+      expect(await labels({ not: { field: "status", op: "eq", value: "closed" } })).toEqual(["Late:500", "Dinner:7000", "Bar:9000", "Dinner:12000"]);
+      expect(await labels({ not: { field: "status", op: "in", value: ["open", "closed"] } })).toEqual(["Late:500", "Bar:9000"]);
+      expect(await labels({ not: { not: { field: "status", op: "eq", value: "open" } } })).toEqual(["Dinner:7000", "Dinner:12000"]);
+      expect(await labels({ field: "status", op: "eq", value: "closed" })).toEqual(["Lunch:4000"]);
+      expect(await labels({ field: "headcount", op: "ne", value: 3 })).toEqual(["Late:500", "Dinner:7000", "Bar:9000", "Dinner:12000"]);
+    });
+
+    it("takes times to the millisecond and no finer, so what is written reads back equal", async () => {
+      refused(await call("query", ownerA, { model: "tip_pool", where: { field: "counted_at", op: "eq", value: "2026-11-15T03:10:00.123456Z" } }), "invalid_request");
+      refused(await call("batch", ownerA, { ops: [pool("Too fine", 1, { location_id: T.locA1, counted_at: "2026-11-15T03:10:00.1234Z" })] }), "invalid_request");
+      expect((await pools(ownerA, { where: { field: "counted_at", op: "eq", value: "2026-11-15T03:10:00.123Z" } })).rows.map((r: any) => r.id)).toEqual([P.d1]);
     });
 
     it("pages through rows with a signed cursor, with empty values and mixed directions", async () => {
@@ -241,6 +277,23 @@ describe.skipIf(!hasDb)("Data API", () => {
       const withRemoved = await pools(ownerA, { where: { field: "id", op: "eq", value: id }, includeDeleted: true });
       expect(withRemoved.rows[0].deleted_at).toMatch(/Z$/);
       refused(await call("batch", ownerA, { ops: [{ op: "update", model: "tip_pool", id, values: { amount: 2 } }] }), "not_found");
+      // removed rows are for the owner only
+      refused(await call("query", staffA, { model: "tip_pool", includeDeleted: true }), "forbidden_role");
+      refused(await call("query", staffA, { model: "tip_pool", where: { field: "id", op: "eq", value: id }, includeDeleted: true }), "forbidden_role");
+      ok(await call("query", staffA, { model: "tip_pool", includeDeleted: false }));
+    });
+
+    it("refuses a total too large to send exactly, rather than sending it as text", async () => {
+      const big = Number.MAX_SAFE_INTEGER;
+      const made = ok(await call("batch", ownerA, { ops: [pool("Huge one", big, { location_id: T.locA1, business_date: "2026-12-31" }), pool("Huge two", big, { location_id: T.locA1, business_date: "2026-12-31" })] }));
+      const where = { field: "business_date", op: "eq", value: "2026-12-31" };
+      expect((await pools(ownerA, { where, sort: [{ field: "label" }] })).rows.map((r: any) => r.amount)).toEqual([big, big]);
+      expect((await pools(ownerA, { where, totals: { aggregates: [{ fn: "max", field: "amount", as: "m" }, { fn: "count", as: "n" }] } })).totals).toEqual([{ m: big, n: 2 }]);
+      refused(await call("query", ownerA, { model: "tip_pool", where, totals: { aggregates: [{ fn: "sum", field: "amount", as: "total" }] } }), "limit");
+      // a number JSON cannot carry exactly is never accepted on the way in either
+      refused(await call("batch", ownerA, { ops: [pool("Unsafe", 2 ** 53, { location_id: T.locA1 })] }), "invalid_request");
+      refused(await call("query", ownerA, { model: "tip_pool", where: { field: "amount", op: "eq", value: 2 ** 53 + 2 } }), "invalid_request");
+      ok(await call("batch", ownerA, { ops: made.results.map((r: any) => ({ op: "delete", model: "tip_pool", id: r.id })) }));
     });
 
     it("reads parent data, and never more than the role and locations allow", async () => {
@@ -285,6 +338,26 @@ describe.skipIf(!hasDb)("Data API", () => {
       refused(await call("batch", staffA, { ops: [{ op: "update", model: "tip_pool", id: P.d2, values: { hourly_rate: 1 } }] }), "forbidden_field");
       refused(await call("batch", staffA, { ops: [{ op: "upsert_by_source", model: "tip_pool", sourceId: "x-1", values: { business_date: "2026-11-15", label: "u", amount: 1, hourly_rate: 5 } }] }), "forbidden_field");
       expect((await pools(ownerA, { where: { field: "hourly_rate", op: "gt", value: 2000 } })).rows.map((r: any) => r.id)).toEqual([P.d1]);
+    });
+
+    it("cannot be found out through a rule that compares them with a visible field", async () => {
+      // The rule: hourly rate <= headcount x 1000. P.d1 has an hourly rate of 2150 that staff cannot see.
+      const set = (who: Caller, headcount: number) => call("batch", who, { ops: [{ op: "update", model: "tip_pool", id: P.d1, values: { headcount } }] });
+      const below = await set(staffA, 2); // would break the rule
+      const above = await set(staffA, 3); // would pass the rule
+      refused(below, "forbidden_field");
+      refused(above, "forbidden_field");
+      expect(below.body.error.message).toBe(above.body.error.message);
+      refused(await call("batch", staffA, { ops: [pool("With headcount", 1, { location_id: T.locA1, headcount: 1 })] }), "forbidden_field");
+      refused(await call("batch", staffA, { ops: [{ op: "upsert_by_source", model: "tip_pool", sourceId: "hc-1", values: { business_date: "2026-11-15", label: "u", amount: 1, location_id: T.locA1, headcount: 5 } }] }), "forbidden_field");
+      expect((await pools(ownerA, { where: { field: "id", op: "eq", value: P.d1 } })).rows[0].headcount).toBe(7);
+      // staff can still read the visible field, and the owner gets the rule's own words
+      expect((await pools(staffA, { where: { field: "id", op: "eq", value: P.d1 } })).rows[0].headcount).toBe(7);
+      const owner = await set(ownerA, 2);
+      refused(owner, "invalid_request");
+      expect(owner.body.error.message).toBe("The hourly rate is too high for that headcount.");
+      ok(await set(ownerA, 3));
+      ok(await set(ownerA, 7));
     });
   });
 
@@ -514,11 +587,26 @@ describe.skipIf(!hasDb)("Data API", () => {
       const one = ok(await totals(ownerA, { business_date: "2026-11-15", location_id: T.locA2 }));
       expect(one.rows.map((r: any) => r.location_name)).toEqual(["Riverside"]);
       expect(ok(await totals(ownerA, { business_date: "2026-11-15", location_id: null })).rows).toHaveLength(2);
-      expect(ok(await totals(ownerA, { business_date: "2026-11-15" }, { limit: 1 })).rows).toHaveLength(1);
+      // more rows than asked for is said out loud, never cut short in silence
+      refused(await totals(ownerA, { business_date: "2026-11-15" }, { limit: 1 }), "limit");
+      expect(ok(await totals(ownerA, { business_date: "2026-11-15" }, { limit: 2 })).rows).toHaveLength(2);
+    });
+
+    it("the security review's attack template never runs", async () => {
+      const r = await call("named", ownerA, { query: QUERY_KEYS.attack, params: {} });
+      refused(r, "internal");
+      expect(r.text).not.toContain("CANARY");
+      // the role switch it attempts never happened: the next request is still restaurant A's
+      expect((await pools(ownerA)).rows.some((row: any) => row.id === P.b1)).toBe(false);
     });
 
     it("checks parameters", async () => {
-      refused(await totals(ownerA, {}), "invalid_request"); // required one missing
+      const missing = await totals(ownerA, {}); // required one missing
+      refused(missing, "invalid_request");
+      expect(missing.body.error.message).not.toMatch(/business_date|location_id/); // plain words, never a raw key
+      const wrong = await totals(ownerA, { business_date: 20261115 });
+      refused(wrong, "invalid_request");
+      expect(wrong.body.error.message).not.toMatch(/business_date/);
       refused(await totals(ownerA, { business_date: "soon" }), "invalid_request");
       refused(await totals(ownerA, { business_date: "2026-11-15", location_id: "x' or '1'='1" }), "invalid_request");
       refused(await totals(ownerA, { business_date: "2026-11-15", extra: 1 }), "invalid_request");
@@ -695,7 +783,17 @@ describe.skipIf(!hasDb)("Data API", () => {
       expect(tip.access).toBe("write");
       expect(tip.fields.map((f: any) => f.key)).toContain("hourly_rate");
       expect(tip.fields.find((f: any) => f.key === "status").values).toEqual(["open", "closed"]);
-      expect(owner.namedQueries.map((q: any) => q.key).sort()).toEqual([QUERY_KEYS.rates, QUERY_KEYS.totals, QUERY_KEYS.writes, QUERY_KEYS.undeclared].sort());
+      // broken and hostile templates are never offered
+      expect(owner.namedQueries.map((q: any) => q.key).sort()).toEqual([QUERY_KEYS.rates, QUERY_KEYS.totals].sort());
+      // system fields can be filtered and sorted on, so they are listed, with ids shown as ids and links as links
+      expect(tip.fields.find((f: any) => f.key === "id")).toMatchObject({ type: "id" });
+      expect(tip.fields.find((f: any) => f.key === "location_id")).toMatchObject({ type: "ref", refersTo: "parent.locations" });
+      expect(tip.fields.map((f: any) => f.key)).toEqual(expect.arrayContaining(["created_at", "updated_at", "source", "deleted_at", "currency"]));
+      const parentStaff = owner.models.find((m: any) => m.ref === "parent.staff");
+      expect(parentStaff.fields.find((f: any) => f.key === "id")).toMatchObject({ type: "id" });
+      expect(parentStaff.fields.find((f: any) => f.key === "location_id")).toMatchObject({ type: "ref", refersTo: "parent.locations" });
+      expect(parentStaff.fields.find((f: any) => f.key === "job_id")).toMatchObject({ type: "ref", refersTo: "parent.jobs" });
+      expect(owner.models.find((m: any) => m.ref === "staff_note").fields.find((f: any) => f.key === "tip_pool")).toMatchObject({ type: "ref", refersTo: "tip_pool" });
       expect(owner.actions.map((a: any) => a.key).sort()).toEqual([ACTION_KEYS.close, ACTION_KEYS.setRate].sort());
       expect(JSON.stringify(owner)).not.toMatch(/select |insert |\{\{/i);
 
@@ -705,6 +803,12 @@ describe.skipIf(!hasDb)("Data API", () => {
       expect(staff.models.find((m: any) => m.ref === "staff_note").access).toBe("read");
       expect(staff.models.find((m: any) => m.ref === "parent.staff").fields.map((f: any) => f.key)).not.toContain("hourly_rate_minor");
       expect(staff.namedQueries.find((q: any) => q.key === QUERY_KEYS.totals).columns.map((c: any) => c.key)).not.toContain("entries");
+      // what the ROLE cannot run is not offered: a report on an owner-only field, an action that writes one
+      expect(staff.namedQueries.map((q: any) => q.key)).toEqual([QUERY_KEYS.totals]);
+      expect(staff.actions.map((a: any) => a.key)).toEqual([ACTION_KEYS.close]);
+      // and each of those really is refused when staff try it anyway
+      refused(await call("named", staffA, { query: QUERY_KEYS.rates, params: {} }), "forbidden_field");
+      refused(await call("action", staffA, { action: ACTION_KEYS.setRate, params: { pool_id: P.d3 } }), "forbidden_field");
 
       const viewer = ok(await call("catalog", viewerA, {}));
       expect(viewer.models.map((m: any) => [m.ref, m.access]).sort()).toEqual([["parent.staff", "read"], ["tip_pool", "read"]]);
@@ -714,6 +818,120 @@ describe.skipIf(!hasDb)("Data API", () => {
       const run = ok(await call("catalog", runA, {}));
       expect(run.models.map((m: any) => m.ref).sort()).toEqual(["draft_idea", "parent.staff", "tip_pool"]);
     });
+  });
+
+  // ------------------------------------------------------------------ fixes from the reviews
+  describe("links, ids and keys", () => {
+    it("a link must point at a row the caller can see: other location, removed and made-up ids all get one answer", async () => {
+      const removed = await insertPool(ownerA, "Removed target", 1, { location_id: T.locA1, business_date: "2026-11-02" });
+      ok(await call("batch", ownerA, { ops: [{ op: "delete", model: "tip_pool", id: removed }] }));
+      const note = (who: Caller, tip_pool: string) => call("batch", who, { ops: [{ op: "insert", model: "staff_note", values: { staff: T.staffRowA1, note: "Link test", location_id: T.locA1, tip_pool } }] });
+      const elsewhere = await note(ownerA1, P.r1); // a real row, at a location this user does not work at
+      const gone = await note(ownerA1, removed);
+      const madeUp = await note(ownerA1, newUuid());
+      const otherRestaurant = await note(ownerA1, P.b1);
+      for (const r of [elsewhere, gone, madeUp, otherRestaurant]) refused(r, "invalid_request");
+      expect(new Set([elsewhere, gone, madeUp, otherRestaurant].map((r) => r.body.error.message)).size).toBe(1);
+      const good = ok(await note(ownerA1, P.d3)).results[0].id;
+      // the same check on update
+      refused(await call("batch", ownerA1, { ops: [{ op: "update", model: "staff_note", id: good, values: { tip_pool: P.r1 } }] }), "invalid_request");
+      // the owner who works at every location may link to the Riverside row
+      ok(await note(ownerA, P.r1));
+    });
+
+    it("an id the client picks that is already taken gets the usual clash answer, visible row or not", async () => {
+      const seen = await call("batch", ownerA1, { ops: [{ ...pool("Taken id, visible", 1), id: P.d1 }] });
+      const unseen = await call("batch", ownerA1, { ops: [{ ...pool("Taken id, unseen", 1), id: P.r1 }] });
+      const other = await call("batch", ownerA1, { ops: [{ ...pool("Taken id, other restaurant", 1), id: P.b1 }] });
+      refused(seen, "conflict");
+      refused(unseen, "conflict");
+      expect(unseen.body.error.message).toBe(seen.body.error.message);
+      // ids are per restaurant: B's id is simply free in A's store, which says nothing about B
+      const freed = ok(other).results[0].id;
+      expect(freed).toBe(P.b1);
+      ok(await call("batch", ownerA, { ops: [{ op: "delete", model: "tip_pool", id: freed }] }));
+      expect((await pools(ownerB, { where: { field: "id", op: "eq", value: P.b1 } })).rows[0].amount).toBe(99999);
+    });
+
+    it("ids the client picks let later ops in the same batch point at earlier ones", async () => {
+      const poolId = newUuid();
+      const res = ok(await call("batch", ownerA, { ops: [
+        { ...pool("Linked in batch", 77, { location_id: T.locA1, business_date: "2026-11-03" }), id: poolId },
+        { op: "insert", model: "staff_note", values: { staff: T.staffRowA1, note: "Points at the pool above", location_id: T.locA1, tip_pool: poolId } },
+      ] }));
+      expect(res.results[0].id).toBe(poolId);
+      const note = ok(await call("query", ownerA, { model: "staff_note", where: { field: "id", op: "eq", value: res.results[1].id } })).rows[0];
+      expect(note.tip_pool).toBe(poolId);
+      // the other way round fails as a whole: the link does not exist yet
+      const later = newUuid();
+      refused(await call("batch", ownerA, { ops: [
+        { op: "insert", model: "staff_note", values: { staff: T.staffRowA1, note: "Too early", location_id: T.locA1, tip_pool: later } },
+        { ...pool("Comes second", 1, { location_id: T.locA1, business_date: "2026-11-03" }), id: later },
+      ] }), "invalid_request");
+      expect((await pools(ownerA, { where: { field: "id", op: "eq", value: later } })).rows).toEqual([]);
+    });
+
+    it("a key can be used again after the first attempt failed", async () => {
+      const key = `key-${newUuid()}`;
+      refused(await call("batch", ownerA, { ops: [pool("Dinner", 1, { location_id: T.locA1 })], idempotencyKey: key }), "conflict"); // unique rule: nothing written, key not kept
+      const second = ok(await call("batch", ownerA, { ops: [pool("After a failed try", 5, { location_id: T.locA1, business_date: "2026-11-04" })], idempotencyKey: key }));
+      expect(ok(await call("batch", ownerA, { ops: [pool("After a failed try", 5, { location_id: T.locA1, business_date: "2026-11-04" })], idempotencyKey: key }))).toEqual(second);
+      expect((await pools(ownerA, { where: { field: "label", op: "eq", value: "After a failed try" } })).rows).toHaveLength(1);
+    });
+
+    it("two identical requests racing always end with the same answer, also when the second finds the rows already gone", async () => {
+      for (let round = 0; round < 3; round++) {
+        const id = await insertPool(ownerA, `Race delete ${round}`, 1, { location_id: T.locA1, business_date: "2026-11-05" });
+        const body = { ops: [{ op: "delete", model: "tip_pool", id }], idempotencyKey: `key-${newUuid()}` };
+        const [x, y] = await Promise.all([call("batch", ownerA, body), call("batch", ownerA, body)]);
+        expect(ok(x)).toEqual(ok(y));
+        expect(ok(await call("batch", ownerA, body))).toEqual(x.body); // and a later replay
+      }
+    });
+
+    it("a failure in our own bookkeeping is ours, never blamed on the caller, and nothing is written", async () => {
+      const { handleData } = await import("@rms/data");
+      const n = await count("tip_pool");
+      // A request id the audit table cannot store makes the audit write fail after the rows were written.
+      const reply = await handleData("batch", tenantFor("live"), { ops: [pool("Bookkeeping fails", 1, { location_id: T.locA1, business_date: "2026-11-06" })] }, "bad\u0000request-id");
+      expect(reply.status).toBe(500);
+      expect((reply.body as any).error.code).toBe("internal");
+      expect(await count("tip_pool")).toBe(n);
+    });
+  });
+
+  describe("one restaurant cannot stall the others", () => {
+    it("caps requests in flight per restaurant, and B still answers quickly while A is at the cap", async () => {
+      const cap = Number(process.env.RMS_DATA_MAX_INFLIGHT ?? 4);
+      const target = await insertPool(ownerA, "Held row", 1, { location_id: T.locA1, business_date: "2026-11-07" });
+      // Hold a lock on one row, so A's updates to it wait.
+      let release!: () => void;
+      let locked!: () => void;
+      const gate = new Promise<void>((r) => (release = r));
+      const isLocked = new Promise<void>((r) => (locked = r));
+      const holder = withStore(adminDb(), tenantFor("live"), async (tx, s) => {
+        await tx.unsafe(`select id from ${s.table("tip_pool")} where id = $1::uuid for update`, [target]);
+        locked();
+        await gate;
+      });
+      await isLocked;
+      const slow = Array.from({ length: cap }, (_, i) => call("batch", ownerA, { ops: [{ op: "update", model: "tip_pool", id: target, values: { amount: 10 + i } }] }));
+      await new Promise((r) => setTimeout(r, 300)); // let them reach the lock
+      try {
+        refused(await call("query", ownerA, { model: "tip_pool", limit: 1 }), "limit"); // A is at its cap
+        refused(await call("catalog", staffA, {}), "limit"); // the cap is per restaurant, not per user
+        const started = Date.now();
+        const b = await call("query", ownerB, { model: "tip_pool", limit: 1 });
+        const took = Date.now() - started;
+        ok(b);
+        expect(took).toBeLessThan(1000);
+      } finally {
+        release();
+        await holder;
+      }
+      for (const r of await Promise.all(slow)) ok(r);
+      ok(await call("query", ownerA, { model: "tip_pool", limit: 1 })); // the count went back down
+    }, 30_000);
   });
 
   // ------------------------------------------------------------------ limits

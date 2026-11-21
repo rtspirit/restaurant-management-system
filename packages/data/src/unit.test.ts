@@ -200,7 +200,7 @@ describe("named templates", () => {
     expect(() => a("with x as (delete from {{tip_pool}} as tp returning tp.id) select count(*) as affected from x")).toThrow(TemplateError);
     expect(() => a(`${good}; select 1`)).toThrow(TemplateError);
     expect(() => a("truncate cash_event")).toThrow(TemplateError);
-    // `on conflict ... do update` is part of an insert and stays allowed
+    // The scanner alone lets `on conflict ... do update` through. The allow list refuses it (see template-check.test.ts).
     expect(() => a("insert into {{cash_event}} (id, amount) select tp.id, tp.amount from {{tip_pool}} as tp on conflict (id) do update set amount = excluded.amount")).not.toThrow();
     // a query may never contain an insert target
     expect(() => q(good, ["tip_pool"])).toThrow(TemplateError);

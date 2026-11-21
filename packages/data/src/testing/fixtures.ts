@@ -1,4 +1,5 @@
-// TEST ONLY. Not part of the built package (excluded in tsconfig.json).
+// TEST ONLY. Exported as `@rms/data/testing` for this package's tests and the API's tests.
+// Nothing in the product imports it.
 //
 // Until the model compiler (task C) merges, the Data API tests need tables to run against.
 // This helper creates two fictional restaurants and a handful of models with hand-written
@@ -37,6 +38,9 @@ export const T = {
   staffRowA1: "0193a3c0-0000-7000-8000-00000000e1a1", staffRowA2: "0193a3c0-0000-7000-8000-00000000e1a2", staffRowB1: "0193a3c0-0000-7000-8000-00000000e1b1",
 } as const;
 
+/** Build runs for the main test mini-app of restaurant A: one still going, one that has ended. */
+export const RUNS = { live: newUuid(), ended: newUuid(), session: newUuid() } as const;
+
 export const CANARY_A = "CANARY-A-7f3d9c21-marigold-only";
 export const CANARY_B = "CANARY-B-b81e44d0-slice-yard-only";
 
@@ -60,7 +64,14 @@ export const MODELS = [
       { key: "headcount", label: "Headcount", type: "integer" },
     ],
     unique: [["location_id", "business_date", "label"]], defaultAccess: access, labelField: "label",
-    rules: [{ kind: "check", name: "amount_not_negative", expr: { op: "gte", args: [{ field: "amount" }, { lit: 0 }] }, message: "A tip pool cannot be less than zero." }],
+    rules: [
+      { kind: "check", name: "amount_not_negative", expr: { op: "gte", args: [{ field: "amount" }, { lit: 0 }] }, message: "A tip pool cannot be less than zero." },
+      // Compares a field everyone can read with one only the owner can read.
+      {
+        kind: "check", name: "rate_under_cap", message: "The hourly rate is too high for that headcount.",
+        expr: { op: "or", args: [{ op: "is_null", arg: { field: "hourly_rate" } }, { op: "is_null", arg: { field: "headcount" } }, { op: "lte", args: [{ field: "hourly_rate" }, { op: "mul", args: [{ field: "headcount" }, { lit: 1000 }] }] }] },
+      },
+    ],
   }),
   ModelDefinition.parse({
     key: "cash_event", pack: "custom", version: 1, name: "Cash events", description: "Money in and out of the till. Never changed once written.",
@@ -114,7 +125,21 @@ export const B_ONLY = ModelDefinition.parse({
 });
 const DRAFT_ONLY = new Set(["draft_idea"]);
 
-export const QUERY_KEYS = { totals: "taskd_pool_totals", rates: "taskd_pool_rates", writes: "taskd_bad_write", undeclared: "taskd_bad_ref", unlisted: "taskd_unlisted" } as const;
+export const QUERY_KEYS = { totals: "taskd_pool_totals", rates: "taskd_pool_rates", writes: "taskd_bad_write", undeclared: "taskd_bad_ref", unlisted: "taskd_unlisted", attack: "taskd_attack" } as const;
+
+/**
+ * The template the security review used to read another restaurant's table: SQL hidden in a
+ * text literal, run by a function that evaluates text, after switching role. `{prefix}` is
+ * the other restaurant's store prefix.
+ */
+export const attackSql = (prefix: string): string =>
+  `select cast(table_to_xml(cast(w.t as regclass), true, false, '') as text) as leak
+from {{tip_pool}} as tp
+cross join (
+  select '${prefix}.tip_pool' as t
+  from ts_stat('select to_tsvector(set_config(''role'', ''${prefix}_rw'', true))') as s
+) as w
+limit 1`;
 export const ACTION_KEYS = { close: "taskd_close_pool", setRate: "taskd_set_rate", unlisted: "taskd_unlisted_action" } as const;
 
 const totalsSql = `
@@ -161,6 +186,12 @@ export const NAMED_QUERIES = [
     reads: ["tip_pool"], params: [],
     sql: "select count(*) as n from {{owner_ledger}} as ol",
     columns: [{ key: "n", label: "N", type: "integer" }],
+  }),
+  NamedQueryDefinition.parse({
+    key: QUERY_KEYS.attack, pack: "custom", name: "Attack", description: "A hostile report that tries to read the other test restaurant's table.",
+    reads: ["tip_pool"], params: [],
+    sql: attackSql("o_e1e1e1e1e102"),
+    columns: [{ key: "leak", label: "Leak", type: "text" }],
   }),
   NamedQueryDefinition.parse({
     key: QUERY_KEYS.unlisted, pack: "custom", name: "Unlisted", description: "A working report that no test manifest lists.",
@@ -223,7 +254,7 @@ export const MANIFEST_MAIN: AppManifestInput = {
     use("tip_pool", "write"), use("cash_event", "write"), use("staff_note", "write"), use("owner_ledger", "write"),
     use("draft_idea", "write"), use("b_only", "write"), use("parent.staff", "read"), use("parent.locations", "read"),
   ],
-  namedQueries: [QUERY_KEYS.totals, QUERY_KEYS.rates, QUERY_KEYS.writes, QUERY_KEYS.undeclared],
+  namedQueries: [QUERY_KEYS.totals, QUERY_KEYS.rates, QUERY_KEYS.writes, QUERY_KEYS.undeclared, QUERY_KEYS.attack],
   actions: [ACTION_KEYS.close, ACTION_KEYS.setRate],
 };
 /** The working (unpublished) manifest a run token gets. Deliberately different from the published one. */
@@ -262,7 +293,10 @@ const ddlFor = (def: ModelDefinition, prefix: string, env: StoreEnv): string[] =
     if (f.type === "ref") lines.push(`foreign key (${ident(f.key)}) references ${schema}.${ident(f.model)} (id) on delete ${f.onDelete === "set_null" ? "set null" : "restrict"}`);
   }
   for (const u of def.unique) lines.push(`unique (${u.map(ident).join(", ")})`);
-  if (def.key === "tip_pool") lines.push(`constraint ${ident(ruleConstraint("tip_pool", "amount_not_negative"))} check (amount >= 0)`);
+  if (def.key === "tip_pool") {
+    lines.push(`constraint ${ident(ruleConstraint("tip_pool", "amount_not_negative"))} check (amount >= 0)`);
+    lines.push(`constraint ${ident(ruleConstraint("tip_pool", "rate_under_cap"))} check (hourly_rate is null or headcount is null or hourly_rate <= headcount * 1000)`);
+  }
   const out = [
     `create table ${table} (${lines.join(", ")})`,
     `create unique index on ${table} (source, source_id) where source_id is not null`,
@@ -309,7 +343,7 @@ export const cleanupData = async (): Promise<void> => {
   const sql = adminDb();
   for (const o of ORGS) {
     await exec(sql, "select platform.drop_store($1::uuid)", [o.id]).catch(() => {});
-    for (const table of ["idempotency_keys", "audit_log", "app_versions", "apps", "org_models"]) {
+    for (const table of ["idempotency_keys", "audit_log", "agent_runs", "agent_sessions", "app_versions", "apps", "org_models"]) {
       await exec(sql, `delete from platform.${ident(table)} where org_id = $1::uuid`, [o.id]);
     }
     await exec(sql, "delete from platform.organizations where id = $1::uuid", [o.id]);
@@ -375,6 +409,11 @@ export const setupData = async (): Promise<void> => {
   await app(T.appB, T.orgB, "taskd-main", "1", T.verB);
   await version(T.verB, T.appB, T.orgB, "1", MANIFEST_MAIN, "published");
 
+  // A build session for the main mini-app of A, with one run still going and one that ended.
+  await exec(sql, "insert into platform.agent_sessions (id, org_id, user_id, app_id, mode, model) values ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'build', 'taskd-test-model')", [RUNS.session, T.orgA, T.ownerA, T.appA]);
+  await exec(sql, "insert into platform.agent_runs (id, session_id, org_id, status) values ($1::uuid, $2::uuid, $3::uuid, 'running')", [RUNS.live, RUNS.session, T.orgA]);
+  await exec(sql, "insert into platform.agent_runs (id, session_id, org_id, status, ended_at) values ($1::uuid, $2::uuid, $3::uuid, 'done', now())", [RUNS.ended, RUNS.session, T.orgA]);
+
   for (const q of NAMED_QUERIES) await exec(sql, "insert into platform.named_queries (key, pack, definition) values ($1::text, $2::text, ($3::text)::jsonb)", [q.key, q.pack, JSON.stringify(q)]);
   for (const a of NAMED_ACTIONS) await exec(sql, "insert into platform.named_actions (key, pack, definition) values ($1::text, $2::text, ($3::text)::jsonb)", [a.key, a.pack, JSON.stringify(a)]);
 };
@@ -402,5 +441,5 @@ export const tenantFor = (env: StoreEnv, who: Who = {}): TenantContext => {
     env,
     appId: toPublicId("app", who.app ?? (b ? T.appB : T.appA)),
   };
-  return env === "live" ? { ...base, appVersionId: toPublicId("ver", who.version ?? (b ? T.verB : T.verA)) } : { ...base, runId: toPublicId("run", newUuid()) };
+  return env === "live" ? { ...base, appVersionId: toPublicId("ver", who.version ?? (b ? T.verB : T.verA)) } : { ...base, runId: toPublicId("run", RUNS.live) };
 };

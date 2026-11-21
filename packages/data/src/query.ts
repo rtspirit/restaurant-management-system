@@ -19,16 +19,18 @@ type Aggregate = Totals["aggregates"][number];
 type AggPlan = { as: string; sql: string; read: (v: unknown) => unknown };
 
 const trimZeros = (s: string): string => (s.includes(".") ? s.replace(/0+$/, "").replace(/\.$/, "") : s);
+/** A whole-number total. One too large for JSON to carry exactly is refused rather than sent as text. */
 const wholeNumber = (v: unknown): unknown => {
   if (v === null || v === undefined) return null;
   const n = Number(v);
-  return Number.isSafeInteger(n) ? n : String(v);
+  if (!Number.isSafeInteger(n)) throw new DataApiError("limit", "That total is too large to show exactly. Narrow the filter or group the rows.");
+  return n;
 };
 
 const planAggregate = (shape: Shape, a: Aggregate): AggPlan => {
   if (a.fn === "count") {
     const target = a.field === undefined ? "*" : ident(attrOf(shape, a.field).key);
-    return { as: a.as, sql: `count(${target})::text`, read: (v) => Number(v ?? 0) };
+    return { as: a.as, sql: `count(${target})::text`, read: (v) => wholeNumber(v ?? "0") };
   }
   if (a.field === undefined) throw new DataApiError("invalid_request", "A total needs to say which detail to add up.");
   const attr = attrOf(shape, a.field);
@@ -41,6 +43,7 @@ const planAggregate = (shape: Shape, a: Aggregate): AggPlan => {
       if (!SUMMABLE.has(attr.kind)) return refuse();
       return { as: a.as, sql: `sum(${col})::text`, read: attr.kind === "decimal" ? (v) => (v === null || v === undefined ? null : String(v)) : wholeNumber };
     case "avg":
+      // An average is always a decimal written as text (for example "8333.333333"), also for money.
       if (!SUMMABLE.has(attr.kind)) return refuse();
       return { as: a.as, sql: `round(avg(${col}), 6)::text`, read: (v) => (v === null || v === undefined ? null : trimZeros(String(v))) };
     case "min":
@@ -94,6 +97,8 @@ export const runQuery = async (tenant: TenantContext, raw: unknown): Promise<Que
   const parsed = QueryRequest.safeParse(raw);
   if (!parsed.success) throw new DataApiError("invalid_request");
   const req = parsed.data;
+  // Removed rows are for the owner only.
+  if (req.includeDeleted === true && tenant.role !== "owner") throw new DataApiError("forbidden_role", "Only the owner can look at removed records.");
 
   const { shape, ids } = await withPlatform(tenant, async (platform, ids) => {
     const manifest = await platform.manifest();

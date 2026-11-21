@@ -17,12 +17,15 @@ const isRealDate = (s: string): boolean => {
   return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
 };
 
-/** A timestamp as the exact text we compare and store: ISO, UTC, at most microseconds. */
+/**
+ * A timestamp as the exact text we compare and store: ISO, UTC, at most milliseconds. That is
+ * the precision the wire format carries, so what is written always reads back equal.
+ */
 const timestampText = (v: unknown): string | null => {
   if (typeof v !== "string" || !TimestampValue.safeParse(v).success) return null;
   if (Number.isNaN(Date.parse(v))) return null;
   const frac = /\.(\d+)Z$/.exec(v);
-  if (frac && (frac[1] as string).length > 6) return null;
+  if (frac && (frac[1] as string).length > 3) return null;
   return v;
 };
 
@@ -59,7 +62,7 @@ export const scalarText = (attr: Attr, v: unknown): string => {
       return v;
     case "timestamp": {
       const t = timestampText(v);
-      return t ?? bad(attr, "needs a date and time like 2026-11-15T03:10:00.000Z");
+      return t ?? bad(attr, "needs a date and time like 2026-11-15T03:10:00.000Z (no finer than milliseconds)");
     }
     case "uuid":
     case "ref":
@@ -71,7 +74,7 @@ export const scalarText = (attr: Attr, v: unknown): string => {
   }
 };
 
-export type ColumnValue = { column: string; value: string | null; kind: Kind };
+export type ColumnValue = { column: string; value: string | null; kind: Kind; /** For a `ref` field: the model the id must point into. */ refModel?: string };
 
 /**
  * A value from a write, as the column values to store. `null` clears the field.
@@ -119,6 +122,11 @@ export const writeColumns = (attr: Attr, v: unknown): ColumnValue[] => {
       if (text === undefined) return bad(attr, "is not valid");
       if (text.length > MAX_JSON) return bad(attr, "is too large");
       return cols(text);
+    }
+    case "ref": {
+      const out = cols(scalarText(attr, v));
+      if (def?.type === "ref" && out[0]) out[0].refModel = def.model;
+      return out;
     }
     default:
       return cols(scalarText(attr, v));

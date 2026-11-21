@@ -19,7 +19,7 @@ import { canonical, sha256 } from "./cursor.js";
 import { DataApiError, toDataApiError } from "./errors.js";
 import { PARENT_SPECS } from "./parent-models.js";
 import { type Ids, IdempotencyRace, type StoredResponse, storeResponse, withPlatform, writeAudit } from "./platform.js";
-import { type Attr, PG_TYPE, type Shape, baseConditions, parentShape, tableOf, textExpr } from "./shape.js";
+import { type Attr, PG_TYPE, type Shape, baseConditions, childShape, parentShape, tableOf, textExpr } from "./shape.js";
 import { NOW_MS, Params, run, setTimeoutFor } from "./sql.js";
 import { type ColumnValue, writeColumns } from "./values.js";
 
@@ -57,6 +57,10 @@ const prepare = (op: WriteOp, shape: Shape): Prepared => {
     if (!attr) throw new DataApiError("invalid_request", "One of the details named is not part of this kind of record.");
     if (!attr.readable) throw new DataApiError("forbidden_field");
     if (!attr.settable) throw new DataApiError("invalid_request", `"${attr.label}" is set by RMS and cannot be sent.`);
+    // A field tied by a model rule to one the role cannot read: whether the write passes the
+    // rule would give the hidden value away, one try at a time. Refused before any rule runs,
+    // with the same answer whatever the values are.
+    if (shape.guarded.has(key)) throw new DataApiError("forbidden_field", "That detail is tied to one your role cannot see, so your role cannot change it.");
     given.add(key);
     if (attr.system && key === "location_id") {
       if (typeof value !== "string" || !Uuid.safeParse(value).success) throw new DataApiError("invalid_request", "The location is not a valid id.");
@@ -107,6 +111,27 @@ type Ctx = {
   actor: string;
   places: () => Promise<Places>;
   labels: Map<string, string>;
+  /** Shapes of the models that `ref` fields in this batch point into, for this caller. */
+  refShapes: ReadonlyMap<string, Shape>;
+};
+
+const NO_SUCH_LINK = "One of the linked records does not exist.";
+
+/**
+ * A `ref` must point at a row the CALLER can see: looked up as the restaurant's role, so
+ * row-level security and the location rule apply. A row at another location, a removed row
+ * and a made-up id all get the same answer.
+ */
+const checkRefs = async (c: Ctx, columns: readonly ColumnValue[]): Promise<void> => {
+  for (const col of columns) {
+    if (col.refModel === undefined || col.value === null) continue;
+    const target = c.refShapes.get(col.refModel);
+    if (!target) throw new DataApiError("invalid_request", NO_SUCH_LINK);
+    const p = new Params();
+    const conditions = [`${ident("id")} = ${p.add(col.value, "uuid")}`, ...baseConditions(target)];
+    const rows = await run1(c.tx, `select 1 as found from ${tableOf(target, c.store)} where ${conditions.join(" and ")} limit 1`, p);
+    if (rows.length !== 1) throw new DataApiError("invalid_request", NO_SUCH_LINK);
+  }
 };
 
 /** A location for a new or moved row: inside the token's locations AND one of this restaurant's. */
@@ -160,6 +185,7 @@ const parentColumns = async (c: Ctx, refs: Prepared["parentRefs"]): Promise<Colu
 
 const insertRow = async (c: Ctx, w: Prepared, id: string, sourceId: string | null): Promise<void> => {
   const { shape } = w;
+  await checkRefs(c, w.columns);
   const p = new Params();
   const names: string[] = [];
   const exprs: string[] = [];
@@ -186,6 +212,7 @@ const insertRow = async (c: Ctx, w: Prepared, id: string, sourceId: string | nul
 
 const updateRow = async (c: Ctx, w: Prepared, id: string, revive: boolean): Promise<void> => {
   const { shape } = w;
+  await checkRefs(c, w.columns);
   const p = new Params();
   const sets: string[] = [];
   if (w.locationId !== undefined) sets.push(`${ident("location_id")} = ${p.add(await checkLocation(c, w.locationId), "uuid")}`);
@@ -270,12 +297,24 @@ export const runBatch = async (tenant: TenantContext, raw: unknown, requestId: s
     return stored.body as BatchResponse;
   };
 
-  const { shapes, ids, stored } = await withPlatform(tenant, async (platform, ids: Ids) => {
+  const { shapes, refShapes, ids, stored } = await withPlatform(tenant, async (platform, ids: Ids) => {
     const manifest = await platform.manifest();
     const models = [...new Set(req.ops.map((o) => o.model))];
     const shapes = await shapesFor(platform, manifest, tenant, models.map((ref) => ({ ref, need: "write" as const })));
+    // The models that `ref` values point into. The mini-app needs no access to them: they are
+    // only used to check that a linked row exists and the caller can see it.
+    const targets = new Set<string>();
+    for (const op of req.ops) {
+      if (op.op === "delete") continue;
+      for (const key of Object.keys(op.values)) {
+        const def = shapes.get(op.model)?.attrs.get(key)?.def;
+        if (def?.type === "ref") targets.add(def.model);
+      }
+    }
+    const refShapes = new Map<string, Shape>();
+    for (const [key, def] of await platform.models([...targets])) refShapes.set(key, childShape(def, tenant.role));
     const stored = req.idempotencyKey !== undefined ? await platform.storedResponse(req.idempotencyKey) : null;
-    return { shapes, ids, stored };
+    return { shapes, refShapes, ids, stored };
   });
   if (stored) return replay(stored);
 
@@ -289,7 +328,7 @@ export const runBatch = async (tenant: TenantContext, raw: unknown, requestId: s
     return await withStore(apiDb(), tenant, async (tx, store) => {
       await setTimeoutFor(tx, "write");
       let places: Promise<Places> | undefined;
-      const ctx: Ctx = { tx, store, tenant, actor: actorText(tenant.actor), places: () => (places ??= loadPlaces(tx, store, tenant)), labels: new Map() };
+      const ctx: Ctx = { tx, store, tenant, actor: actorText(tenant.actor), places: () => (places ??= loadPlaces(tx, store, tenant)), labels: new Map(), refShapes };
       const results: BatchResponse["results"] = [];
       // The database limit is per statement. This caps the whole batch, so many slow ops cannot hold a transaction open.
       const deadline = Date.now() + MAX_BATCH_MS;
@@ -317,18 +356,25 @@ export const runBatch = async (tenant: TenantContext, raw: unknown, requestId: s
         byOp[r.op] = (byOp[r.op] ?? 0) + 1;
         byModel[r.model] = (byModel[r.model] ?? 0) + 1;
       }
-      await writeAudit(tx, tenant, ids, {
-        action: "data.batch", targetType: "app", targetId: tenant.appId ?? null, requestId,
-        meta: { env: tenant.env, ops: results.length, byOp, byModel, idempotent: req.idempotencyKey !== undefined },
-      });
       const body: BatchResponse = { results };
-      if (req.idempotencyKey !== undefined) await storeResponse(tx, tenant, ids, req.idempotencyKey, { fingerprint, body });
+      try {
+        await writeAudit(tx, tenant, ids, {
+          action: "data.batch", targetType: "app", targetId: tenant.appId ?? null, requestId,
+          meta: { env: tenant.env, ops: results.length, byOp, byModel, idempotent: req.idempotencyKey !== undefined },
+        });
+        if (req.idempotencyKey !== undefined) await storeResponse(tx, tenant, ids, req.idempotencyKey, { fingerprint, body });
+      } catch (e) {
+        if (e instanceof IdempotencyRace) throw e;
+        // Our own bookkeeping failed. That is never the caller's fault, whatever the database said.
+        throw new DataApiError("internal", undefined, "audit or idempotency write failed");
+      }
       return body;
     });
   } catch (e) {
     const err = e instanceof IdempotencyRace ? new DataApiError("conflict", "The same request is already being handled. Please try again.") : toDataApiError(e, { op: "write", models });
-    // A request that lost a race with its own twin (same key) gets the twin's stored response.
-    if (err.code === "conflict" && req.idempotencyKey !== undefined) {
+    // A request that lost a race with its own twin (same key) gets the twin's stored response,
+    // whatever it tripped over on the way (the twin may already have removed or changed the rows).
+    if (req.idempotencyKey !== undefined) {
       const key = req.idempotencyKey;
       const first = await withPlatform(tenant, (platform) => platform.storedResponse(key));
       if (first) return replay(first);

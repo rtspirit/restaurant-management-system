@@ -113,7 +113,9 @@ const platformFor = (tx: Tx, tenant: TenantContext, ids: Ids): Platform => {
   return {
     async manifest() {
       // App token: the pinned version must be published and belong to this app and restaurant.
-      // Run token: the app's current working version. Either way no row means no access.
+      // Run token: the app's current working version, and only while the token's own run is
+      // still going (a run of this app, in this restaurant, that has not ended).
+      // A paused or deleted mini-app stops both kinds at once. No row means no access.
       const p = new Params();
       const text =
         tenant.env === "live"
@@ -130,7 +132,15 @@ const platformFor = (tx: Tx, tenant: TenantContext, ids: Ids): Platform => {
                join platform.app_versions v on v.id = a.current_version_id and v.app_id = a.id and v.org_id = a.org_id
               where a.id = ${p.add(ids.appUuid, "uuid")}
                 and a.org_id = ${p.add(ids.orgUuid, "uuid")}
-                and a.status <> 'deleted'`;
+                and a.status not in ('deleted', 'paused')
+                and exists (
+                  select 1
+                    from platform.agent_runs r
+                    join platform.agent_sessions s on s.id = r.session_id and s.org_id = r.org_id
+                   where r.id = ${p.add(toUuid(tenant.runId as string), "uuid")}
+                     and r.org_id = a.org_id
+                     and s.app_id = a.id
+                     and r.status in ('running', 'paused', 'waiting'))`;
       const rows = await run(tx, text, p.values);
       if (rows.length !== 1) throw new DataApiError("unauthenticated", "This mini-app is not available. Please open it again from RMS.");
       const parsed = AppManifest.safeParse(parseJson(rows[0]?.manifest));

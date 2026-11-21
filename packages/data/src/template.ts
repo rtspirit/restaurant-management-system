@@ -16,11 +16,13 @@
 // What a request sends never becomes part of the statement text: parameters are bound, and
 // model names come from the stored definition.
 //
-// The scanner refuses anything outside those rules: a semicolon, a comment marker, a dollar
-// sign, an undeclared reference or parameter, and a few words a report has no use for. That
-// is a safety net against a careless template. The wall is still: only maintainers write
-// templates, the statement is sent with the one-statement protocol, and it runs as the
-// restaurant's own database role.
+// This file is the SCANNER: it finds the placeholders and parameters, and refuses a semicolon,
+// a comment marker, a dollar sign, an undeclared reference or parameter, and a few words a
+// report has no use for. It is a first, cheap layer. It does not decide what SQL is allowed.
+//
+// That decision is the ALLOW LIST in template-check.ts, which parses the scanned template with
+// the real PostgreSQL parser and refuses anything not named there. Nothing runs a template
+// without going through `checkTemplate`.
 import { Ident, ModelRef } from "@rms/contracts";
 
 export class TemplateError extends Error {}
@@ -88,7 +90,8 @@ export const parseTemplate = (spec: TemplateSpec): Piece[] => {
   };
   const checkWord = (word: string, end: number): void => {
     const w = word.toLowerCase();
-    if (BANNED.has(w) || BANNED_PREFIX.test(w) || OTHER_STORE.test(w)) stop("a word that is not allowed in a template");
+    // `rmsx_` is the prefix of the marker names the allow-list check puts where placeholders are.
+    if (BANNED.has(w) || BANNED_PREFIX.test(w) || OTHER_STORE.test(w) || w.startsWith("rmsx_")) stop("a word that is not allowed in a template");
     if (w === "update" && !(spec.mode === "action" && seen[seen.length - 1] === "do")) stop("a template may not update rows");
     if (w === "insert" && spec.mode !== "action") stop("a query may not insert");
     if (BANNED_SCHEMAS.has(w) && s[skipSpace(end)] === ".") stop("a template may only reach tables through {{model}}");

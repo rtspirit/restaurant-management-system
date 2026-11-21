@@ -2,5 +2,5 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": { "outDir": "dist", "rootDir": "src", "types": ["node"], "lib": ["ES2023", "DOM"] },
   "include": ["src"],
-  "exclude": ["src/**/*.test.ts", "src/testing/**"]
+  "exclude": ["src/**/*.test.ts"]
 }

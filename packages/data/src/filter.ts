@@ -25,7 +25,8 @@ export const attrOf = (shape: Shape, key: string): Attr => {
   return a;
 };
 
-const COMPARE = { eq: "=", ne: "<>", gt: ">", gte: ">=", lt: "<", lte: "<=" } as const;
+// `ne` counts a row with no value as "not equal" (plain `<>` would silently drop it).
+const COMPARE = { eq: "=", ne: "is distinct from", gt: ">", gte: ">=", lt: "<", lte: "<=" } as const;
 const MAX_CONDITIONS = 200;
 
 const wrongOp = (a: Attr): never => {
@@ -36,13 +37,19 @@ const noNull = (a: Attr, v: unknown): void => {
   if (v === null) throw new DataApiError("invalid_request", `To find records with no "${a.label}", use the "is empty" filter.`);
 };
 
-/** Compiles a filter tree to one SQL condition. */
+/**
+ * Compiles a filter tree to one SQL condition.
+ *
+ * Rows with no value: `ne` and `not` INCLUDE them (a status that is empty is "not closed").
+ * Every other comparison leaves them out. `contains` and `starts_with` ignore upper and lower case.
+ */
 export const compileFilter = (shape: Shape, filter: Filter, params: Params): string => {
   let count = 0;
   const walk = (f: Filter): string => {
     if ("and" in f) return `(${f.and.map(walk).join(" and ")})`;
     if ("or" in f) return `(${f.or.map(walk).join(" or ")})`;
-    if ("not" in f) return `(not ${walk(f.not)})`;
+    // "is not true" rather than "not": a condition that is unknown for a row (an empty value) counts as not met.
+    if ("not" in f) return `(${walk(f.not)} is not true)`;
     if (++count > MAX_CONDITIONS) throw new DataApiError("limit", "That filter has too many conditions.");
     const a = attrOf(shape, f.field);
     const col = ident(a.key);

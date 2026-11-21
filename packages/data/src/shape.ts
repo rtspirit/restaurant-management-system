@@ -5,9 +5,11 @@
 // (field keys), the storage contract (system columns) or the fixed parent table list.
 // A request can only pick among these names by exact match. It can never add one.
 import {
+  type Expr,
   type FieldDef,
   type FieldType,
   type ModelDefinition,
+  type ModelRule,
   type ParentModelKey,
   type Role,
   SYSTEM_COLUMNS,
@@ -37,6 +39,8 @@ export type Attr = {
   /** May appear in write values (fields, plus location_id and currency). */
   settable: boolean;
   def?: FieldDef;
+  /** For parent-data link columns: the parent table the id points at. */
+  refersTo?: string;
 };
 
 export type Shape = {
@@ -48,6 +52,11 @@ export type Shape = {
   list: readonly Attr[];
   /** Keys hidden from this caller. */
   masked: string[];
+  /**
+   * Readable fields that share a model rule with a hidden field. Writing one would let the
+   * caller learn the hidden value from whether the rule passes, so writes to them are refused.
+   */
+  guarded: ReadonlySet<string>;
   locationColumn: "location_id" | "id" | null;
   softDelete: boolean;
   appendOnly: boolean;
@@ -75,6 +84,44 @@ const settableSystem = new Set<string>(WRITABLE_SYSTEM_FIELDS);
 
 const fieldReadable = (f: { readableBy?: Role[] | undefined }, role: Role): boolean => !f.readableBy || f.readableBy.includes(role);
 
+const exprFields = (e: Expr, out: Set<string>): void => {
+  if ("field" in e) out.add(e.field);
+  else if ("args" in e) for (const a of e.args) exprFields(a, out);
+  else if ("arg" in e) exprFields(e.arg, out);
+};
+
+/** Every field a model rule looks at, whatever its kind. */
+export const ruleFields = (rule: ModelRule): Set<string> => {
+  const out = new Set<string>();
+  switch (rule.kind) {
+    case "check":
+      exprFields(rule.expr, out);
+      break;
+    case "balanced":
+      for (const k of [rule.lineRef, rule.debit, rule.credit]) out.add(k);
+      break;
+    case "open_period_only":
+      out.add(rule.dateField);
+      break;
+    case "ref_value_in":
+      out.add(rule.field);
+      if (rule.when) exprFields(rule.when, out);
+      break;
+  }
+  return out;
+};
+
+const guardedFields = (def: ModelDefinition, hidden: ReadonlySet<string>): Set<string> => {
+  const out = new Set<string>();
+  if (hidden.size === 0) return out;
+  for (const rule of def.rules) {
+    const fields = ruleFields(rule);
+    if (![...fields].some((f) => hidden.has(f))) continue;
+    for (const f of fields) if (!hidden.has(f)) out.add(f);
+  }
+  return out;
+};
+
 /** The shape of a restaurant's own model for one role. `def` has already passed ModelDefinition. */
 export const childShape = (def: ModelDefinition, role: Role): Shape => {
   const hasMoney = def.fields.some((f) => f.type === "money");
@@ -94,9 +141,10 @@ export const childShape = (def: ModelDefinition, role: Role): Shape => {
       readable: fieldReadable(f, role), system: false, settable: true, def: f,
     });
   }
+  const masked = list.filter((a) => !a.readable).map((a) => a.key);
   return {
     ref: def.key, parent: false, table: def.key, attrs: new Map(list.map((a) => [a.key, a])), list,
-    masked: list.filter((a) => !a.readable).map((a) => a.key),
+    masked, guarded: guardedFields(def, new Set(masked)),
     locationColumn: def.locationScoped ? "location_id" : null, softDelete, appendOnly: def.appendOnly, hasMoney, def,
   };
 };
@@ -107,10 +155,11 @@ export const parentShape = (key: ParentModelKey, role: Role, env: StoreEnv): Sha
   const list: Attr[] = spec.columns.map((c) => ({
     key: c.key, label: c.label, kind: c.kind, required: false,
     readable: fieldReadable(c, role) && !(env === "draft" && c.liveOnly === true), system: false, settable: false,
+    ...(c.refersTo ? { refersTo: c.refersTo } : {}),
   }));
   return {
     ref: `parent.${key}`, parent: true, table: key, attrs: new Map(list.map((a) => [a.key, a])), list,
-    masked: list.filter((a) => !a.readable).map((a) => a.key),
+    masked: list.filter((a) => !a.readable).map((a) => a.key), guarded: new Set(),
     locationColumn: spec.locationColumn, softDelete: false, appendOnly: false, hasMoney: false,
   };
 };

@@ -3,12 +3,28 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/fixtures.d.ts",
+      "default": "./dist/testing/fixtures.js"
+    }
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests"
   },
-  "dependencies": { "@rms/contracts": "workspace:*", "@rms/db": "workspace:*", "@rms/models": "workspace:*" },
-  "devDependencies": { "@types/node": "26.6.6" }
+  "dependencies": {
+    "@rms/contracts": "workspace:*",
+    "@rms/db": "workspace:*",
+    "@rms/models": "workspace:*",
+    "libpg-query": "18.2.4"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.6"
+  }
 }

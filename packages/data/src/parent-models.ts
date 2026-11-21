@@ -17,6 +17,8 @@ export type ParentColumn = {
   sensitivity?: Sensitivity;
   /** The draft (build and preview) database role has no grant on this column. Hidden in draft. */
   liveOnly?: boolean;
+  /** For a link column: the parent table its id points at. */
+  refersTo?: string;
 };
 
 export type ParentSpec = {
@@ -32,7 +34,7 @@ export type ParentSpec = {
 
 const id: ParentColumn = { key: "id", label: "Id", kind: "uuid" };
 const updated: ParentColumn = { key: "updated_at", label: "Last updated", kind: "timestamp" };
-const loc: ParentColumn = { key: "location_id", label: "Location", kind: "uuid" };
+const loc: ParentColumn = { key: "location_id", label: "Location", kind: "uuid", refersTo: "parent.locations" };
 const text = (key: string, label: string): ParentColumn => ({ key, label, kind: "text" });
 const ownerOnly = (c: ParentColumn, sensitivity: Sensitivity): ParentColumn => ({ ...c, readableBy: ["owner"], sensitivity, liveOnly: true });
 
@@ -59,7 +61,7 @@ export const PARENT_SPECS: Record<ParentModelKey, ParentSpec> = {
   staff: {
     key: "staff", name: "Staff", description: "The people who work here, their job and their location.",
     labelColumn: "full_name", locationColumn: "location_id",
-    columns: [id, loc, text("full_name", "Name"), { key: "job_id", label: "Job", kind: "uuid" },
+    columns: [id, loc, text("full_name", "Name"), { key: "job_id", label: "Job", kind: "uuid", refersTo: "parent.jobs" },
       ownerOnly(text("email", "Email"), "personal"), ownerOnly(text("phone", "Phone"), "personal"),
       ownerOnly({ key: "hourly_rate_minor", label: "Hourly rate", kind: "money" }, "payroll"),
       text("currency", "Currency"), { key: "started_on", label: "Started on", kind: "date" }, text("status", "Status"), updated],
@@ -72,13 +74,13 @@ export const PARENT_SPECS: Record<ParentModelKey, ParentSpec> = {
   menu_items: {
     key: "menu_items", name: "Menu items", description: "What the restaurant sells, with its price.",
     labelColumn: "name", locationColumn: null,
-    columns: [id, { key: "category_id", label: "Category", kind: "uuid" }, text("name", "Name"), text("description", "Description"),
+    columns: [id, { key: "category_id", label: "Category", kind: "uuid", refersTo: "parent.menu_categories" }, text("name", "Name"), text("description", "Description"),
       { key: "price_minor", label: "Price", kind: "money" }, text("currency", "Currency"), { key: "active", label: "On the menu", kind: "boolean" }, updated],
   },
   menu_modifiers: {
     key: "menu_modifiers", name: "Menu modifiers", description: "Extras and changes a guest can ask for on a menu item.",
     labelColumn: "name", locationColumn: null,
-    columns: [id, { key: "item_id", label: "Menu item", kind: "uuid" }, text("name", "Name"),
+    columns: [id, { key: "item_id", label: "Menu item", kind: "uuid", refersTo: "parent.menu_items" }, text("name", "Name"),
       { key: "price_minor", label: "Price", kind: "money" }, text("currency", "Currency"), updated],
   },
   tax_rates: {
