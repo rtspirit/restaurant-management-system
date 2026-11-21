@@ -7,7 +7,7 @@ import { DEMO_POS_TOOL_NAMES, DEMO_POS_TOOLS, SYNC_CONSUMER, type ConnectionId, 
 import { mintAppToken, mintConnectionToken } from "@rms/auth";
 import { adminDb, closeAll, newUuid } from "@rms/db";
 import { requireTestEnv } from "@rms/db/testing";
-import { createDemoRestaurant, installPlatformLibrary, removeRestaurants } from "@rms/seed";
+import { createDemoRestaurant, deliveryStatements, generateSales, installPlatformLibrary, removeRestaurants } from "@rms/seed";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { McpServer, createMcpHandler } from "@modelcontextprotocol/server";
 import { TOOLS_CHANGED_TEXT, approveTools, connectDemoPos, disconnect } from "./connections.js";
@@ -343,6 +343,32 @@ describe("Demo POS server and gateway", () => {
       const [outbox] = await adminDb()<{ n: number }[]>`select count(*)::int as n from platform.outbox where org_id = ${D.org} and topic = 'connection.synced'`;
       expect(outbox?.n).toBe(0);
     });
+
+    it("counts the supplier bills the POS sent, not the delivery statements RMS keeps beside them", async () => {
+      const g = generateSales("marigold");
+      const statements = deliveryStatements(g).length;
+      expect([g.vendorBills.length, statements]).toEqual([128, 32]);
+      const weeks = g.weeks.map((w) => ({ weekStart: w.weekStart, netSalesMinor: w.netSalesMinor, primeCostPct: "0.0", stockCounted: true }));
+      // What the loader reports: every bill row it wrote, the 32 statements among them.
+      const loaded = (bills: number) =>
+        (async () => ({
+          setUp: { accountsAndRules: 0, calendar: 0 },
+          books: {
+            startsOn: g.startsOn, endsOn: g.endsOn, setUp: { accountsAndRules: 0, calendar: 0 },
+            rows: { sales_day: g.days.length, labour_day: g.days.length * 3, delivery_payout: g.deliveryPayouts.length, vendor_bill: bills, stock_count: g.stockCounts.length },
+            posted: { salesDays: g.days.length, vendorBills: bills, labourDays: g.days.length * 3, stockCounts: g.stockCounts.length },
+            lastWeek: weeks.at(-1), weeks,
+          },
+          draft: null,
+        })) as never;
+      const res = await syncDemoPos({ tenant: tenantD, ownerUserId: newUuid(), connectionId: conD, loadBooks: loaded(128 + statements) }, { fetch: pos });
+      expect(res.status).toBe("ok");
+      expect(res.counts).toMatchObject({ salesDays: 112, deliveryPayouts: 32, vendorBills: 128, stockCounts: 18 });
+      expect(res.counts.posted).toBe(112 + 160 + 336 + 18);
+      // A load that is short of a bill the POS sent is still refused.
+      const short = await syncDemoPos({ tenant: tenantD, ownerUserId: newUuid(), connectionId: conD, loadBooks: loaded(127) }, { fetch: pos });
+      expect(short).toMatchObject({ status: "failed", message: "The sales brought in do not add up to what Demo POS reported. Please try again, or tell us." });
+    }, 120_000);
 
     it("disconnect removes every grant and the server refuses the connection from then on", async () => {
       await disconnect(tenantD, conD);

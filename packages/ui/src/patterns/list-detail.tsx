@@ -68,16 +68,30 @@ export function ListDetail({ label, items, selectedId, onSelect, onBack, backLab
 }
 
 export type DetailListProps = {
-  rows: Array<{ label: string; value: ReactNode }>;
+  rows: Array<{
+    label: string;
+    value: ReactNode;
+    /** A quieter line under the label: what it is made of, or what it means. */
+    note?: string | undefined;
+  }>;
+  /**
+   * Which side the eye should land on first.
+   * value (the default): facts about one thing. The label is quiet, the value is heavy ("Seats", "110 seats").
+   * label: a list of things. The label is the thing itself, in ink, with its figure beside it ("Market Fish", "$35.00").
+   */
+  lead?: "value" | "label";
 };
 
-/** Facts about one thing: a name on the left, its value on the right. */
-export function DetailList({ rows }: DetailListProps) {
+/** Facts about one thing, or a short list of things: words on the left, a value on the right. */
+export function DetailList({ rows, lead = "value" }: DetailListProps) {
   return (
-    <dl className="rms-detail-list">
-      {rows.map((row) => (
-        <div key={row.label}>
-          <dt>{row.label}</dt>
+    <dl className="rms-detail-list" data-lead={lead === "label" ? "label" : undefined}>
+      {rows.map((row, index) => (
+        <div key={`${index}-${row.label}`}>
+          <dt>
+            {row.label}
+            {row.note ? <span className="rms-detail-list__note">{row.note}</span> : null}
+          </dt>
           <dd>{row.value}</dd>
         </div>
       ))}

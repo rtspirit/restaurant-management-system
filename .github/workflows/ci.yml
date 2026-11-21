@@ -20,6 +20,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm build
+      - name: Install the browser the frame and preview tests use
+        run: pnpm exec playwright install --with-deps chromium
       - name: Start the local database and sign-in service
         run: pnpm exec supabase start -x realtime,storage-api,imgproxy,postgrest,postgres-meta,studio,edge-runtime,logflare,vector
       - name: Create local logins and settings

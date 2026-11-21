@@ -3,7 +3,7 @@
 import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { BarChart, BottomBar, BottomBarItem, Button, Dialog, Feed, Icon, NavItem, NavList, Notice, Stepper, TabLinks, Tabs, Tag, TextField, Theme } from "./index";
+import { BarChart, BottomBar, BottomBarItem, Button, DataTable, DetailList, Dialog, Feed, Icon, NavItem, NavList, Notice, Stepper, TabLinks, Tabs, Tag, TextField, Theme } from "./index";
 
 const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
 const tokens = readFileSync(new URL("./tokens.css", import.meta.url), "utf8");
@@ -81,6 +81,38 @@ describe("Stepper", () => {
   it("marks the step in progress for screen readers", () => {
     expect(html.match(/aria-current="step"/g)).toHaveLength(1);
     expect(html).toContain('data-state="now" aria-current="step"');
+  });
+
+  const stopped = renderToStaticMarkup(
+    <Stepper
+      label="Progress"
+      steps={[
+        { id: "a", label: "Set up your vendor list", state: "done" },
+        { id: "b", label: "Building the screen", state: "stopped" },
+        { id: "c", label: "Checking it works", state: "todo" },
+      ]}
+    />,
+  );
+
+  it("a step that did not finish says so in words, and is not the current step", () => {
+    expect(stopped).toContain('data-state="stopped"');
+    expect(stopped).toContain("Did not finish");
+    expect(stopped).not.toContain("aria-current");
+  });
+
+  it("a step that did not finish has its own ink shape, and no colour", () => {
+    expect(rule('.rms-step[data-state="stopped"] .rms-step__mark')).toContain("border: 2px solid var(--rms-ink)");
+    expect(rule('.rms-step[data-state="stopped"] .rms-step__mark::after')).toContain("background: var(--rms-ink)");
+    for (const block of css.match(/\.rms-step\[data-state="stopped"\][^{]*\{[^}]*\}/g) ?? []) expect(block).not.toContain("--rms-action");
+  });
+
+  it("changing one state's word keeps the usual words for the rest", () => {
+    const html = renderToStaticMarkup(
+      <Stepper label="Progress" words={{ stopped: "Stopped" }} steps={[{ id: "a", label: "One", state: "done" }, { id: "b", label: "Two", state: "stopped" }]} />,
+    );
+    expect(html).toContain("Done");
+    expect(html).toContain("Stopped");
+    expect(html).not.toContain("Did not finish");
   });
 });
 
@@ -176,6 +208,76 @@ describe("navigation", () => {
     );
     expect(html.match(/aria-current="page"/g)).toHaveLength(1);
     expect(html).toContain('aria-haspopup="dialog"');
+    expect(html).not.toContain('aria-current="true"');
+  });
+
+  it("More is marked when the page you are on lives behind it, and takes the same marker as a link", () => {
+    const html = renderToStaticMarkup(
+      <BottomBar label="Main">
+        <BottomBarItem icon="home" label="Home" href="/" />
+        <BottomBarItem icon="more" label="More" onPress={() => undefined} expanded={false} current />
+      </BottomBar>,
+    );
+    expect(html).toMatch(/<button[^>]*aria-current="true"/);
+    expect(html).not.toContain('aria-current="page"');
+    expect(rule(".rms-bottom-bar__item[aria-current]::before")).toContain("background: var(--rms-action)");
+  });
+});
+
+describe("DataTable and DetailList", () => {
+  const columns = [
+    { key: "name", label: "Name" },
+    { key: "started", label: "Started", onPhone: "under-name" as const },
+    { key: "email", label: "Email", onPhone: "under-name-bare" as const },
+    { key: "rate", label: "Hourly rate", align: "end" as const, strong: true },
+  ];
+  const html = renderToStaticMarkup(
+    <DataTable
+      caption="Team"
+      columns={columns}
+      rows={[
+        { id: "a", subtitle: "Server · Front of house", cells: { name: "Amara Solberg", started: "17 Mar 2025", email: "amara@marigold.test", rate: "$9.00" } },
+        { id: "b", cells: { name: "Bao Whitley", started: "3 Feb 2025", email: "", rate: "$16.50" } },
+      ]}
+    />,
+  );
+
+  it("a row can carry a quieter second line under its name", () => {
+    expect(html).toContain('<span class="rms-table__sub">Server · Front of house</span>');
+    expect(html.match(/class="rms-table__sub"/g)).toHaveLength(1);
+  });
+
+  it("a column that sits under the name on a phone is printed there with its label, and stays a column too", () => {
+    expect(html).toContain('<span class="rms-table__sub rms-table__sub--phone"><span>Started: </span>17 Mar 2025</span>');
+    expect(html.match(/<th[^>]*data-phone="under-name"/g)).toHaveLength(2);
+    expect(html.match(/<td[^>]*data-phone="under-name"/g)).toHaveLength(4);
+    expect(html).not.toMatch(/data-strong="true"[^>]*data-phone/);
+  });
+
+  it("a value that says what it is keeps its label for screen readers only, and an empty value prints no line", () => {
+    expect(html).toContain('<span class="rms-sr-only">Email: </span>amara@marigold.test');
+    expect(html.match(/Email: /g)).toHaveLength(1);
+  });
+
+  it("a table that asks for none of this is drawn as before", () => {
+    const plain = renderToStaticMarkup(<DataTable caption="Hours" columns={[{ key: "day", label: "Day" }, { key: "opens", label: "Opens" }]} rows={[{ id: "mon", cells: { day: "Monday", opens: "5:00 pm" } }]} />);
+    expect(plain).not.toContain("rms-table__sub");
+    expect(plain).not.toContain("data-phone");
+    expect(plain).toContain('<th scope="row" data-align="start">Monday</th>');
+  });
+
+  it("the phone lines only show on a phone, and the columns only leave there", () => {
+    expect(rule(".rms-table__sub--phone")).toContain("display: none");
+    expect(css).toMatch(/@media \(max-width: 40rem\) \{[^@]*\.rms-table \[data-phone="under-name"\] \{\s*display: none;[^@]*\.rms-table__sub--phone \{\s*display: block;/);
+  });
+
+  it("DetailList leads with the value unless asked to lead with the label, and prints a note under the label", () => {
+    const facts = renderToStaticMarkup(<DetailList rows={[{ label: "Seats", value: "110 seats" }]} />);
+    expect(facts).toBe('<dl class="rms-detail-list"><div><dt>Seats</dt><dd>110 seats</dd></div></dl>');
+    const things = renderToStaticMarkup(<DetailList lead="label" rows={[{ label: "Market Fish", note: "Fennel, citrus", value: "$35.00" }]} />);
+    expect(things).toContain('data-lead="label"');
+    expect(things).toContain('<dt>Market Fish<span class="rms-detail-list__note">Fennel, citrus</span></dt>');
+    expect(rule('.rms-detail-list[data-lead="label"] dt')).toContain("color: var(--rms-ink)");
   });
 });
 

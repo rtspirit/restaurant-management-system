@@ -8,20 +8,27 @@ import { createClient } from "@/lib/supabase/client";
 
 const MIN_PASSWORD = 8;
 
+/** The sign-in service refuses with status 429 after too many sign-ups or sign-ins from one place in a few minutes. */
+const tooManyTries = (e: { status?: number | undefined; code?: string | undefined }): boolean => e.status === 429 || (e.code ?? "").endsWith("rate_limit");
+
 export default function SignUpPage() {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // The two passwords differ: said at the second box, where it is fixed, not above the button.
+  const [mismatch, setMismatch] = useState(false);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const password = String(form.get("password") ?? "");
     if (password !== String(form.get("confirm") ?? "")) {
-      setError("The two passwords are not the same.");
+      setError(null);
+      setMismatch(true);
       return;
     }
+    setMismatch(false);
     setBusy(true);
     setError(null);
     try {
@@ -31,9 +38,11 @@ export default function SignUpPage() {
       });
       if (signUpError) {
         setError(
-          signUpError.status === 422 || signUpError.code === "user_already_exists"
-            ? "We could not create an account with that email. If you already have one, sign in instead."
-            : "We could not create your account just now. Please try again.",
+          tooManyTries(signUpError)
+            ? "Too many tries. Wait a minute and try again."
+            : signUpError.status === 422 || signUpError.code === "user_already_exists"
+              ? "We could not create an account with that email. If you already have one, sign in instead."
+              : "We could not create your account just now. Please try again.",
         );
         return;
       }
@@ -82,7 +91,17 @@ export default function SignUpPage() {
             minLength={MIN_PASSWORD}
             required
           />
-          <TextField id="confirm" name="confirm" type="password" label="Type the password again" autoComplete="new-password" minLength={MIN_PASSWORD} required />
+          <TextField
+            id="confirm"
+            name="confirm"
+            type="password"
+            label="Type the password again"
+            autoComplete="new-password"
+            minLength={MIN_PASSWORD}
+            required
+            {...(mismatch ? { error: "The two passwords are not the same. Type the same password in both boxes." } : {})}
+            onChange={() => setMismatch(false)}
+          />
         </FormLayout>
       )}
       <Text>
