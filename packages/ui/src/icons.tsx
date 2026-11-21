@@ -2,6 +2,8 @@ import type { ReactNode } from "react";
 import { cx } from "./cx";
 
 // One hand-drawn set: 24px grid, 1.75 stroke, round caps and joins. No other icon source.
+// An icon has no colour of its own: it takes the colour of what it sits in, so only an icon
+// inside something pressable is ever coloured.
 const PATHS = {
   home: <path d="M4 11l8-7 8 7v8a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z" />,
   menu: <path d="M5 3v5a2 2 0 0 0 4 0V3M7 3v18M17 21V3c-2 2-3 5-3 9h3" />,
@@ -64,16 +66,14 @@ export type IconProps = {
   name: IconName;
   /** s is 16px for inside a tag, m is 20px, l is 24px for the bottom bar. */
   size?: "s" | "m" | "l";
-  /** Paint it in the action colour. Only for icons that are part of something pressable. */
-  go?: boolean;
   /** Icons are decoration by default. Give a label only when the icon stands alone. */
   label?: string;
 };
 
-export function Icon({ name, size = "m", go = false, label }: IconProps) {
+export function Icon({ name, size = "m", label }: IconProps) {
   return (
     <svg
-      className={cx("rms-icon", size !== "m" && `rms-icon--${size}`, go && "rms-icon--go")}
+      className={cx("rms-icon", size !== "m" && `rms-icon--${size}`)}
       viewBox="0 0 24 24"
       {...(label ? { role: "img", "aria-label": label } : { "aria-hidden": true })}
     >

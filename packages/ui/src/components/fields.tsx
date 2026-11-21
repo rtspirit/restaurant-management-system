@@ -12,9 +12,11 @@ export type TextFieldProps = NativeInput & {
   error?: string;
   /** Right-aligned figures for money and counts. */
   money?: boolean;
+  /** The question is already on screen as a heading (QuestionForm), so do not print the label again. */
+  hideLabel?: boolean;
 };
 
-export function TextField({ label, hint, error, money = false, id, ...rest }: TextFieldProps) {
+export function TextField({ label, hint, error, money = false, hideLabel = false, id, ...rest }: TextFieldProps) {
   const auto = useId();
   const fieldId = id ?? auto;
   const hintId = hint ? `${fieldId}-hint` : undefined;
@@ -23,20 +25,23 @@ export function TextField({ label, hint, error, money = false, id, ...rest }: Te
 
   return (
     <div className="rms-field">
-      <label className="rms-field__label" htmlFor={fieldId}>
-        {label}
-      </label>
+      {hideLabel ? null : (
+        <label className="rms-field__label" htmlFor={fieldId}>
+          {label}
+        </label>
+      )}
       {hint ? (
         <span className="rms-field__hint" id={hintId}>
           {hint}
         </span>
       ) : null}
       <input
+        {...(hideLabel ? { "aria-label": label } : {})}
         {...rest}
         id={fieldId}
         className={cx("rms-input", money && "rms-input--money")}
         aria-invalid={error ? true : undefined}
-        aria-describedby={describedBy}
+        aria-describedby={[describedBy, rest["aria-describedby"]].filter(Boolean).join(" ") || undefined}
         {...(money ? { inputMode: "decimal" as const } : {})}
       />
       {error ? (

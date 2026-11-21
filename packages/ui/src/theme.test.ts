@@ -1,7 +1,20 @@
 /// <reference types="node" />
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { AA_TEXT, DEFAULT_BRAND, MIN_CHROMA, SURFACES, chromaOf, contrastRatio, darkenToContrast, normaliseHex, relativeLuminance, themeFromBrand } from "./theme";
+import {
+  AA_TEXT,
+  DEFAULT_BRAND,
+  MIN_CHROMA,
+  MIN_INK_CONTRAST,
+  SURFACES,
+  chromaOf,
+  contrastRatio,
+  darkenToContrast,
+  normaliseHex,
+  relativeLuminance,
+  themeFromBrand,
+  type BrandTheme,
+} from "./theme";
 
 const tokens = readFileSync(new URL("./tokens.css", import.meta.url), "utf8");
 
@@ -9,8 +22,38 @@ const tokens = readFileSync(new URL("./tokens.css", import.meta.url), "utf8");
 // tomato, a light yellow that failed in the sketch, and a blue.
 const BRIEF_COLOURS = ["#12804A", "#E8892B", "#C8372D", "#F2C230", "#1F6FD0"];
 
+// Brand colours too dark to tell from ink: navy, dark blue, maroon.
+const DARK_COLOURS = ["#0B1F3A", "#00008B", "#800000"];
+
 // Colours no owner should be able to break the screen with.
 const HARD_COLOURS = ["#FFFFFF", "#000000", "#FFFF00", "#00FFFF", "#FF00FF", "#F4EEE6", "#DEE7F2", "#FFD1DC", "#7FFF00", "#0000FF", "#101820"];
+
+// Things that are not a #RRGGBB string at all.
+const NOT_COLOURS: unknown[] = [
+  null,
+  undefined,
+  42,
+  0x12804a,
+  {},
+  [],
+  true,
+  "",
+  "tomato",
+  "#12",
+  "#abc",
+  "12804A",
+  " #12804A",
+  "#12804A ",
+  "#GGGGGG",
+  "#12804AFF",
+  "rgb(1,2,3)",
+  "url(x)",
+  "}",
+  "</style>",
+  "#12804A; color: red",
+  "#12804A}body{display:none}",
+  "var(--rms-ink)",
+];
 
 function token(name: string): string {
   const match = new RegExp(`--rms-${name}:\\s*(#[0-9a-fA-F]{6})\\b`).exec(tokens);
@@ -29,6 +72,24 @@ function hueOf(hex: string): number {
   return (h * 60 + 360) % 360;
 }
 
+/** Every promise themeFromBrand makes, checked on one result. Returns the first one broken. */
+function brokenRule(theme: BrandTheme): string | null {
+  const hex = /^#[0-9A-F]{6}$/;
+  for (const value of [theme.brand, theme.action, theme.actionInk, theme.actionPressed, theme.actionWash, theme.onAction]) {
+    if (!hex.test(value)) return `not a hex colour: ${value}`;
+  }
+  if (contrastRatio(theme.onAction, theme.action) < AA_TEXT) return "white on the fill";
+  if (contrastRatio(theme.onAction, theme.actionPressed) < AA_TEXT) return "white on the pressed fill";
+  if (contrastRatio(theme.action, SURFACES.card) < AA_TEXT) return "action on card";
+  if (contrastRatio(theme.actionInk, SURFACES.card) < AA_TEXT) return "action ink on card";
+  if (contrastRatio(theme.actionInk, SURFACES.ground) < AA_TEXT) return "action ink on ground";
+  if (contrastRatio(theme.actionInk, theme.actionWash) < AA_TEXT) return "action ink on wash";
+  if (relativeLuminance(theme.actionWash) <= 0.8) return "wash is not a faint tint";
+  if (chromaOf(theme.action) < MIN_CHROMA) return "action is a grey";
+  if (contrastRatio(theme.action, SURFACES.ink) < MIN_INK_CONTRAST) return "action reads as ink";
+  return null;
+}
+
 describe("WCAG contrast maths", () => {
   it("matches the published reference values", () => {
     expect(contrastRatio("#000000", "#FFFFFF")).toBeCloseTo(21, 5);
@@ -41,11 +102,11 @@ describe("WCAG contrast maths", () => {
   });
 
   it("does not depend on the order of the two colours", () => {
-    expect(contrastRatio("#12804A", "#F4EEE6")).toBeCloseTo(contrastRatio("#F4EEE6", "#12804A"), 10);
+    expect(contrastRatio("#12804A", "#DEE7F2")).toBeCloseTo(contrastRatio("#DEE7F2", "#12804A"), 10);
   });
 });
 
-describe.each([...BRIEF_COLOURS, ...HARD_COLOURS])("themeFromBrand(%s)", (brand) => {
+describe.each([...BRIEF_COLOURS, ...DARK_COLOURS, ...HARD_COLOURS])("themeFromBrand(%s)", (brand) => {
   const theme = themeFromBrand(brand);
 
   it("white text on a filled button passes AA", () => {
@@ -69,19 +130,13 @@ describe.each([...BRIEF_COLOURS, ...HARD_COLOURS])("themeFromBrand(%s)", (brand)
     expect(contrastRatio(theme.actionInk, theme.actionWash)).toBeGreaterThanOrEqual(AA_TEXT);
   });
 
-  it("the hover wash stays a faint tint, never a fill", () => {
-    expect(relativeLuminance(theme.actionWash)).toBeGreaterThan(0.8);
-  });
-
-  it("the action colour is a colour, never a grey, black or white", () => {
+  it("the action colour is a colour that cannot be mistaken for ink", () => {
     expect(chromaOf(theme.action)).toBeGreaterThanOrEqual(MIN_CHROMA);
-    expect(chromaOf(theme.actionInk)).toBeGreaterThanOrEqual(MIN_CHROMA);
+    expect(contrastRatio(theme.action, SURFACES.ink)).toBeGreaterThanOrEqual(MIN_INK_CONTRAST);
   });
 
-  it("returns well-formed colours and the matching CSS variables", () => {
-    for (const value of [theme.brand, theme.action, theme.actionInk, theme.actionPressed, theme.actionWash, theme.onAction]) {
-      expect(value).toMatch(/^#[0-9A-F]{6}$/);
-    }
+  it("breaks none of its rules and returns the matching CSS variables", () => {
+    expect(brokenRule(theme)).toBeNull();
     expect(theme.cssVars).toEqual({
       "--rms-action": theme.action,
       "--rms-action-ink": theme.actionInk,
@@ -89,6 +144,23 @@ describe.each([...BRIEF_COLOURS, ...HARD_COLOURS])("themeFromBrand(%s)", (brand)
       "--rms-action-wash": theme.actionWash,
       "--rms-on-action": theme.onAction,
     });
+  });
+});
+
+describe("themeFromBrand across a sweep of every kind of colour", () => {
+  it("holds every rule for 4,096 colours spread over the whole RGB cube", () => {
+    const steps = [0, 17, 34, 51, 68, 85, 102, 119, 136, 153, 170, 187, 204, 221, 238, 255];
+    const broken: string[] = [];
+    for (const r of steps) {
+      for (const g of steps) {
+        for (const b of steps) {
+          const brand = `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`.toUpperCase();
+          const rule = brokenRule(themeFromBrand(brand));
+          if (rule) broken.push(`${brand}: ${rule}`);
+        }
+      }
+    }
+    expect(broken).toEqual([]);
   });
 });
 
@@ -100,60 +172,81 @@ describe("themeFromBrand keeps the owner's colour recognisable", () => {
     }
   });
 
-  it("says when it darkened the colour", () => {
+  it("darkens a colour that is too light, and says so", () => {
+    for (const brand of ["#E8892B", "#F2C230", "#FFFF00", "#FFD1DC"]) {
+      const theme = themeFromBrand(brand);
+      expect(theme.adjustment).toBe("darkened");
+      expect(relativeLuminance(theme.action)).toBeLessThan(relativeLuminance(brand));
+    }
+  });
+
+  it("goes no darker than it has to", () => {
     for (const brand of ["#E8892B", "#F2C230"]) {
-      expect(themeFromBrand(brand).adjustment).toBe("darkened");
+      expect(contrastRatio(themeFromBrand(brand).action, "#FFFFFF")).toBeLessThan(AA_TEXT + 0.15);
+    }
+  });
+
+  it("lightens navy, dark blue and maroon until they read as a colour, not as ink, and says so", () => {
+    for (const brand of DARK_COLOURS) {
+      const theme = themeFromBrand(brand);
+      expect(contrastRatio(brand, SURFACES.ink)).toBeLessThan(MIN_INK_CONTRAST);
+      expect(theme.adjustment).toBe("lightened");
+      expect(relativeLuminance(theme.action)).toBeGreaterThan(relativeLuminance(brand));
+      expect(contrastRatio(theme.action, SURFACES.ink)).toBeGreaterThanOrEqual(MIN_INK_CONTRAST);
+      // Lightened only as far as needed.
+      expect(contrastRatio(theme.action, SURFACES.ink)).toBeLessThan(MIN_INK_CONTRAST + 0.15);
+    }
+  });
+
+  it("keeps the hue", () => {
+    // The steps are made in OKLCH, which holds the hue the eye sees. Measured here on the
+    // plain HSL wheel, that shows as a few degrees of drift, a little more for deep blues.
+    for (const [brands, limit] of [
+      [BRIEF_COLOURS, 12],
+      [DARK_COLOURS, 20],
+    ] as const) {
+      for (const brand of brands) {
+        const theme = themeFromBrand(brand);
+        for (const step of [theme.action, theme.actionInk]) {
+          const drift = Math.abs(hueOf(step) - hueOf(brand));
+          expect(Math.min(drift, 360 - drift)).toBeLessThan(limit);
+        }
+      }
     }
   });
 
   it("replaces black, white and greys with basil, because they would read as ink, not as press", () => {
     const basil = themeFromBrand(DEFAULT_BRAND);
-    for (const brand of ["#000000", "#FFFFFF", "#777777", "#101820", "#F4EEE6", "#1E2420"]) {
+    for (const brand of ["#000000", "#FFFFFF", "#777777", "#101820", "#F4EEE6", "#DEE7F2", "#1E2420"]) {
       const theme = themeFromBrand(brand);
       expect(theme.adjustment).toBe("replaced");
       expect(theme.brand).toBe(brand);
       expect(theme.cssVars).toEqual(basil.cssVars);
     }
   });
-
-  it("only ever darkens a colour that fails", () => {
-    for (const brand of ["#E8892B", "#F2C230", "#FFFF00", "#FFD1DC"]) {
-      const { action } = themeFromBrand(brand);
-      expect(action).not.toBe(brand);
-      expect(relativeLuminance(action)).toBeLessThan(relativeLuminance(brand));
-    }
-  });
-
-  it("goes no darker than it has to", () => {
-    // The derived step sits just over the line, not far past it.
-    for (const brand of ["#E8892B", "#F2C230"]) {
-      expect(contrastRatio(themeFromBrand(brand).action, "#FFFFFF")).toBeLessThan(AA_TEXT + 0.15);
-    }
-  });
-
-  it("keeps the hue within a few degrees", () => {
-    for (const brand of ["#E8892B", "#F2C230", "#C8372D", "#1F6FD0", "#12804A"]) {
-      const theme = themeFromBrand(brand);
-      for (const step of [theme.action, theme.actionInk]) {
-        const drift = Math.abs(hueOf(step) - hueOf(brand));
-        expect(Math.min(drift, 360 - drift)).toBeLessThan(12);
-      }
-    }
-  });
 });
 
 describe("themeFromBrand input handling", () => {
-  it("accepts short hex, lower case and a missing hash", () => {
-    expect(themeFromBrand("12804a").brand).toBe("#12804A");
-    expect(themeFromBrand("#abc").brand).toBe("#AABBCC");
-    expect(normaliseHex("  #E8892B ")).toBe("#E8892B");
+  it("accepts only a # and six hex digits, in either case", () => {
+    expect(normaliseHex("#12804a")).toBe("#12804A");
+    expect(normaliseHex("#E8892B")).toBe("#E8892B");
+    expect(themeFromBrand("#e8892b").brand).toBe("#E8892B");
   });
 
-  it("falls back to basil for anything that is not a hex colour", () => {
-    for (const bad of ["", "tomato", "#12", "#GGGGGG", "rgb(1,2,3)", "#12804A; color: red"]) {
-      expect(normaliseHex(bad)).toBeNull();
-      expect(themeFromBrand(bad).cssVars).toEqual(themeFromBrand(DEFAULT_BRAND).cssVars);
-      expect(themeFromBrand(bad).adjustment).toBe("replaced");
+  it.each(NOT_COLOURS.map((value) => [JSON.stringify(value) ?? String(value), value] as const))("falls back to basil for %s without throwing", (_name, value) => {
+    const basil = themeFromBrand(DEFAULT_BRAND);
+    expect(normaliseHex(value)).toBeNull();
+    const theme = themeFromBrand(value);
+    expect(theme.adjustment).toBe("replaced");
+    expect(theme.brand).toBe(DEFAULT_BRAND);
+    expect(theme.cssVars).toEqual(basil.cssVars);
+  });
+
+  it("never lets anything but hex colours into the CSS variables", () => {
+    for (const value of [...NOT_COLOURS, ...BRIEF_COLOURS, ...DARK_COLOURS, ...HARD_COLOURS]) {
+      for (const cssValue of Object.values(themeFromBrand(value).cssVars)) {
+        expect(cssValue).toMatch(/^#[0-9A-F]{6}$/);
+      }
     }
   });
 
@@ -203,7 +296,9 @@ describe("tokens.css", () => {
     expect(contrastRatio(token("card"), token("ground"))).toBeGreaterThanOrEqual(1.2);
   });
 
-  it("chart bars stand clear of the card they sit on", () => {
-    expect(contrastRatio(token("bar"), token("card"))).toBeGreaterThanOrEqual(2);
+  it("chart bars pass 3 to 1 against the card they sit on, and are not mistaken for ink", () => {
+    expect(contrastRatio(token("bar"), token("card"))).toBeGreaterThanOrEqual(3);
+    expect(contrastRatio(token("bar"), token("ink"))).toBeGreaterThanOrEqual(3);
+    expect(chromaOf(token("bar"))).toBeLessThan(MIN_CHROMA);
   });
 });

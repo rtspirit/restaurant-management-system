@@ -1,5 +1,6 @@
 "use client";
 import { useRouter } from "next/navigation";
+import { Button } from "@rms/ui";
 import { supabaseBrowser } from "@/lib/supabase/client";
 
 export function SignOutButton() {
@@ -10,8 +11,8 @@ export function SignOutButton() {
     router.refresh();
   };
   return (
-    <button type="button" onClick={onClick}>
+    <Button variant="quiet" onClick={onClick}>
       Sign out
-    </button>
+    </Button>
   );
 }

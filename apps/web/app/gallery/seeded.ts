@@ -1,7 +1,22 @@
 // Seeded, fictional content for the gallery. The figures for the week of Nov 9 are the
 // ones on the approved sketches (Marigold Kitchen), and every total adds up.
 
-import type { BarChartItem, DataTableColumn, DataTableRow, FeedItem, ListDetailItem } from "@rms/ui";
+import type { BarChartItem, DataTableColumn, DataTableRow, ListDetailItem } from "@rms/ui";
+import type { ShellData } from "@/components/shell-data";
+
+/** The seeded demo restaurant the gallery screens are drawn for. Fictional. */
+export const MARIGOLD_KITCHEN: ShellData = {
+  restaurantName: "Marigold Kitchen",
+  locations: [
+    { id: "downtown", name: "Downtown" },
+    { id: "riverside", name: "Riverside" },
+  ],
+  brandColour: null,
+  userName: "Asha Verma",
+  userInitials: "AV",
+  role: "owner",
+  miniApps: [],
+};
 
 const dollars = (amount: number) => `$${amount.toLocaleString("en-US")}`;
 const share = (part: number, whole: number) => `${((part / whole) * 100).toFixed(1)}%`;
@@ -159,12 +174,23 @@ export const BILLS: Bill[] = [
   { id: "b4", title: "Tidewater Fish Co.", subtitle: "Paid Nov 12", meta: "$2,095.20", due: "Nov 14", forWhat: "Fresh fish, two deliveries", location: "Downtown", status: "Paid Nov 12" },
 ];
 
-// Maintainer change feed. Tiers are words a maintainer knows. Owners never see them.
-export type Change = Omit<FeedItem, "tag"> & { tier: "T0" | "T1" | "T2" | "T3"; tierWords: string };
+// Maintainer change feed, as the console shows it. Tiers are maintainer words. Owners never see them.
+export type Change = {
+  id: string;
+  tier: "T0" | "T1" | "T2" | "T3";
+  tierWords: string;
+  restaurant: string;
+  shortId: string;
+  summary: string;
+  detail: string;
+  when: string;
+  flag?: string;
+  waiting?: boolean;
+};
 
 export const CHANGES: Change[] = [
-  { id: "c1", tier: "T3", tierWords: "Needs approval", what: "Slice Yard asked to share “Close-out count” in the Marketplace", when: "2 min ago" },
-  { id: "c2", tier: "T2", tierWords: "Major", what: "Marigold Kitchen published “Money” to all staff", when: "14 min ago" },
-  { id: "c3", tier: "T1", tierWords: "Minor", what: "Marigold Kitchen added a “Target” field to “Money”", when: "1 hr ago" },
-  { id: "c4", tier: "T0", tierWords: "Cosmetic", what: "Slice Yard renamed a column in “Close-out count”", when: "3 hr ago" },
+  { id: "c1", tier: "T3", tierWords: "T3 platform", restaurant: "Slice Yard", shortId: "9c41e2", summary: "Asked to share “Close-out count” in the Marketplace", detail: "Waiting for us · From marketplace · Signals: public_listing · By owner", when: "2 min ago", waiting: true },
+  { id: "c2", tier: "T2", tierWords: "T2 major", restaurant: "Marigold Kitchen", shortId: "4be7a0", summary: "Published “Money” to all staff", detail: "Waiting for owner · From build · Signals: publish, role_change · By owner", when: "14 min ago" },
+  { id: "c3", tier: "T1", tierWords: "T1 minor", restaurant: "Marigold Kitchen", shortId: "4be7a0", summary: "Added a “Target” field to “Money”", detail: "Applied · From build · Signals: add_field · By owner", when: "1 hr ago", flag: "Needs a look: tier does not match its signals" },
+  { id: "c4", tier: "T0", tierWords: "T0 cosmetic", restaurant: "Slice Yard", shortId: "9c41e2", summary: "Renamed a column in “Close-out count”", detail: "Applied · From build · Signals: label_change · By owner", when: "3 hr ago" },
 ];

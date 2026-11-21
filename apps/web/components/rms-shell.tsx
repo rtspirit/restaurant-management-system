@@ -41,6 +41,17 @@ const ON_BOTTOM_BAR = ["/", "/menu", "/staff", "/mini-apps"];
 
 const ROLE_WORDS: Record<ShellData["role"], string> = { owner: "Owner", staff: "Staff" };
 
+/** Posts to /sign-out, which clears the session and goes to sign-in (task A's route). */
+function SignOut() {
+  return (
+    <form action="/sign-out" method="post">
+      <Button type="submit" variant="quiet">
+        Sign out
+      </Button>
+    </form>
+  );
+}
+
 const ALL_LOCATIONS = "all";
 
 function isCurrent(href: string, path: string): boolean {
@@ -84,7 +95,14 @@ export function RmsShell({ data, currentHref, phoneStart, children }: RmsShellPr
       />
     ) : null;
 
-  const account = <Account name={data.userName} initials={data.userInitials} role={ROLE_WORDS[data.role]} />;
+  // RMS may not know a name yet. Then the role stands in for it, and the avatar shows the restaurant's initial.
+  const role = ROLE_WORDS[data.role];
+  const account = (
+    <Stack gap="s">
+      <Account name={data.userName || role} initials={data.userInitials || data.restaurantName.slice(0, 1)} role={data.userName ? role : data.restaurantName} />
+      <SignOut />
+    </Stack>
+  );
   const inMore = DESTINATIONS.filter((place) => !ON_BOTTOM_BAR.includes(place.href));
 
   return (

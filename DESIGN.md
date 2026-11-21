@@ -6,7 +6,7 @@ colors:
   card: "#FFFFFF"
   ink: "#1E2420"
   line: "#CAD6E2"
-  bar: "#A4B3C3"
+  bar: "#8896A6"
   field-line: "#76828E"
   muted-on-card: "#616C77"
   muted-on-ground: "#4C5661"
@@ -199,11 +199,11 @@ One slate neutral set that never changes, and one action colour that changes per
 
 ### Neutral
 
-- **Ground** (`#DEE7F2`, slate): the page, the same for every restaurant. The blue-grey of a slate menu board. It is cool so that every brand colour stands off it, most of all the oranges and yellows that sank into the first sketch's cream (`#F4EEE6`, retired). Faint enough (OKLCH chroma 0.018) that it never reads as something to press.
+- **Ground** (`#DEE7F2`, slate): the page, the same for every restaurant. The blue-grey of a slate menu board. It is cool so that every brand colour stands off it, most of all the oranges and yellows that sank into the first sketch's cream (`#F4EEE6`, retired). Chosen by Rahul from a side-by-side of the cream, this slate and a dusty plum (`#EFE5EF`); see `docs/adr/0006`. Faint enough (OKLCH chroma 0.018) that it never reads as something to press.
 - **Card** (`#FFFFFF`): anything you read sits on white.
 - **Ink** (`#1E2420`): text, figures, focus rings, and every state shape.
 - **Line** (`#CAD6E2`): hairlines, quiet tags, your own message bubble, disabled buttons.
-- **Bar** (`#A4B3C3`): chart bars that are not the current one, the dashed edge of an empty state. 2.1 to 1 against a card, with the figure always printed beside it.
+- **Bar** (`#8896A6`): chart bars that are not the current one, the hollow ring of a step not started, the dashed edge of an empty state. 3.0 to 1 against a card, and the figure is always printed beside the bar.
 - **Field line** (`#76828E`): the edge of a text field and a disabled arrow. 3 to 1 against card and ground.
 - **Muted on card** (`#616C77`) and **muted on ground** (`#4C5661`): secondary words. Components pick the right one through `--rms-muted`, which a card redefines.
 
@@ -213,7 +213,7 @@ One slate neutral set that never changes, and one action colour that changes per
 
 **The Press Rule.** If it has colour, you can press it. Nothing coloured that cannot be pressed. A disabled action loses its colour entirely.
 
-**The Brand Safety Rule.** A restaurant's colour never reaches the page directly. `themeFromBrand(hex)` keeps the hue and darkens only as far as it must so that white words on the fill and coloured words on card, ground and wash all pass WCAG AA (4.5 to 1). A colour that already passes is used exactly as chosen. Black, white and greys have no colour to keep, so they are replaced by basil and `adjustment` reports `"replaced"`. `packages/ui/src/theme.test.ts` proves this for `#12804A`, `#E8892B`, `#C8372D`, `#F2C230`, `#1F6FD0` and ten hostile colours.
+**The Brand Safety Rule.** A restaurant's colour never reaches the page directly. `themeFromBrand(value)` accepts only a string of `#` and six hex digits; anything else is ignored. It keeps the hue and moves the lightness only as far as it must: darker, so that white words on the fill and coloured words on card, ground and wash all pass WCAG AA (4.5 to 1); or lighter, when the colour is within 2 to 1 of ink (navy, maroon) and would read as text instead of as something to press. A colour that already passes is used exactly as chosen. Black, white and greys have no colour to keep, so they are replaced by basil. `adjustment` reports `none`, `darkened`, `lightened` or `replaced`. `packages/ui/src/theme.test.ts` proves every rule for the five brief colours, three dark ones, eleven hostile ones, twenty-three things that are not colours, and a sweep of 4,096 colours across the whole RGB cube.
 
 **The Ink State Rule.** Over target, slow week, done, in progress, needs approval: each is a word plus an ink shape. A slow week is an outlined bar and the words "Slow week". Three weights of tag (soft, outlined, solid ink) rank how much something matters. An error is a heavier ink edge, an ink mark and plain words.
 
@@ -249,7 +249,8 @@ Buttons are 16px/700, and 19px/800 at the large size. Tabs are 19px/700, 800 whe
 - **Workbench** (build screen). Conversation in a 560px column, preview beside it, a hairline between. From 1024px it fills the window: each side scrolls on its own, and the composer and the main actions stay on the bottom edge. Below 1024px the preview moves under the conversation and the actions pin to the bottom of the screen.
 - **Density.** `data-density="compact"` on any container drops table rows from 52px to 36px, bar rows from 36px to 30px, data text from 16px to 15px and tags to 24px tall. Card padding (20px by 24px) is the same in both, so card edges always line up. Report tables and the change feed are always compact.
 - **Responsive behaviour is structural.** A stat group becomes rows under 448px of card width. Upright bars become rows under 480px. A wide table scrolls sideways inside its card with the name column and the strongest column pinned. A dialog becomes a bottom sheet on a phone. Type does not scale with the window.
-- **Touch.** 44px minimum for anything pressable, 48px for navigation and fields, 52px for the main action of a page.
+- **Touch.** 44px minimum for anything pressable, in every density and at every width (a pressable chart bar and a sortable header are 44px even inside a compact card). 48px for navigation, fields and choice rows, 52px for the main action of a page.
+- **Pages with no rail.** Sign-in, onboarding and the maintainer console sit on a `Canvas`: the logo, then one column. Onboarding is one question per screen (`QuestionForm`): a line of ink that fills as you go, the question as the heading, the answer, then Back and Next at thumb height.
 
 ## Elevation & Depth
 
@@ -285,8 +286,11 @@ All in `@rms/ui`. They take no `className` and no `style`, so screens are compos
 - **Stepper.** Done is a solid ink disc with a tick. In progress is an open ring that turns. Not started is a hollow ring. Each with its word.
 - **Conversation, Message, Answers, Composer.** Your words in a Line bubble on the right. RMS answers in white, as a bubble or as cards. Answered questions fold into quiet chips. Send only has colour when there is something to send.
 - **Dialog.** The platform dialog, for decisions that need full attention. A bottom sheet on a phone.
+- **Choice.** A radio or checkbox row you press: a white pill that keeps its corners when the words wrap. Chosen is a heavier ink edge and heavier words as well as the tick.
+- **Notice.** A message about the whole form or page. A problem is an ink outline with an ink mark and plain words. A status is quiet text.
+- **Feed.** Compact rows of changes: an ink tag, what changed, when, and a quieter second line. A row that needs a look is the only one with an ink outline, and says why in a solid ink label. Used by the maintainer console, where tier codes are allowed as words.
 - **NavItem, BottomBar, Pager, Account, Logo, Skeleton, EmptyState.**
-- **Patterns:** `Dashboard`, `ListDetail`, `FormLayout`, `ReportTable`, plus `Workbench` and `Feed`.
+- **Patterns:** `Dashboard`, `ListDetail`, `FormLayout`, `ReportTable`, plus `Workbench`, `QuestionForm` and `Feed`.
 
 ## Do's and Don'ts
 
@@ -308,6 +312,4 @@ All in `@rms/ui`. They take no `className` and no `style`, so screens are compos
 
 - The Marketplace listing card and a filled Mini-apps home exist only in the gallery, with seeded content. They are not wired to data.
 - Settings does not yet tell the owner when their colour was darkened or replaced. `themeFromBrand` reports it; the screen is not built.
-- Chart bars in Bar (`#A4B3C3`) are 2.1 to 1 against white, under the 3 to 1 asked of standalone graphics. Every bar carries its figure in text, so no information depends on the bar.
-- Sign-in, onboarding and the maintainer console are plain HTML until they are skinned.
 - No dark theme. The use scene is a lit kitchen or office, and the direction was approved light.

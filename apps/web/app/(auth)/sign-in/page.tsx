@@ -1,8 +1,9 @@
 "use client";
-// Unstyled on purpose: the designer skins this after task E merges.
+// Skinned with @rms/ui only. The sign-in logic is task A's and is unchanged.
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
+import { Button, Canvas, FormLayout, Logo, Notice, Text, TextField } from "@rms/ui";
 import { SignedOutError } from "@/lib/api";
 import { createClient } from "@/lib/supabase/client";
 import { goToNextStep } from "../next-step";
@@ -45,27 +46,24 @@ export default function SignInPage() {
   }
 
   return (
-    <main>
-      <h1>Sign in</h1>
-      <form onSubmit={onSubmit}>
-        <p>
-          <label htmlFor="email">Email</label>
-          <br />
-          <input id="email" name="email" type="email" autoComplete="email" required />
-        </p>
-        <p>
-          <label htmlFor="password">Password</label>
-          <br />
-          <input id="password" name="password" type="password" autoComplete="current-password" required />
-        </p>
-        {error ? <p role="alert">{error}</p> : null}
-        <button type="submit" disabled={busy}>
-          {busy ? "Signing in…" : "Sign in"}
-        </button>
-      </form>
-      <p>
+    <Canvas narrow header={<Logo />}>
+      <FormLayout
+        title="Sign in"
+        titleLevel={1}
+        onSubmit={onSubmit}
+        message={error ? <Notice kind="problem">{error}</Notice> : null}
+        actions={
+          <Button type="submit" variant="primary" size="l" block busy={busy}>
+            {busy ? "Signing in…" : "Sign in"}
+          </Button>
+        }
+      >
+        <TextField id="email" name="email" type="email" label="Email" autoComplete="email" required />
+        <TextField id="password" name="password" type="password" label="Password" autoComplete="current-password" required />
+      </FormLayout>
+      <Text>
         New to RMS? <Link href="/sign-up">Create an account</Link>
-      </p>
-    </main>
+      </Text>
+    </Canvas>
   );
 }

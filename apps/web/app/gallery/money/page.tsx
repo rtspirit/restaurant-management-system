@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import { Button } from "@rms/ui";
 import { BackToRms, RmsShell } from "@/components/rms-shell";
-import { MARIGOLD_KITCHEN } from "@/components/shell-data";
 import { MoneyApp } from "../money-app";
+import { MARIGOLD_KITCHEN } from "../seeded";
 
 export const metadata: Metadata = { title: "Gallery: Money on a phone" };
 

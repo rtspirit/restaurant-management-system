@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { RmsShell } from "@/components/rms-shell";
 import { MiniAppsPage } from "@/components/mini-apps-page";
-import { MARIGOLD_KITCHEN } from "@/components/shell-data";
+import { MARIGOLD_KITCHEN } from "../seeded";
 import { BuildScreen } from "./build-screen";
 
 export const metadata: Metadata = { title: "Gallery: build conversation" };

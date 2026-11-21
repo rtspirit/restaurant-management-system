@@ -1,5 +1,6 @@
 "use client";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
+import { Button, Heading, Notice, Row, Select, Text } from "@rms/ui";
 import { ChangeTable } from "@/components/change-table";
 import { ApiError, type FeedItem, apiFetch } from "@/lib/api";
 
@@ -46,37 +47,51 @@ export default function FeedPage() {
   };
 
   return (
-    <main>
-      <h1>Change feed</h1>
+    <>
+      <Heading level={1} size="page">
+        Change feed
+      </Heading>
       <form onSubmit={onFilter} aria-label="Filter the feed">
-        <label htmlFor="tier">Tier</label>{" "}
-        <select id="tier" name="tier" defaultValue="">
-          <option value="">All tiers</option>
-          <option value="T0">T0 cosmetic</option>
-          <option value="T1">T1 minor</option>
-          <option value="T2">T2 major</option>
-          <option value="T3">T3 platform</option>
-        </select>{" "}
-        <label htmlFor="decision">Status</label>{" "}
-        <select id="decision" name="decision" defaultValue="">
-          <option value="">Any status</option>
-          <option value="applied">Applied</option>
-          <option value="pending_owner">Waiting for owner</option>
-          <option value="pending_maintainer">Waiting for us</option>
-          <option value="approved">Approved</option>
-          <option value="rejected">Rejected</option>
-        </select>{" "}
-        <button type="submit">Apply filters</button>
+        <Row align="bottom">
+          <Select
+            id="tier"
+            name="tier"
+            label="Tier"
+            defaultValue=""
+            options={[
+              { value: "", label: "All tiers" },
+              { value: "T0", label: "T0 cosmetic" },
+              { value: "T1", label: "T1 minor" },
+              { value: "T2", label: "T2 major" },
+              { value: "T3", label: "T3 platform" },
+            ]}
+          />
+          <Select
+            id="decision"
+            name="decision"
+            label="Status"
+            defaultValue=""
+            options={[
+              { value: "", label: "Any status" },
+              { value: "applied", label: "Applied" },
+              { value: "pending_owner", label: "Waiting for owner" },
+              { value: "pending_maintainer", label: "Waiting for us" },
+              { value: "approved", label: "Approved" },
+              { value: "rejected", label: "Rejected" },
+            ]}
+          />
+          <Button type="submit">Apply filters</Button>
+        </Row>
       </form>
-      {error ? <p role="alert">{error}</p> : null}
-      {!error && !loading && items.length === 0 ? <p>No changes match these filters.</p> : null}
+      {error ? <Notice kind="problem">{error}</Notice> : null}
+      {!error && !loading && items.length === 0 ? <Text>No changes match these filters.</Text> : null}
       {items.length > 0 ? <ChangeTable items={items} caption="Changes, newest first" /> : null}
-      {loading ? <p aria-live="polite">Loading...</p> : null}
+      {loading ? <Notice kind="status">Loading...</Notice> : null}
       {next && !loading ? (
-        <button type="button" onClick={() => void load(filters, next)}>
-          Show older changes
-        </button>
+        <div>
+          <Button onClick={() => void load(filters, next)}>Show older changes</Button>
+        </div>
       ) : null}
-    </main>
+    </>
   );
 }

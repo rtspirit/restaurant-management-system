@@ -87,18 +87,6 @@ a {
   display: contents;
 }
 
-/* Review pages only: a patch of another page ground, edged so it shows against the real one. */
-.rms-ground-sample {
-  display: grid;
-  align-content: start;
-  gap: var(--rms-space-3);
-  min-width: 0;
-  padding: var(--rms-space-5);
-  border: 1px solid var(--rms-field-line);
-  border-radius: var(--rms-radius-card);
-  background: var(--rms-ground);
-}
-
 /* ---------------------------------------------------------------- icon */
 
 .rms-icon {
@@ -121,10 +109,6 @@ a {
 .rms-icon--l {
   width: 1.5rem;
   height: 1.5rem;
-}
-
-.rms-icon--go {
-  color: var(--rms-action-ink);
 }
 
 /* ---------------------------------------------------------------- text and layout helpers */
@@ -255,6 +239,10 @@ a {
 
 .rms-row--top {
   align-items: flex-start;
+}
+
+.rms-row--bottom {
+  align-items: flex-end;
 }
 
 .rms-row--nowrap {
@@ -934,7 +922,7 @@ a.rms-logo--s {
   display: inline-flex;
   align-items: center;
   gap: var(--rms-space-1);
-  min-height: var(--rms-row);
+  min-height: var(--rms-target);
   margin: 0;
   padding: 0;
   border: 0;
@@ -956,12 +944,6 @@ a.rms-logo--s {
   display: inline-flex;
   margin-left: var(--rms-space-2);
   vertical-align: middle;
-}
-
-@media (pointer: coarse) {
-  .rms-table__sort {
-    min-height: var(--rms-target);
-  }
 }
 
 /* ---------------------------------------------------------------- bar chart */
@@ -1221,8 +1203,13 @@ a.rms-logo--s {
   }
 }
 
-@media (pointer: coarse) {
-  .rms-chart--rows .rms-chart__press {
+/* A bar you can press is a 44px target in every layout, whatever the density. */
+.rms-chart--rows .rms-chart__press {
+  min-height: var(--rms-target);
+}
+
+@container (max-width: 30rem) {
+  .rms-chart--columns .rms-chart__press {
     min-height: var(--rms-target);
   }
 }
@@ -1737,6 +1724,11 @@ a.rms-logo--s {
   padding: var(--rms-space-6) 0 0 var(--rms-space-4);
 }
 
+/* A quiet button under the account lines its words up with the avatar's edge. */
+.rms-account + form .rms-button--quiet {
+  margin-left: calc(var(--rms-space-3) * -1);
+}
+
 .rms-shell__main {
   display: flex;
   flex-direction: column;
@@ -1865,7 +1857,7 @@ a.rms-logo--s {
 }
 
 .rms-canvas--narrow {
-  max-width: 30rem;
+  max-width: 32rem;
 }
 
 .rms-section {
@@ -2303,10 +2295,72 @@ a.rms-logo--s {
   grid-template-columns: 8.5rem minmax(0, 1fr) auto;
   align-items: center;
   justify-items: start;
-  column-gap: var(--rms-space-3);
+  gap: var(--rms-space-1) var(--rms-space-3);
   min-height: var(--rms-row);
   padding-block: 0.375rem;
   font-size: var(--rms-text-data);
+}
+
+.rms-feed__item + .rms-feed__item {
+  border-top: 1px solid var(--rms-line);
+}
+
+.rms-feed__what {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.rms-feed__what b {
+  font-weight: var(--rms-weight-strong);
+}
+
+.rms-feed__what small {
+  color: var(--rms-muted);
+  font-size: var(--rms-text-xs);
+}
+
+.rms-feed__when {
+  color: var(--rms-muted);
+  font-size: var(--rms-text-s);
+  white-space: nowrap;
+}
+
+.rms-feed__detail,
+.rms-feed__flag,
+.rms-feed__actions {
+  grid-column: 2 / -1;
+  min-width: 0;
+}
+
+.rms-feed__detail {
+  color: var(--rms-muted);
+  font-size: var(--rms-text-s);
+  line-height: 1.25rem;
+  overflow-wrap: anywhere;
+}
+
+/* The reason a row is flagged can be a full sentence: let it wrap on a phone. */
+.rms-feed__flag .rms-tag {
+  align-items: flex-start;
+  line-height: 1.25rem;
+  white-space: normal;
+}
+
+.rms-feed__actions {
+  justify-self: stretch;
+  padding-block: var(--rms-space-2);
+}
+
+/* A row that needs a look is the only one with an ink outline. */
+.rms-feed__item[data-flagged="true"] {
+  margin-block: var(--rms-space-2);
+  padding: var(--rms-space-3);
+  border: 1.5px solid var(--rms-ink);
+  border-radius: var(--rms-radius-label);
+}
+
+.rms-feed__item[data-flagged="true"] + .rms-feed__item {
+  border-top: 0;
 }
 
 /* Compact rows carry a smaller label so a row stays near 36px. */
@@ -2322,31 +2376,202 @@ a.rms-logo--s {
 @media (max-width: 40rem) {
   .rms-feed__item {
     grid-template-columns: minmax(0, 1fr) auto;
-    row-gap: var(--rms-space-1);
   }
 
-  .rms-feed__what {
+  .rms-feed__what,
+  .rms-feed__detail,
+  .rms-feed__flag,
+  .rms-feed__actions {
     grid-column: 1 / -1;
-    grid-row: 2;
   }
 }
 
-.rms-feed__item + .rms-feed__item {
-  border-top: 1px solid var(--rms-line);
+/* ---------------------------------------------------------------- choices, notes and notices */
+
+.rms-choices {
+  display: grid;
+  gap: var(--rms-space-2);
 }
 
-.rms-feed__what {
+/* A row you press: one line is a pill, and it keeps its corners when the words wrap. */
+.rms-choice {
+  display: flex;
+  align-items: center;
+  gap: var(--rms-space-3);
+  min-height: var(--rms-target-nav);
+  padding: var(--rms-space-3) var(--rms-space-5) var(--rms-space-3) var(--rms-space-4);
+  border: 1px solid var(--rms-line);
+  border-radius: var(--rms-radius-composer);
+  background: var(--rms-card);
+  font-weight: var(--rms-weight-label);
+  line-height: 1.375rem;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color var(--rms-fade);
+}
+
+.rms-choice:hover {
+  background: var(--rms-action-wash);
+}
+
+/* Chosen: a heavier ink edge and heavier words, as well as the tick. */
+.rms-choice:has(:checked) {
+  border-color: var(--rms-ink);
+  box-shadow: inset 0 0 0 1px var(--rms-ink);
+  font-weight: var(--rms-weight-heavy);
+}
+
+.rms-choice:has(:focus-visible) {
+  outline: 3px solid var(--rms-ink);
+  outline-offset: 2px;
+}
+
+.rms-choice__input {
+  flex: none;
+  width: 1.375rem;
+  height: 1.375rem;
+  margin: 0;
+  accent-color: var(--rms-action);
+  outline: 0;
+}
+
+.rms-input--area {
+  min-height: 4.5rem;
+  resize: vertical;
+}
+
+.rms-field-group {
+  display: grid;
+  gap: var(--rms-space-3);
   min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
 }
 
-.rms-feed__what b {
+.rms-field-group__legend {
+  margin-bottom: var(--rms-space-2);
+  padding: 0;
   font-weight: var(--rms-weight-strong);
 }
 
-.rms-feed__when {
+.rms-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--rms-space-2);
+  max-width: 36rem;
+  margin: 0;
+  line-height: 1.375rem;
+  text-wrap: pretty;
+}
+
+/* A problem is an ink outline with an ink mark. Never a colour. */
+.rms-notice--problem {
+  padding: var(--rms-space-3) var(--rms-space-4);
+  border: 1.5px solid var(--rms-ink);
+  border-radius: var(--rms-radius-label);
+  background: var(--rms-card);
+  font-weight: var(--rms-weight-strong);
+}
+
+.rms-notice--problem .rms-icon {
+  margin-top: 0.0625rem;
+}
+
+.rms-notice--status {
+  color: var(--rms-muted);
+}
+
+/* ---------------------------------------------------------------- pattern: one question per screen */
+
+.rms-question {
+  gap: var(--rms-space-6);
+}
+
+.rms-question__progress {
+  display: grid;
+  gap: var(--rms-space-2);
+}
+
+.rms-question__count {
+  margin: 0;
   color: var(--rms-muted);
   font-size: var(--rms-text-s);
-  white-space: nowrap;
+  font-weight: var(--rms-weight-strong);
+  line-height: 1.25rem;
+}
+
+/* Progress is ink filling a line. */
+.rms-progress {
+  display: block;
+  width: 100%;
+  height: 0.375rem;
+  border: 0;
+  border-radius: var(--rms-radius-foot);
+  background: var(--rms-line);
+  appearance: none;
+  overflow: hidden;
+}
+
+.rms-progress::-webkit-progress-bar {
+  background: var(--rms-line);
+}
+
+.rms-progress::-webkit-progress-value {
+  background: var(--rms-ink);
+}
+
+.rms-progress::-moz-progress-bar {
+  background: var(--rms-ink);
+}
+
+.rms-question__body {
+  display: grid;
+  gap: var(--rms-space-4);
+}
+
+.rms-question__title {
+  line-height: 2.25rem;
+  outline: 0;
+}
+
+/* A legend is not laid out by its group's gap, so it carries the space under the question itself. */
+.rms-question__body .rms-field-group__legend {
+  margin-bottom: var(--rms-space-4);
+}
+
+/* The main button of a question is easy to hit with a thumb. */
+.rms-question .rms-form__actions .rms-button {
+  min-height: var(--rms-target-large);
+}
+
+/* ---------------------------------------------------------------- canvas header (pages with no rail) */
+
+.rms-canvas__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--rms-space-2) var(--rms-space-6);
+  margin-bottom: var(--rms-space-8);
+}
+
+.rms-canvas__title {
+  margin: 0;
+  color: var(--rms-muted);
+  font-weight: var(--rms-weight-strong);
+}
+
+.rms-canvas__head-end {
+  display: flex;
+  align-items: center;
+  gap: var(--rms-space-3);
+  margin-left: auto;
+}
+
+.rms-canvas__main {
+  display: grid;
+  gap: var(--rms-space-6);
+  min-width: 0;
 }
 
 /* ---------------------------------------------------------------- reduced motion */
@@ -2356,6 +2581,7 @@ a.rms-logo--s {
   .rms-icon-button,
   .rms-chart__bar,
   .rms-dialog,
+  .rms-choice,
   .rms-list__row .rms-icon {
     transition: none;
   }

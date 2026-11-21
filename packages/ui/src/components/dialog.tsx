@@ -6,7 +6,7 @@ import { Heading } from "./text";
 
 export type DialogProps = {
   open: boolean;
-  /** Called when the owner closes it: the close button, the Escape key or a tap outside. */
+  /** Called once when the owner closes it: the close button, the Escape key or a tap outside. */
   onClose: () => void;
   title: string;
   /** Buttons at the bottom. Put the main action last. Every confirmation says what will happen. */
@@ -41,7 +41,6 @@ export function Dialog({ open, onClose, title, actions, closeLabel = "Close", ch
       ref={ref}
       className="rms-dialog"
       aria-labelledby={titleId}
-      onClose={onClose}
       onCancel={(event) => {
         event.preventDefault();
         onClose();

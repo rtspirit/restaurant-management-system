@@ -11,7 +11,7 @@
   --rms-card: #ffffff; /* anything you read sits on white */
   --rms-ink: #1e2420; /* text, figures, state shapes */
   --rms-line: #cad6e2; /* dividers, quiet labels, your own messages */
-  --rms-bar: #a4b3c3; /* chart bars that are not the current one */
+  --rms-bar: #8896a6; /* chart bars that are not the current one: 3 to 1 against a card */
   --rms-field-line: #76828e; /* edge of a text field: 3 to 1 against card and ground */
   --rms-muted-on-card: #616c77; /* secondary text on white */
   --rms-muted-on-ground: #4c5661; /* secondary text on the ground or on line */

@@ -12,6 +12,8 @@ import {
   Button,
   Canvas,
   Card,
+  Choice,
+  ChoiceList,
   Columns,
   Composer,
   Conversation,
@@ -20,9 +22,9 @@ import {
   Dialog,
   EmptyState,
   Feed,
+  FieldGroup,
   FieldPair,
   FormLayout,
-  GroundSample,
   Heading,
   IconButton,
   ListDetail,
@@ -30,6 +32,7 @@ import {
   Message,
   NavItem,
   NavList,
+  Notice,
   Pager,
   ReportTable,
   Row,
@@ -44,6 +47,7 @@ import {
   Tabs,
   Tag,
   Text,
+  TextArea,
   TextField,
   Theme,
   contrastRatio,
@@ -55,20 +59,14 @@ import { MiniAppList } from "@/components/mini-app-list";
 import { MoneyApp } from "./money-app";
 import { BILLS, CHANGES, LISTINGS, MINI_APPS, REPORT_COLUMNS, REPORT_DAYS, REPORT_TOTAL, WEEKS, reportRow, weekView, type ReportDay } from "./seeded";
 
-// The five colours the brief asks the system to survive.
+// The five colours the brief asks the system to survive, and one that is too dark to tell from ink.
 const BRANDS = [
   { name: "RMS basil", hex: "#12804A" },
   { name: "Marigold Kitchen", hex: "#E8892B" },
   { name: "Slice Yard", hex: "#C8372D" },
   { name: "A pale yellow", hex: "#F2C230" },
   { name: "A blue", hex: "#1F6FD0" },
-];
-
-// The page ground: the sketch's cream, the slate now in the tokens, and one alternative.
-const GROUNDS = [
-  { name: "Before: cream", hex: "#F4EEE6", line: "#E3DBD0", muted: "#5A5E56", note: "The sketch. Reads as off-white, and warm brand colours sink into it." },
-  { name: "Now: slate", hex: "#DEE7F2", line: "#CAD6E2", muted: "#4C5661", note: "The blue-grey of a menu board. Cool, so every brand colour stands off it." },
-  { name: "Alternative: fig", hex: "#EFE5EF", line: "#DCD0DC", muted: "#5C515C", note: "A dusty plum, the hue furthest from all five test colours. Softer, less expected." },
+  { name: "A navy, too dark", hex: "#0B1F3A" },
 ];
 
 const TIER_WEIGHT = { T0: "quiet", T1: "quiet", T2: "outline", T3: "solid" } as const;
@@ -122,40 +120,6 @@ export function Gallery() {
           </Row>
         </Stack>
 
-        <Section title="The page ground">
-          <Text tone="muted">
-            The same for every restaurant. Each patch shows a card, a button in the two hardest brand colours (Marigold orange and a pale yellow) and
-            a row of secondary text on the ground itself.
-          </Text>
-          <Columns>
-            {GROUNDS.map((ground) => (
-              <GroundSample key={ground.hex} ground={ground.hex} line={ground.line} mutedOnGround={ground.muted}>
-                <Heading level={3} size="small">
-                  {ground.name} {ground.hex}
-                </Heading>
-                <Card as="div">
-                  <StatGroup>
-                    <Stat label="Net sales" value="$84,310" note="This week" />
-                  </StatGroup>
-                </Card>
-                <Row gap="s">
-                  <Theme brand="#E8892B">
-                    <Button variant="primary">Publish</Button>
-                    <Button>Try it</Button>
-                  </Theme>
-                  <Theme brand="#F2C230">
-                    <Button variant="primary">Publish</Button>
-                    <Button variant="quiet">Change</Button>
-                  </Theme>
-                </Row>
-                <Text tone="muted" size="s">
-                  {ground.note}
-                </Text>
-              </GroundSample>
-            ))}
-          </Columns>
-        </Section>
-
         <Section title="Any brand colour stays readable">
           <Text tone="muted">
             A restaurant picks one colour. RMS keeps the hue and darkens it only as far as it must, so white words on a button and coloured words on
@@ -169,7 +133,13 @@ export function Gallery() {
                   <Card title={brand.name} titleLevel={3} titleSize="small" as="article">
                     <Stack gap="m">
                       <Text tone="muted" size="s">
-                        Picked {brand.hex}. {theme.action === theme.brand ? "Used as it is." : `Buttons use ${theme.action}.`} White on the button is{" "}
+                        Picked {brand.hex}.{" "}
+                        {theme.adjustment === "none"
+                          ? "Used as it is."
+                          : theme.adjustment === "lightened"
+                            ? `Too close to ink, so buttons use ${theme.action}.`
+                            : `Buttons use ${theme.action}.`}{" "}
+                        White on the button is{" "}
                         {contrastRatio(theme.onAction, theme.action).toFixed(1)} to 1.
                       </Text>
                       <Row gap="s">
@@ -218,16 +188,16 @@ export function Gallery() {
                 <Button icon="plus">Add a bill</Button>
               </Row>
               <Row>
-                <Button variant="primary" size="l">
-                  Publish
+                <Button variant="primary" size="l" icon="ask">
+                  Ask about your numbers
                 </Button>
-                <Button size="l">Try it on my phone</Button>
+                <Button size="l">Not now</Button>
               </Row>
               <Row>
                 <Button variant="primary" disabled>
-                  Publish
+                  Save bill
                 </Button>
-                <Button disabled>Try it on my phone</Button>
+                <Button disabled>Cancel</Button>
                 <Button variant="primary" busy>
                   Publishing
                 </Button>
@@ -552,14 +522,53 @@ export function Gallery() {
               items={CHANGES.map((change) => ({
                 id: change.id,
                 tag: <Tag weight={TIER_WEIGHT[change.tier]}>{change.tierWords}</Tag>,
-                what: change.what,
+                what: (
+                  <>
+                    <b>{change.restaurant}</b> <small>({change.shortId})</small> {change.summary}
+                  </>
+                ),
                 when: change.when,
+                detail: change.detail,
+                ...(change.flag ? { flag: change.flag } : {}),
+                ...(change.waiting
+                  ? {
+                      actions: (
+                        <FieldGroup legend="Decide on this change">
+                          <TextArea label="Note (optional)" maxLength={1000} />
+                          <Row>
+                            <Button variant="primary">Approve</Button>
+                            <Button>Reject</Button>
+                          </Row>
+                        </FieldGroup>
+                      ),
+                    }
+                  : {}),
               }))}
             />
           </Card>
           <Text tone="muted" size="s">
-            For the maintainer console. How much a change matters is said in words and shown by the weight of ink, so it never depends on colour.
+            The maintainer console. A tier is written out and its weight of ink rises with it. The one row that needs a look is the only one with an
+            ink outline, and it says why.
           </Text>
+        </Section>
+
+        <Section title="One question per screen">
+          <Row>
+            <Button href="/gallery/onboarding" linkAs={Link}>
+              See the five onboarding questions
+            </Button>
+          </Row>
+          <Columns>
+            <ChoiceList>
+              <Choice type="radio" name="gallery-style" label="Table service: guests order from a server" defaultChecked />
+              <Choice type="radio" name="gallery-style" label="Counter service: guests order at the counter" />
+              <Choice type="checkbox" name="gallery-systems" label="Square" defaultChecked />
+            </ChoiceList>
+            <Stack>
+              <Notice kind="problem">We could not set up your restaurant just now. Please try again.</Notice>
+              <Notice kind="status">Check your email for a link to finish signing up.</Notice>
+            </Stack>
+          </Columns>
         </Section>
       </Stack>
     </Canvas>

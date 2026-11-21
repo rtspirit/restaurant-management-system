@@ -42,10 +42,12 @@ export type BrandTheme = {
   brand: string;
   /**
    * What RMS did with it. none: used as chosen. darkened: same hue, darker, so words stay
-   * readable. replaced: it was not a colour (unreadable, or a grey, black or white), so the
-   * default basil is used. Settings should tell the owner in plain words when it is not none.
+   * readable. lightened: same hue, lighter, because it was too close to ink to read as
+   * something to press. replaced: it was not a usable colour (not a hex colour, or a grey,
+   * black or white), so the default basil is used. Settings should tell the owner in plain
+   * words when it is not none.
    */
-  adjustment: "none" | "darkened" | "replaced";
+  adjustment: "none" | "darkened" | "lightened" | "replaced";
   action: string;
   actionInk: string;
   actionPressed: string;
@@ -55,14 +57,15 @@ export type BrandTheme = {
   cssVars: Record<`--rms-${string}`, string>;
 };
 
-const HEX = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i;
+const HEX = /^#[0-9a-f]{6}$/i;
 
-export function normaliseHex(input: string): string | null {
-  const match = HEX.exec(input.trim());
-  if (!match?.[1]) return null;
-  const raw = match[1];
-  const six = raw.length === 3 ? raw.replace(/./g, (c) => c + c) : raw;
-  return `#${six.toUpperCase()}`;
+/**
+ * The only shape of brand colour RMS accepts: a string of exactly `#` and six hex digits.
+ * Anything else (another type, `#RGB`, no hash, spaces, eight digits, CSS of any kind) is
+ * null. The value ends up in a style attribute, so nothing but a checked hex may pass.
+ */
+export function normaliseHex(input: unknown): string | null {
+  return typeof input === "string" && HEX.test(input) ? input.toUpperCase() : null;
 }
 
 function hexToRgb(hex: string): Rgb {
@@ -187,20 +190,52 @@ function shiftLightness(hex: string, by: number): string {
   return oklchToHex([Math.min(1, Math.max(0, L + by)), C, h]);
 }
 
+/** A colour this close to ink would read as text, not as something to press. */
+export const MIN_INK_CONTRAST = 2;
+
+/**
+ * The darkest version of `hex`, same hue, that stands at least `min` away from ink.
+ * Used for navy, maroon and other brand colours too dark to tell from text.
+ */
+function lightenAwayFromInk(hex: string, min: number = MIN_INK_CONTRAST): string {
+  if (contrastRatio(hex, SURFACES.ink) >= min) return hex;
+  const [L, C, h] = rgbToOklch(hexToRgb(hex));
+  let lo = L;
+  let hi = 1; // white always stands clear of ink
+  for (let i = 0; i < 24; i++) {
+    const mid = (lo + hi) / 2;
+    if (contrastRatio(oklchToHex([mid, C, h]), SURFACES.ink) >= min) hi = mid;
+    else lo = mid;
+  }
+  return oklchToHex([hi, C, h]);
+}
+
+/** Every rule an action colour must meet. One place, so the code and the tests agree. */
+function isSafeAction(hex: string): boolean {
+  return (
+    passes(hex, ["#FFFFFF", SURFACES.card], AA_TEXT) && // white words on the fill, coloured words on a card
+    contrastRatio(hex, SURFACES.ink) >= MIN_INK_CONTRAST && // not mistaken for ink
+    chromaOf(hex) >= MIN_CHROMA // a colour, not a grey
+  );
+}
+
 /**
  * Turn any brand colour into action colours that pass WCAG AA.
- * An unreadable value (not a hex colour) falls back to the default basil.
+ * Takes anything and never throws. Only a `#RRGGBB` string is treated as a colour.
+ * A colour that fails is darkened (too light) or lightened (too close to ink) in its own hue.
+ * If no version of it can meet every rule, the default basil is used.
  */
-export function themeFromBrand(hex: string): BrandTheme {
-  const chosen = normaliseHex(hex);
+export function themeFromBrand(input: unknown): BrandTheme {
+  const chosen = normaliseHex(input);
   const onAction = "#FFFFFF";
 
   // White text on the fill and the fill colour as text on a white card are the same test.
-  const derived = chosen ? darkenToContrast(chosen, [onAction, SURFACES.card]) : null;
-  const usable = derived !== null && chromaOf(derived) >= MIN_CHROMA;
+  const darkened = chosen ? darkenToContrast(chosen, [onAction, SURFACES.card]) : null;
+  const derived = darkened ? lightenAwayFromInk(darkened) : null;
+  const usable = derived !== null && isSafeAction(derived);
   const brand = chosen ?? DEFAULT_BRAND;
   const action = usable ? derived : DEFAULT_BRAND;
-  const adjustment = !usable ? "replaced" : action === brand ? "none" : "darkened";
+  const adjustment: BrandTheme["adjustment"] = !usable ? "replaced" : action === brand ? "none" : derived === darkened ? "darkened" : "lightened";
 
   // A faint tint of the action colour for hover. Light enough that it never reads as a fill.
   const actionWash = mix(action, SURFACES.card, 0.08);
@@ -208,9 +243,8 @@ export function themeFromBrand(hex: string): BrandTheme {
   // Coloured text also sits on the slate ground and on the wash, which are darker than white.
   const actionInk = darkenToContrast(action, [SURFACES.ground, SURFACES.card, actionWash]);
 
-  // Hover and hold go darker. A colour that is already near black goes a step lighter instead.
-  const [lightness] = rgbToOklch(hexToRgb(action));
-  const actionPressed = darkenToContrast(shiftLightness(action, lightness < 0.3 ? 0.16 : -0.06), [onAction]);
+  // Hover and hold go one step darker.
+  const actionPressed = darkenToContrast(shiftLightness(action, -0.06), [onAction]);
 
   return {
     brand,

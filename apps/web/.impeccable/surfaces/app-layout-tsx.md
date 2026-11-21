@@ -53,4 +53,6 @@ Built in `packages/ui` and `apps/web`. Review at `/gallery`, `/gallery/build`, `
 - Mini-apps home: built (empty state in the shell, filled state in the gallery with seeded content).
 - Marketplace with "Recommended for you": empty state in the shell, listing card in the gallery with seeded content. Not wired to data.
 - Maintainer change feed: the compact `Feed` component is in the gallery. The console itself (task F) is unskinned.
-- Still open: Settings telling the owner their colour was darkened or replaced; skinning sign-in, onboarding and the console; an app icon.
+- Sign-in, sign-up, onboarding (one question per screen) and the maintainer console (sign-in, change feed, review queue) are skinned from `@rms/ui`.
+- The shell reads the signed-in user and restaurant from `GET /auth/me`.
+- Still open: Settings telling the owner their colour was darkened, lightened or replaced; an app icon; Marketplace and Mini-apps lists wired to data.

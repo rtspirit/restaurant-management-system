@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Tag } from "../components/card";
 
 export type WorkbenchProps = {
   /** Names the left side for screen readers: "Build conversation". */
@@ -44,8 +45,15 @@ export type FeedItem = {
   tag: ReactNode;
   /** What changed, in one line. */
   what: ReactNode;
-  /** When, in short words: "2 min ago". */
+  /** When, in short words: "2 min ago". Give `dateTime` too when you have the exact time. */
   when: string;
+  dateTime?: string;
+  /** A second, quieter line: who, where from, what it touched. */
+  detail?: ReactNode;
+  /** Something is wrong with this row. It gets a full ink outline and a solid ink label with these words. */
+  flag?: string;
+  /** Controls for deciding on this row, shown under it. */
+  actions?: ReactNode;
 };
 
 export type FeedProps = {
@@ -55,15 +63,29 @@ export type FeedProps = {
   density?: "comfortable" | "compact";
 };
 
-/** A running list of changes, newest first. Built for the compact density. */
+/**
+ * A running list of changes. Built for the compact density. A flagged row cannot be missed:
+ * it is the only one with an ink outline, and it says why in a solid ink label.
+ */
 export function Feed({ label, items, density = "compact" }: FeedProps) {
   return (
     <ol className="rms-feed" aria-label={label} data-density={density}>
       {items.map((item) => (
-        <li key={item.id} className="rms-feed__item">
-          {item.tag}
+        <li key={item.id} className="rms-feed__item" data-flagged={item.flag ? true : undefined}>
+          <span className="rms-feed__tag">{item.tag}</span>
           <span className="rms-feed__what">{item.what}</span>
-          <span className="rms-feed__when">{item.when}</span>
+          <time className="rms-feed__when" dateTime={item.dateTime}>
+            {item.when}
+          </time>
+          {item.detail ? <span className="rms-feed__detail">{item.detail}</span> : null}
+          {item.flag ? (
+            <span className="rms-feed__flag">
+              <Tag weight="solid" icon="alert">
+                {item.flag}
+              </Tag>
+            </span>
+          ) : null}
+          {item.actions ? <div className="rms-feed__actions">{item.actions}</div> : null}
         </li>
       ))}
     </ol>

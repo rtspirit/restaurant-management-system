@@ -6,6 +6,7 @@ export const metadata: Metadata = { title: "Locations" };
 
 export default async function LocationsPage() {
   const data = await loadShellData();
+  if (!data) return null; // The layout is showing something else (signing out, or not answering).
   const count = data.locations.length;
 
   return (

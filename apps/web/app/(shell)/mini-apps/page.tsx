@@ -6,5 +6,6 @@ export const metadata: Metadata = { title: "Build a mini-app" };
 
 export default async function BuildPage() {
   const data = await loadShellData();
+  if (!data) return null; // The layout is showing something else (signing out, or not answering).
   return <BuildHome miniApps={data.miniApps} />;
 }

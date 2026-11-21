@@ -5,10 +5,10 @@
 // the patterns, so screens can be composed without writing any CSS.
 
 // Brand colour safety
-export { themeFromBrand, contrastRatio, relativeLuminance, chromaOf, darkenToContrast, normaliseHex, DEFAULT_BRAND, SURFACES, AA_TEXT, MIN_CHROMA } from "./theme";
+export { themeFromBrand, contrastRatio, relativeLuminance, chromaOf, darkenToContrast, normaliseHex, DEFAULT_BRAND, SURFACES, AA_TEXT, MIN_CHROMA, MIN_INK_CONTRAST } from "./theme";
 export type { BrandTheme } from "./theme";
-export { Theme, GroundSample } from "./theme-provider";
-export type { ThemeProps, GroundSampleProps } from "./theme-provider";
+export { Theme } from "./theme-provider";
+export type { ThemeProps } from "./theme-provider";
 
 // Icons
 export { Icon, ICON_NAMES } from "./icons";
@@ -18,6 +18,8 @@ export type { IconName, IconProps } from "./icons";
 export { Button, IconButton } from "./components/button";
 export type { ButtonProps, IconButtonProps } from "./components/button";
 export { TextField, Select, FieldPair } from "./components/fields";
+export { Choice, ChoiceList, TextArea, FieldGroup, Notice } from "./components/choices";
+export type { ChoiceProps, ChoiceListProps, TextAreaProps, FieldGroupProps, NoticeProps } from "./components/choices";
 export type { TextFieldProps, SelectProps, SelectOption, FieldPairProps } from "./components/fields";
 export { Tabs } from "./components/tabs";
 export type { TabsProps, TabItem } from "./components/tabs";
@@ -54,8 +56,8 @@ export { Skeleton, EmptyState } from "./components/feedback";
 export type { SkeletonProps, EmptyStateProps } from "./components/feedback";
 export { Heading, Text, BulletList, Stack, Row, Columns, Density } from "./components/text";
 export type { HeadingProps, TextProps, BulletListProps, StackProps, RowProps, ColumnsProps, DensityProps } from "./components/text";
-export { AppShell, Rail, TopBar, Page, Section, Dock, Canvas, Narrow } from "./components/shell";
-export type { AppShellProps, RailProps, TopBarProps, PageProps, SectionProps, DockProps, CanvasProps, NarrowProps } from "./components/shell";
+export { AppShell, Rail, TopBar, Page, Section, Dock, Canvas, CanvasHeader, Narrow } from "./components/shell";
+export type { AppShellProps, RailProps, TopBarProps, PageProps, SectionProps, DockProps, CanvasProps, CanvasHeaderProps, NarrowProps } from "./components/shell";
 
 // Patterns
 export { Dashboard } from "./patterns/dashboard";
@@ -64,6 +66,8 @@ export { ListDetail, DetailList } from "./patterns/list-detail";
 export type { ListDetailProps, ListDetailItem, DetailListProps } from "./patterns/list-detail";
 export { FormLayout } from "./patterns/form";
 export type { FormLayoutProps } from "./patterns/form";
+export { QuestionForm } from "./patterns/question";
+export type { QuestionFormProps } from "./patterns/question";
 export { ReportTable } from "./patterns/report-table";
 export type { ReportTableProps } from "./patterns/report-table";
 export { Workbench, Feed } from "./patterns/workbench";

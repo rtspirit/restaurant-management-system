@@ -61,7 +61,8 @@ export function Stack({ gap, children }: StackProps) {
 export type RowProps = {
   gap?: "s" | "m";
   justify?: "start" | "between" | "end";
-  align?: "center" | "top";
+  /** bottom lines a button up with labelled fields beside it. */
+  align?: "center" | "top" | "bottom";
   wrap?: boolean;
   children: ReactNode;
 };
@@ -74,7 +75,7 @@ export function Row({ gap = "m", justify = "start", align = "center", wrap = tru
         "rms-row",
         gap === "s" && "rms-row--s",
         justify !== "start" && `rms-row--${justify}`,
-        align === "top" && "rms-row--top",
+        align !== "center" && `rms-row--${align}`,
         !wrap && "rms-row--nowrap",
       )}
     >

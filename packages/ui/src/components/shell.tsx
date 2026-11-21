@@ -143,12 +143,41 @@ export function Dock({ children }: DockProps) {
 export type CanvasProps = {
   /** A single narrow column, for sign-in and onboarding. */
   narrow?: boolean;
+  /** What sits above the page: usually the Logo. Pass a CanvasHeader for more. */
+  header?: ReactNode;
   children: ReactNode;
 };
 
-/** A plain page with no navigation around it: sign-in, onboarding, the gallery. */
-export function Canvas({ narrow = false, children }: CanvasProps) {
-  return <main className={cx("rms-canvas", narrow && "rms-canvas--narrow")}>{children}</main>;
+/** A plain page with no rail around it: sign-in, onboarding, the gallery, the maintainer console. */
+export function Canvas({ narrow = false, header, children }: CanvasProps) {
+  return (
+    <div className={cx("rms-canvas", narrow && "rms-canvas--narrow")}>
+      {header ? <header className="rms-canvas__head">{header}</header> : null}
+      <main className="rms-canvas__main">{children}</main>
+    </div>
+  );
+}
+
+export type CanvasHeaderProps = {
+  logo: ReactNode;
+  /** A few words beside the logo, such as "Maintainer console". */
+  title?: string;
+  /** Navigation. Pass TabLinks. */
+  nav?: ReactNode;
+  /** On the right: sign out. */
+  end?: ReactNode;
+};
+
+/** Logo, a name, navigation and one action, for pages that have no side rail. */
+export function CanvasHeader({ logo, title, nav, end }: CanvasHeaderProps) {
+  return (
+    <>
+      {logo}
+      {title ? <p className="rms-canvas__title">{title}</p> : null}
+      {nav}
+      {end ? <div className="rms-canvas__head-end">{end}</div> : null}
+    </>
+  );
 }
 
 export type NarrowProps = { children: ReactNode };

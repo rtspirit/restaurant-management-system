@@ -36,9 +36,12 @@ export function Button({
   type = "button",
   ...rest
 }: ButtonProps) {
+  const off = Boolean(disabled) || busy;
   const className = cx(
     "rms-button",
-    variant !== "secondary" && `rms-button--${variant}`,
+    // A disabled action loses its colour entirely, so it does not carry the filled class at all.
+    variant === "primary" && !off && "rms-button--primary",
+    variant === "quiet" && "rms-button--quiet",
     size === "l" && "rms-button--l",
     block && "rms-button--block",
     hideOnPhone && "rms-button--wide-only",
@@ -50,7 +53,7 @@ export function Button({
     </>
   );
 
-  if (href !== undefined && !disabled && !busy) {
+  if (href !== undefined && !off) {
     const Link: ElementType = linkAs ?? "a";
     return (
       <Link href={href} className={className} aria-label={rest["aria-label"]}>
@@ -60,7 +63,7 @@ export function Button({
   }
 
   return (
-    <button {...rest} type={type} className={className} disabled={disabled || busy} aria-busy={busy || undefined}>
+    <button {...rest} type={type} className={className} disabled={off} aria-busy={busy || undefined}>
       {content}
     </button>
   );

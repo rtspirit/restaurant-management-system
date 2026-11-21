@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-11-21T18:05:00.000Z",
+  "generatedAt": "2026-11-21T19:40:00.000Z",
   "title": "Design System: RMS",
   "extensions": {
     "colorMeta": {
@@ -107,7 +107,7 @@
     ],
     "rules": [
       { "name": "The Press Rule", "body": "If it has colour, you can press it. Nothing coloured that cannot be pressed. A disabled action loses its colour entirely.", "section": "colors" },
-      { "name": "The Brand Safety Rule", "body": "A restaurant's colour never reaches the page directly. themeFromBrand(hex) keeps the hue and darkens only as far as it must so that white words on the fill and coloured words on card, ground and wash all pass WCAG AA. Black, white and greys are replaced by basil.", "section": "colors" },
+      { "name": "The Brand Safety Rule", "body": "A restaurant's colour never reaches the page directly. themeFromBrand(hex) keeps the hue and darkens only as far as it must so that white words on the fill and coloured words on card, ground and wash all pass WCAG AA. A colour too close to ink is lightened in its own hue. Black, white and greys are replaced by basil. Only a # and six hex digits is accepted.", "section": "colors" },
       { "name": "The Ink State Rule", "body": "Over target, slow week, done, in progress, needs approval: each is a word plus an ink shape.", "section": "colors" },
       { "name": "The 14 Rule", "body": "Nothing is smaller than 14px.", "section": "typography" },
       { "name": "The Lined-up Figures Rule", "body": "Tabular numerals on body. Money and counts are right-aligned in tables.", "section": "typography" },

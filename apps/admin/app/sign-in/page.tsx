@@ -1,6 +1,7 @@
 "use client";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
+import { Button, FormLayout, Notice, TextField } from "@rms/ui";
 import { supabaseBrowser } from "@/lib/supabase/client";
 
 export default function SignInPage() {
@@ -32,24 +33,19 @@ export default function SignInPage() {
   };
 
   return (
-    <main>
-      <h1>Maintainer sign-in</h1>
-      <form onSubmit={onSubmit}>
-        <p>
-          <label htmlFor="email">Email</label>
-          <br />
-          <input id="email" name="email" type="email" autoComplete="username" required />
-        </p>
-        <p>
-          <label htmlFor="password">Password</label>
-          <br />
-          <input id="password" name="password" type="password" autoComplete="current-password" required />
-        </p>
-        {error ? <p role="alert">{error}</p> : null}
-        <button type="submit" disabled={busy}>
+    <FormLayout
+      title="Maintainer sign-in"
+      titleLevel={1}
+      onSubmit={onSubmit}
+      message={error ? <Notice kind="problem">{error}</Notice> : null}
+      actions={
+        <Button type="submit" variant="primary" size="l" block busy={busy}>
           {busy ? "Signing in..." : "Sign in"}
-        </button>
-      </form>
-    </main>
+        </Button>
+      }
+    >
+      <TextField id="email" name="email" type="email" label="Email" autoComplete="username" required />
+      <TextField id="password" name="password" type="password" label="Password" autoComplete="current-password" required />
+    </FormLayout>
   );
 }
