@@ -1,0 +1,53 @@
+// Made by `rms gen list_detail` for vendor. Editable: change anything in this file.
+import { showValue, useQuery, useRms } from "@rms/sdk";
+import { Card, DetailList, EmptyState, ListDetail, Page, Skeleton, Stack } from "@rms/ui";
+import { useState } from "react";
+import { Problem } from "../../rms/notices";
+
+const MODEL = "vendor";
+const FIELDS = [{ key: "name", label: "Name", type: "text" }, { key: "phone", label: "Phone", type: "text" }, { key: "terms_days", label: "Days to pay", type: "integer" }] as const;
+
+export function VendorsScreen() {
+  const rms = useRms();
+  const list = useQuery({ model: MODEL, sort: [{ field: "name", dir: "asc" }], limit: 500 });
+  const [selectedId, setSelectedId] = useState("");
+  const selected = list.rows.find((row) => String(row.id) === selectedId);
+
+  return (
+    <Page title="Vendors">
+      <Stack gap="m">
+        <Problem error={list.error} />
+        {list.loading && list.data === null ? (
+          <Skeleton shape="block" label="Loading vendors" />
+        ) : (
+          <ListDetail
+            label="Vendors"
+            items={list.rows.map((row) => ({ id: String(row.id), title: showValue(row, "name", "text", rms) || "Untitled", subtitle: showValue(row, "phone", "text", rms) }))}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            onBack={() => setSelectedId("")}
+            detail={
+              selected ? (
+                <Detail row={selected} />
+              ) : (
+                <EmptyState title="Pick a vendor">Choose one from the list to see everything about it.</EmptyState>
+              )
+            }
+            empty={<EmptyState title="No vendors yet">They show here once they are added.</EmptyState>}
+          />
+        )}
+      </Stack>
+    </Page>
+  );
+}
+
+function Detail({ row }: { row: Record<string, unknown> }) {
+  const rms = useRms();
+  return (
+    <Card title={showValue(row, "name", "text", rms) || "Untitled"}>
+      <Stack gap="m">
+        <DetailList rows={FIELDS.map((f) => ({ label: f.label, value: showValue(row, f.key, f.type, rms) || "Not set" }))} />
+      </Stack>
+    </Card>
+  );
+}

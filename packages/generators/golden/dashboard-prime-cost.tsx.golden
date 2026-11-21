@@ -1,0 +1,49 @@
+// Made by `rms gen dashboard` for the report prime_cost_by_week. Editable: change anything in this file.
+// The figures show the latest row of the report. The chart shows every row.
+import { formatAs, useNamedQuery, useRms } from "@rms/sdk";
+import { BarChart, Card, Dashboard, Skeleton, Stat, StatGroup, StatLead } from "@rms/ui";
+import { NoNumbers, Problem } from "../../rms/notices";
+
+const QUERY = "prime_cost_by_week";
+const STATS = [{ label: "Net sales", column: "net_sales", format: "money" }, { label: "Staff cost", column: "labour", format: "money" }] as const;
+
+export function MoneyScreen() {
+  const rms = useRms();
+  const report = useNamedQuery(QUERY, {  });
+  const latest = report.rows[report.rows.length - 1];
+
+  return (
+    <Dashboard title="Money">
+      <Problem error={report.error} />
+      {report.loading && report.data === null ? (
+        <Skeleton shape="block" label="Loading the numbers" />
+      ) : latest === undefined ? (
+        <NoNumbers what="numbers" />
+      ) : (
+        <>
+          <Card>
+            <StatLead label="Prime cost" value={formatAs(latest["prime_cost_pct"], "percent", rms)} />
+          </Card>
+          <Card>
+            <StatGroup>
+              {STATS.map((s) => (
+                <Stat key={s.column} label={s.label} value={formatAs(latest[s.column], s.format, rms)} />
+              ))}
+            </StatGroup>
+          </Card>
+          <Card title="Net sales by week">
+            <BarChart
+              label="Net sales by week"
+              items={report.rows.map((row, i) => ({
+                id: String(i),
+                label: formatAs(row["week_start"], "date", rms),
+                value: Number(row["net_sales"]) || 0,
+                display: formatAs(row["net_sales"], "money", rms),
+              }))}
+            />
+          </Card>
+        </>
+      )}
+    </Dashboard>
+  );
+}

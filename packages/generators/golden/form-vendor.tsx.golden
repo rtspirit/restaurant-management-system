@@ -1,0 +1,85 @@
+// Made by `rms gen form` for vendor. Editable: change anything in this file.
+import { fromInput, toInput, useMutation, useRms } from "@rms/sdk";
+import { Button, Choice, FormLayout, Notice, Page, Stack, TextField } from "@rms/ui";
+import { useState } from "react";
+import { Problem } from "../../rms/notices";
+
+const MODEL = "vendor";
+
+export function AddVendorScreen() {
+  const [saved, setSaved] = useState(0);
+  const [round, setRound] = useState(0);
+  return (
+    <Page title="Add a vendor" narrow>
+      <Stack gap="m">
+        {saved > 0 ? <Notice kind="status">{"Saved. You can add another vendor now."}</Notice> : null}
+        <AddForm
+          key={round}
+          row={null}
+          onDone={(id) => {
+            if (id) setSaved((n) => n + 1);
+            setRound((n) => n + 1);
+          }}
+        />
+      </Stack>
+    </Page>
+  );
+}
+
+const FORM_FIELDS = [{ key: "name", type: "text", required: true }, { key: "phone", type: "text", required: false }, { key: "terms_days", type: "integer", required: false }, { key: "active", type: "boolean", required: true }] as const;
+
+type FormProps = { row: Record<string, unknown> | null; onDone: (id?: string) => void };
+
+function AddForm({ row, onDone }: FormProps) {
+  const rms = useRms();
+  const save = useMutation();
+  const [draft, setDraft] = useState<Record<string, string>>(() =>
+    row === null
+      ? { "name": "", "phone": "", "terms_days": "", "active": "true" }
+      : Object.fromEntries(FORM_FIELDS.map((f) => [f.key, toInput(row[f.key], f.type, rms)])),
+  );
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const set = (key: string, value: string) => setDraft((d) => ({ ...d, [key]: value }));
+
+  const submit = async () => {
+    const values: Record<string, unknown> = {};
+    const problems: Record<string, string> = {};
+    for (const f of FORM_FIELDS) {
+      const read = fromInput(draft[f.key] ?? "", f.type, rms);
+      if (!read.ok) problems[f.key] = read.message;
+      else if (read.value === null && f.required) problems[f.key] = "Fill this in.";
+      else if (read.value !== null || row !== null) values[f.key] = read.value;
+    }
+    setErrors(problems);
+    if (Object.keys(problems).length > 0) return;
+    try {
+      const result = row === null ? await save.insert(MODEL, values) : await save.update(MODEL, String(row.id), values);
+      onDone(result.results[0]?.id);
+    } catch {
+      // The reason shows above the buttons, in RMS's own plain words.
+    }
+  };
+
+  return (
+    <FormLayout
+      title={row === null ? "Add a vendor" : "Change this vendor"}
+      onSubmit={() => void submit()}
+      message={<Problem error={save.error} />}
+      actions={
+        <>
+          <Button variant="secondary" type="button" onClick={() => onDone()}>
+            Cancel
+          </Button>
+          <Button type="submit" busy={save.busy}>
+            Save
+          </Button>
+        </>
+      }
+    >
+      <TextField label="Name" value={draft["name"] ?? ""} onChange={(event) => set("name", event.target.value)} error={errors["name"] ?? ""} />
+      <TextField label="Phone" value={draft["phone"] ?? ""} onChange={(event) => set("phone", event.target.value)} error={errors["phone"] ?? ""} />
+      <TextField label="Days to pay" inputMode="numeric" value={draft["terms_days"] ?? ""} onChange={(event) => set("terms_days", event.target.value)} error={errors["terms_days"] ?? ""} />
+      <Choice type="checkbox" label="In use" checked={draft["active"] === "true"} onChange={(event) => set("active", event.target.checked ? "true" : "false")} />
+    </FormLayout>
+  );
+}
