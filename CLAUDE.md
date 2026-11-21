@@ -55,3 +55,12 @@ Restaurant management system with agent-built mini-apps. Personal project of Rah
 ## Talking to Rahul
 
 Plain words, short sentences, no jargon. Caveats and blockers first.
+
+## Local development
+
+- Database, sign-in and pooler run locally in Docker: `pnpm exec supabase start -x realtime,storage-api,imgproxy,postgrest,postgres-meta,studio,edge-runtime,logflare,vector`. Then `scripts/dev-db-roles.sh` writes local connection strings to `.env.local`.
+- `DATABASE_URL` logs in as `rms_api` (row-level security by org: set `rms.org` per transaction). `DATABASE_ADMIN_URL` logs in as `rms_admin` (sign-up, provisioning, jobs, seed, console). Never connect as `postgres` from app code.
+- Every transaction that touches a restaurant's store: `set local role o_<id>_rw` (or `_draft_rw`), then `select set_config('rms.locations', 'all' | '<uuid>,<uuid>', true)` and `set_config('rms.actor', ..., true)`. Use `prepare: false` with postgres.js.
+- Migrations live in `supabase/migrations/`. Only the lead adds or edits them. Apply with `pnpm exec supabase migration up`. Rebuild from zero with `pnpm exec supabase db reset` then `scripts/dev-db-roles.sh`.
+- Database walls check: `bash tests/security/db-walls.smoke.sh` (must print `FAILS=0`).
+- Shared worktrees use ONE local database. Each task uses its own test org ids and store prefixes and cleans up after itself.
