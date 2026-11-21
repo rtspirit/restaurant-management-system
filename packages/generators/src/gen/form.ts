@@ -14,7 +14,7 @@ export const form = (input: Input, catalog: SandboxCatalog, component: string): 
   if (fields.length === 0) throw new ToolRefusal(`${model.ref} has no fields a form can fill in.`);
   const noun = model.name.toLowerCase();
   const ui = [...new Set([...formUiNames(fields), "Notice", "Page", "Stack"])].sort((a, b) => a.localeCompare(b)).join(", ");
-  const sdk = ["fromInput", "toInput", "useMutation", "useRms", ...(fields.some((f) => f.options?.kind === "model") ? ["showValue", "useQuery"] : [])];
+  const sdk = ["fromInput", "toInput", "useMutation", "useQuery", "useRms", ...(fields.some((f) => f.options?.kind === "model") ? ["showValue"] : [])];
 
   const lines = [
     `// Made by \`rms gen form\` for ${model.ref}. Editable: change anything in this file.`,
@@ -28,6 +28,8 @@ export const form = (input: Input, catalog: SandboxCatalog, component: string): 
     `export function ${component}() {`,
     "  const [saved, setSaved] = useState(0);",
     "  const [round, setRound] = useState(0);",
+    "  // Which fields this user may not see: they are left off the form.",
+    "  const masked = useQuery({ model: MODEL, limit: 1 }).data?.masked ?? [];",
     "  return (",
     `    <Page title=${jsx(input.title)} narrow>`,
     '      <Stack gap="m">',
@@ -35,6 +37,7 @@ export const form = (input: Input, catalog: SandboxCatalog, component: string): 
     "        <AddForm",
     "          key={round}",
     "          row={null}",
+    "          masked={masked}",
     "          onDone={(id) => {",
     "            if (id) setSaved((n) => n + 1);",
     "            setRound((n) => n + 1);",

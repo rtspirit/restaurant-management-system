@@ -11,7 +11,8 @@ export function WeekScreen() {
   const rms = useRms();
   const [weekOf, setWeekOf] = useState(() => dateFromToday(-7));
   const report = useNamedQuery(QUERY, { "week_of": weekOf });
-  const latest = report.rows[report.rows.length - 1];
+  const rows = report.rows;
+  const latest = rows[rows.length - 1];
 
   return (
     <Dashboard title="This week" controls={<Pager label={`Week of ${formatDate(weekOf, rms.locale)}`} previousLabel="Week before" nextLabel="Week after" onPrevious={() => setWeekOf((d) => addDays(d, -7))} onNext={() => setWeekOf((d) => addDays(d, 7))} />}>

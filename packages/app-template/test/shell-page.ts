@@ -16,6 +16,8 @@ export type ShellPageOptions = {
   catalog?: unknown;
   /** Named query answers by key. */
   named?: Record<string, { columns: Array<{ key: string; label: string; type: string }>; rows: Array<Record<string, unknown>> }>;
+  /** Fields hidden from this user, per model, as the Data API reports them in `masked`. */
+  masked?: Record<string, string[]>;
   /** When true the shell never answers `rms.ready`. */
   silent?: boolean;
   width?: string;
@@ -35,6 +37,7 @@ const CONTEXT = ${json(o.context)};
 const store = ${json(o.rows ?? {})};
 const CATALOG = ${json(o.catalog ?? { models: [], namedQueries: [], actions: [] })};
 const NAMED = ${json(o.named ?? {})};
+const MASKED = ${json(o.masked ?? {})};
 const SILENT = ${o.silent ? "true" : "false"};
 const frame = document.getElementById("app");
 window.__seen = [];
@@ -47,8 +50,9 @@ const answer = (route, body) => {
     return q ? [200, { columns: q.columns, rows: q.rows, masked: [] }] : [403, { error: { code: "forbidden_model", message: "This mini-app cannot read that.", requestId: "req_test" } }];
   }
   if (route === "query") {
-    const rows = (store[body.model] || []).filter((r) => !r.deleted_at);
-    return [200, { rows, nextCursor: null, masked: [] }];
+    const hidden = MASKED[body.model] || [];
+    const rows = (store[body.model] || []).filter((r) => !r.deleted_at).map((r) => Object.fromEntries(Object.entries(r).filter(([k]) => !hidden.includes(k))));
+    return [200, { rows, nextCursor: null, masked: hidden }];
   }
   if (route === "batch") {
     const results = [];

@@ -1,6 +1,6 @@
 // Made by `rms gen dashboard` for the report prime_cost_by_week. Editable: change anything in this file.
-// The figures show the latest row of the report. The chart shows every row.
-import { formatAs, useNamedQuery, useRms } from "@rms/sdk";
+// The figures show the last finished week for all locations together. The chart shows every week for all locations.
+import { allLocationsRows, dateFromToday, formatAs, lastFinishedRow, useNamedQuery, useRms } from "@rms/sdk";
 import { BarChart, Card, Dashboard, Skeleton, Stat, StatGroup, StatLead } from "@rms/ui";
 import { NoNumbers, Problem } from "../../rms/notices";
 
@@ -10,7 +10,8 @@ const STATS = [{ label: "Net sales", column: "net_sales", format: "money" }, { l
 export function MoneyScreen() {
   const rms = useRms();
   const report = useNamedQuery(QUERY, {  });
-  const latest = report.rows[report.rows.length - 1];
+  const rows = allLocationsRows(report.rows);
+  const latest = lastFinishedRow(rows, dateFromToday(0));
 
   return (
     <Dashboard title="Money">
@@ -34,7 +35,7 @@ export function MoneyScreen() {
           <Card title="Net sales by week">
             <BarChart
               label="Net sales by week"
-              items={report.rows.map((row, i) => ({
+              items={rows.map((row, i) => ({
                 id: String(i),
                 label: formatAs(row["week_start"], "date", rms),
                 value: Number(row["net_sales"]) || 0,

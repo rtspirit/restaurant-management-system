@@ -1,5 +1,5 @@
 // Made by `rms gen form` for vendor. Editable: change anything in this file.
-import { fromInput, toInput, useMutation, useRms } from "@rms/sdk";
+import { fromInput, toInput, useMutation, useQuery, useRms } from "@rms/sdk";
 import { Button, Choice, FormLayout, Notice, Page, Stack, TextField } from "@rms/ui";
 import { useState } from "react";
 import { Problem } from "../../rms/notices";
@@ -9,6 +9,8 @@ const MODEL = "vendor";
 export function AddVendorScreen() {
   const [saved, setSaved] = useState(0);
   const [round, setRound] = useState(0);
+  // Which fields this user may not see: they are left off the form.
+  const masked = useQuery({ model: MODEL, limit: 1 }).data?.masked ?? [];
   return (
     <Page title="Add a vendor" narrow>
       <Stack gap="m">
@@ -16,6 +18,7 @@ export function AddVendorScreen() {
         <AddForm
           key={round}
           row={null}
+          masked={masked}
           onDone={(id) => {
             if (id) setSaved((n) => n + 1);
             setRound((n) => n + 1);
@@ -28,15 +31,16 @@ export function AddVendorScreen() {
 
 const FORM_FIELDS = [{ key: "name", type: "text", required: true }, { key: "phone", type: "text", required: false }, { key: "terms_days", type: "integer", required: false }, { key: "active", type: "boolean", required: true }] as const;
 
-type FormProps = { row: Record<string, unknown> | null; onDone: (id?: string) => void };
+// `masked`: fields this user may not see (the Data API leaves them out). They are left off the form and never sent.
+type FormProps = { row: Record<string, unknown> | null; masked: readonly string[]; onDone: (id?: string) => void };
 
-function AddForm({ row, onDone }: FormProps) {
+function AddForm({ row, masked, onDone }: FormProps) {
   const rms = useRms();
   const save = useMutation();
   const [draft, setDraft] = useState<Record<string, string>>(() =>
     row === null
       ? { "name": "", "phone": "", "terms_days": "", "active": "true" }
-      : Object.fromEntries(FORM_FIELDS.map((f) => [f.key, toInput(row[f.key], f.type, rms)])),
+      : Object.fromEntries(FORM_FIELDS.filter((f) => !masked.includes(f.key)).map((f) => [f.key, toInput(row[f.key], f.type, rms)])),
   );
   const [errors, setErrors] = useState<Record<string, string>>({});
   const set = (key: string, value: string) => setDraft((d) => ({ ...d, [key]: value }));
@@ -45,6 +49,7 @@ function AddForm({ row, onDone }: FormProps) {
     const values: Record<string, unknown> = {};
     const problems: Record<string, string> = {};
     for (const f of FORM_FIELDS) {
+      if (masked.includes(f.key)) continue;
       const read = fromInput(draft[f.key] ?? "", f.type, rms);
       if (!read.ok) problems[f.key] = read.message;
       else if (read.value === null && f.required) problems[f.key] = "Fill this in.";
@@ -76,10 +81,18 @@ function AddForm({ row, onDone }: FormProps) {
         </>
       }
     >
-      <TextField label="Name" value={draft["name"] ?? ""} onChange={(event) => set("name", event.target.value)} error={errors["name"] ?? ""} />
-      <TextField label="Phone" value={draft["phone"] ?? ""} onChange={(event) => set("phone", event.target.value)} error={errors["phone"] ?? ""} />
-      <TextField label="Days to pay" inputMode="numeric" value={draft["terms_days"] ?? ""} onChange={(event) => set("terms_days", event.target.value)} error={errors["terms_days"] ?? ""} />
-      <Choice type="checkbox" label="In use" checked={draft["active"] === "true"} onChange={(event) => set("active", event.target.checked ? "true" : "false")} />
+      {masked.includes("name") ? null : (
+        <TextField label="Name" value={draft["name"] ?? ""} onChange={(event) => set("name", event.target.value)} error={errors["name"] ?? ""} />
+      )}
+      {masked.includes("phone") ? null : (
+        <TextField label="Phone" value={draft["phone"] ?? ""} onChange={(event) => set("phone", event.target.value)} error={errors["phone"] ?? ""} />
+      )}
+      {masked.includes("terms_days") ? null : (
+        <TextField label="Days to pay" inputMode="numeric" value={draft["terms_days"] ?? ""} onChange={(event) => set("terms_days", event.target.value)} error={errors["terms_days"] ?? ""} />
+      )}
+      {masked.includes("active") ? null : (
+        <Choice type="checkbox" label="In use" checked={draft["active"] === "true"} onChange={(event) => set("active", event.target.checked ? "true" : "false")} />
+      )}
     </FormLayout>
   );
 }

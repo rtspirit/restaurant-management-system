@@ -28,7 +28,7 @@ export function VendorsScreen() {
             onBack={() => setSelectedId("")}
             detail={
               selected ? (
-                <Detail row={selected} />
+                <Detail row={selected} masked={list.data?.masked ?? []} />
               ) : (
                 <EmptyState title="Pick a vendor">Choose one from the list to see everything about it.</EmptyState>
               )
@@ -41,12 +41,12 @@ export function VendorsScreen() {
   );
 }
 
-function Detail({ row }: { row: Record<string, unknown> }) {
+function Detail({ row, masked }: { row: Record<string, unknown>; masked: readonly string[] }) {
   const rms = useRms();
   return (
     <Card title={showValue(row, "name", "text", rms) || "Untitled"}>
       <Stack gap="m">
-        <DetailList rows={FIELDS.filter((f) => f.key !== "name").map((f) => ({ label: f.label, value: showValue(row, f.key, f.type, rms) || "Not set" }))} />
+        <DetailList rows={FIELDS.filter((f) => f.key !== "name" && !masked.includes(f.key)).map((f) => ({ label: f.label, value: showValue(row, f.key, f.type, rms) || "Not set" }))} />
       </Stack>
     </Card>
   );

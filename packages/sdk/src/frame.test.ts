@@ -5,6 +5,7 @@ import { FRAME_LIMITS, type FrameContext } from "@rms/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RmsDataError } from "./client";
 import { type Connection, type FrameWindow, connect } from "./frame";
+import { allLocationsRows, lastFinishedRow } from "./rows";
 import { addDays, formatMoney, formatPercent, fromInput, moneyToMinor, showValue, toInput } from "./format";
 
 const SHELL = "http://localhost:3000";
@@ -268,6 +269,28 @@ describe("formatting", () => {
     expect(showValue(row, "active", "boolean", place)).toBe("No");
     expect(showValue(row, "total", "money", place)).toBe("$12.50");
     expect(showValue(row, "due", "date", place)).toBe("Mon, Nov 9, 2026");
+  });
+
+  it("reads prime_cost_by_week in its seeded shape: all locations, last finished week", () => {
+    // Ordered as the query orders them: start_date, scope, location name. The week of 16 Nov is not over on 21 Nov.
+    const week = (start: string, end: string, pct: string, scope: string, location_name: string | null) => ({ week_start: start, week_end: end, scope, location_name, prime_cost_pct: pct, net_sales: 100 });
+    const rows = [
+      week("2026-11-02", "2026-11-08", "60.1", "all_locations", null),
+      week("2026-11-02", "2026-11-08", "59.0", "location", "Marigold Harbour"),
+      week("2026-11-02", "2026-11-08", "61.0", "location", "Marigold Main Street"),
+      week("2026-11-09", "2026-11-15", "61.3", "all_locations", null),
+      week("2026-11-09", "2026-11-15", "60.2", "location", "Marigold Harbour"),
+      week("2026-11-09", "2026-11-15", "62.4", "location", "Marigold Main Street"),
+      week("2026-11-16", "2026-11-22", "70.0", "all_locations", null),
+      week("2026-11-16", "2026-11-22", "71.0", "location", "Marigold Main Street"),
+    ];
+    const all = allLocationsRows(rows);
+    expect(all.map((r) => r.week_start)).toEqual(["2026-11-02", "2026-11-09", "2026-11-16"]);
+    expect(lastFinishedRow(all, "2026-11-21")?.prime_cost_pct).toBe("61.3");
+    expect(lastFinishedRow(all, "2026-11-23")?.prime_cost_pct).toBe("70.0");
+    expect(lastFinishedRow(all, "2026-11-01")).toBeUndefined();
+    expect(lastFinishedRow([{ a: 1 }, { a: 2 }], "2026-11-21")).toEqual({ a: 2 });
+    expect(allLocationsRows([{ a: 1 }])).toEqual([{ a: 1 }]);
   });
 
   it("reads form text into Data API values, with plain words when it cannot", () => {

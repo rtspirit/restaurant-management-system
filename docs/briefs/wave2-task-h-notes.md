@@ -6,8 +6,8 @@ Branch `worktree-agent-ad1af4bad6e6afa6e`. Fast-forwarded to `main` at `965830d`
 
 - **Not tested inside a real sandbox.** Step 1 is proven on this machine (shell on `localhost`, preview on `127.0.0.1`). Task I proves the sandbox address. The dev server allows hosts `.vercel.run` and `127.0.0.1` (I removed `localhost`: a preview must never be opened from there). If the HMR websocket does not connect through the sandbox's public address, edits still show after a reload; the fix would be `server.hmr.clientPort: 443` in `vite.config.ts` (mine).
 - **The shell side is played by a test page** (`packages/app-template/test/shell-page.ts`) until task J merges. It follows the same origin rules and answers from an in-memory store.
-- **The bundle test needs the npm registry**, so it is skipped in `pnpm test`. Run it by hand (below). It passed.
-- **Dashboard figures read the LAST row** of the report; the chart shows every row. For `prime_cost_by_week` the last row is the latest week's last location row, not the all-locations row. The agent (or a later tweak) picks the row. Said in the generated code and the note the generator returns.
+- **The bundle test runs in `pnpm test`** and rebuilds `bundle/template.tgz` first, so the bundle always matches the code. It needs the npm registry; `RMS_BUNDLE_TEST=0` skips it on a machine with no network.
+- **Dashboard figures** (after review): a report with a `scope` column is read for all locations only (`allLocationsRows`), and one with a `week_end` column shows the last FINISHED week (`lastFinishedRow`), so `prime_cost_by_week` shows the week of 9 November on 21 November. Otherwise the last row. The chart uses the same rows.
 - **Required report dates start a week ago** (`dateFromToday(-7)`) with a week pager. A required report parameter that is not a date is refused.
 - **Report totals** are left out when the report's rows are already a mix of lines and totals (it has a `line_kind` or `scope` column: `weekly_pnl`, `prime_cost_by_week`).
 - **A ref field is left off a form** when the mini-app cannot read the model it points at (the vendor's "Usual cost account" today). The generator says so in its notes.
@@ -29,7 +29,7 @@ pnpm --filter @rms/app-template dev                        # dev server on 5173 
 pnpm --filter @rms/app-template test                       # frame proof, generated app checks, preview with screenshots
 pnpm --filter @rms/generators test                         # golden files (packages/generators/golden/), refusals, the command
 pnpm --filter @rms/app-template bundle                     # writes bundle/template.tgz
-RMS_BUNDLE_TEST=1 pnpm --filter @rms/app-template exec vitest run test/bundle.slow.test.ts
+pnpm --filter @rms/app-template exec vitest run test/bundle.slow.test.ts   # also part of pnpm test
 ```
 
 Inside an app folder (the runner's order): write `rms.config.ts` (`renderManifestFile`), `.rms/catalog.json`, `.env.local`; then `npx --no-install rms lock` (by hand only; the runner writes `locked.json` itself); then `rms gen ...`, `npm run build`, `npx --no-install rms check`.
@@ -43,10 +43,10 @@ Screenshots (git-ignored, made by the tests): `packages/app-template/test-output
 | `pnpm typecheck` | 36 of 36 tasks |
 | `pnpm build` | 20 of 20 tasks |
 | `RMS_ENV_FILE=... pnpm test` | 36 of 36 tasks |
-| `@rms/sdk` tests | 39 passed |
+| `@rms/sdk` tests | 41 passed |
 | `@rms/generators` tests | 28 passed (9 golden files plus the screen list) |
-| `@rms/app-template` tests | 67 passed, 2 skipped (the bundle test, run separately) |
-| bundle test (`RMS_BUNDLE_TEST=1`) | 2 passed: `npm ci` outside the repo, `rms lock`, `rms gen`, `npm run build`, `rms check` all pass |
+| `@rms/app-template` tests | 102 passed, including the bundle test |
+| bundle test (in the 102) | 2 passed: `npm ci` outside the repo, `rms lock`, `rms gen`, `npm run build`, `rms check` all pass |
 
 `pnpm test:security` not run: nothing here touches data, tokens or queries.
 
@@ -54,6 +54,17 @@ Screenshots (git-ignored, made by the tests): `packages/app-template/test-output
 
 - **Added a dev dependency**: `@rms/models` (`workspace:*`) in `packages/generators/package.json`, for the golden tests against the real `LIBRARY` column lists the brief asks for. Test-only (`src/testing/`, not built). `pnpm-lock.yaml` changed by that one line.
 - **Template `tsconfig.json` no longer includes `vite.config.ts`**: it needs Node's types, which the bundle does not install. Vite loads it itself.
+
+## Review fixes (second commit set)
+
+- `rms check` safety: names are looked up in a Map (no more `toString` or `valueOf` refusals). Refused now: bare `location`, `open`, `parent`, `top`, `opener`, `frames`, `self`, `window`, `globalThis` (unless the file declares its own, such as `const [open, setOpen]`), `document.defaultView`, `Function` and `eval` as values, `createElement`, `href`/`action`/`formAction`/`httpEquiv`/`srcDoc` on host elements (an in-page `#` link is fine), `<meta>`, `<base>`, `<script>`, `<iframe>`, `<object>`, `<embed>`, `<link>`, `<style>`, spreads onto host elements, every stylesheet extension, and imports with a query. Still a ban list, not an allow list of globals: `rms check` only warns early, and the runner, the policy header and the relay are the real walls.
+- Dev policy: `connect-src 'self'` (no more `ws: wss:`; a test proves hot reload still connects), `form-action 'none'`, `base-uri 'none'`.
+- Forms and details leave out fields the Data API reports as `masked`, and never send them.
+
+## Can wait
+
+- `node_modules/` is not hashed by the locked rule (it is an ignored folder). A change there is not caught by `rms check`.
+- Vite still accepts a request with `Host: localhost` (the host check allows `127.0.0.1` and `.vercel.run`, and Vite always allows `localhost`). A grant never names `localhost`, so the shell never frames it from there.
 
 ## Noticed, out of scope
 

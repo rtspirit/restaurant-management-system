@@ -12,7 +12,7 @@ export type Problem = { file?: string; line?: number; message: string };
 const CODE = /\.(tsx?|jsx?|mjs|cjs|mts|cts)$/;
 
 /** Names that reach the network, storage, other windows or dynamic code. */
-const BANNED_NAMES: Record<string, string> = {
+const BANNED_LIST: Record<string, string> = {
   fetch: "No network calls: read and write through @rms/sdk.",
   XMLHttpRequest: "No network calls: read and write through @rms/sdk.",
   WebSocket: "No network calls: read and write through @rms/sdk.",
@@ -31,11 +31,74 @@ const BANNED_NAMES: Record<string, string> = {
   cookie: "No cookies.",
   globalThis: "No reaching into the page's globals.",
   importScripts: "No dynamic code.",
+  Function: "No dynamic code (Function).",
+  defaultView: "No reaching into the page's window.",
+  ownerDocument: "No reaching into the page's window.",
+  createElement: "No building elements by hand: use the components.",
+  createElementNS: "No building elements by hand: use the components.",
+  cloneElement: "No copying elements: use the components.",
 };
+/** A Map, so `toString`, `valueOf` and the rest of Object.prototype are never "banned". */
+const BANNED_NAMES = new Map(Object.entries(BANNED_LIST));
+
+/**
+ * Globals a mini-app may not name at all, unless the file declares its own with that name
+ * (`const [open, setOpen] = useState(false)` is fine). `Function` and `eval` are never fine.
+ */
+const BARE_BANNED = new Set(["window", "self", "globalThis", "location", "open", "parent", "top", "opener", "frames"]);
+const NEVER_ALIAS = new Set(["Function", "eval"]);
+
+/** Every stylesheet a bundler could load. */
+const STYLESHEET = /\.(css|scss|sass|less|pcss|postcss|sss|styl|stylus)$/i;
+
+/** JSX attributes that send the page somewhere, or change what the browser does. */
+const NAVIGATING_ATTRS = new Set(["href", "action", "formAction", "httpEquiv", "srcDoc", "xlinkHref", "ping"]);
+/** Host elements a mini-app never draws. */
+const BANNED_TAGS = new Set(["meta", "base", "script", "iframe", "frame", "frameset", "object", "embed", "link", "style", "portal"]);
 
 /** Properties of the page's windows that lead out of the mini-app. */
 const WINDOW_EXITS = new Set(["open", "top", "parent", "opener", "frames", "location"]);
 const GLOBALS = new Set(["window", "self", "document", "navigator", "globalThis"]);
+
+/** True for a name in a position where it is not a value: `x.name`, `{ name: 1 }`, `<X name />`, imports and declarations. */
+const isNamePosition = (node: ts.Identifier): boolean => {
+  const p = node.parent;
+  return (
+    (ts.isPropertyAccessExpression(p) && p.name === node) ||
+    (ts.isPropertyAssignment(p) && p.name === node) ||
+    (ts.isPropertySignature(p) && p.name === node) ||
+    (ts.isPropertyDeclaration(p) && p.name === node) ||
+    (ts.isMethodDeclaration(p) && p.name === node) ||
+    (ts.isJsxAttribute(p) && p.name === node) ||
+    (ts.isBindingElement(p) && p.propertyName === node) ||
+    ts.isImportSpecifier(p) ||
+    ts.isExportSpecifier(p) ||
+    ts.isImportClause(p) ||
+    ts.isNamespaceImport(p) ||
+    ts.isTypeReferenceNode(p) ||
+    ts.isQualifiedName(p) ||
+    ts.isJsxOpeningElement(p) ||
+    ts.isJsxClosingElement(p) ||
+    ts.isJsxSelfClosingElement(p)
+  );
+};
+
+/** Names the file declares itself: variables, parameters, functions, classes, imports. */
+const declaredNames = (source: ts.SourceFile): Set<string> => {
+  const names = new Set<string>();
+  const addBinding = (n: ts.BindingName): void => {
+    if (ts.isIdentifier(n)) names.add(n.text);
+    else for (const el of n.elements) if (!ts.isOmittedExpression(el)) addBinding(el.name);
+  };
+  const walk = (node: ts.Node): void => {
+    if (ts.isVariableDeclaration(node) || ts.isParameter(node)) addBinding(node.name);
+    else if ((ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node)) && node.name) names.add(node.name.text);
+    else if (ts.isImportSpecifier(node) || ts.isImportClause(node) || ts.isNamespaceImport(node)) { if (node.name) names.add(node.name.text); }
+    ts.forEachChild(node, walk);
+  };
+  walk(source);
+  return names;
+};
 
 /** `(window as any)`, `window!` and `(window)` all name `window`. */
 const unwrap = (e: ts.Expression): ts.Expression => {
@@ -57,7 +120,7 @@ export const editableCodeFiles = (files: AppFile[]): string[] => files.filter((f
 export const scanCode = (appDir: string, files: AppFile[]): ScanResult => {
   const result: ScanResult = { imports: [], safety: [], used: { models: new Set(), queries: new Set(), actions: new Set(), unresolved: [] } };
   for (const f of files) {
-    if (!f.link && isEditablePath(f.path) && /\.(css|scss|sass|less)$/i.test(f.path)) result.safety.push({ file: f.path, message: "No stylesheets: the look comes from @rms/ui." });
+    if (!f.link && isEditablePath(f.path) && STYLESHEET.test(f.path)) result.safety.push({ file: f.path, message: "No stylesheets: the look comes from @rms/ui." });
   }
 
   for (const path of editableCodeFiles(files)) {
@@ -82,7 +145,7 @@ export const scanCode = (appDir: string, files: AppFile[]): ScanResult => {
     };
 
     const checkSpecifier = (node: ts.Node, spec: string): void => {
-      if (/\.(css|scss|sass|less)$/i.test(spec)) {
+      if (STYLESHEET.test(spec.split("?")[0] ?? spec) || spec.includes("?")) {
         safety(node, "No CSS imports: the look comes from @rms/ui.");
         return;
       }
@@ -94,6 +157,7 @@ export const scanCode = (appDir: string, files: AppFile[]): ScanResult => {
       if (!allowedImport(spec)) importProblem(node, `"${spec}" cannot be used. Mini-apps import only ${ALLOWED_APP_IMPORTS.join(", ")} and their own files.`);
     };
 
+    const declared = declaredNames(source);
     const visit = (node: ts.Node): void => {
       // Imports and exports from other files.
       if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier) {
@@ -132,7 +196,19 @@ export const scanCode = (appDir: string, files: AppFile[]): ScanResult => {
         const attr = node.name.getText(source);
         if (attr === "style") safety(node, "No inline styles: the look comes from @rms/ui.");
         else if (attr === "className") safety(node, "No class names: compose the components instead.");
-        else if (attr === "dangerouslySetInnerHTML") safety(node, BANNED_NAMES.dangerouslySetInnerHTML!);
+        else if (attr === "dangerouslySetInnerHTML") safety(node, BANNED_LIST.dangerouslySetInnerHTML!);
+        else if (NAVIGATING_ATTRS.has(attr) && /^[a-z]/.test(node.parent.parent.tagName.getText(source))) {
+          // Host elements only: `action` is an ordinary prop on Card and EmptyState.
+          const init = node.initializer;
+          const inPage = attr === "href" && init !== undefined && ts.isStringLiteral(init) && init.text.startsWith("#");
+          if (!inPage) safety(node, `No ${attr}: a mini-app does not send the page anywhere. Links inside it start with "#".`);
+        }
+      } else if (ts.isJsxSpreadAttribute(node)) {
+        const owner = node.parent.parent;
+        const tag = ts.isJsxOpeningElement(owner) || ts.isJsxSelfClosingElement(owner) ? owner.tagName.getText(source) : "";
+        if (/^[a-z]/.test(tag)) safety(node, `No spreading props onto <${tag}>: name each prop, so styles and class names cannot slip in.`);
+      } else if ((ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) && BANNED_TAGS.has(node.tagName.getText(source))) {
+        safety(node, `No <${node.tagName.getText(source)}> in a mini-app.`);
       } else if (ts.isPropertyAssignment(node) && (ts.isIdentifier(node.name) || ts.isStringLiteral(node.name))) {
         const key = node.name.text;
         const v = fixed(node.initializer);
@@ -142,20 +218,22 @@ export const scanCode = (appDir: string, files: AppFile[]): ScanResult => {
       } else if (ts.isIdentifier(node)) {
         const parent = node.parent;
         const isKey = (ts.isPropertyAssignment(parent) && parent.name === node) || (ts.isJsxAttribute(parent) && parent.name === node) || (ts.isPropertySignature(parent) && parent.name === node);
-        const message = BANNED_NAMES[node.text];
+        const message = BANNED_NAMES.get(node.text);
         if (message !== undefined && !isKey) safety(node, `${message} (${node.text})`);
-        if (node.text === "Function" && ts.isCallExpression(parent) && parent.expression === node) safety(node, "No dynamic code (Function).");
-        // The page's globals may only be used as `window.something`: never passed around or
-        // stored, where a later computed access could not be checked.
-        if (GLOBALS.has(node.text) && message === undefined && !isKey) {
-          let outer: ts.Node = parent;
-          let inner: ts.Node = node;
-          while (ts.isParenthesizedExpression(outer) || ts.isAsExpression(outer) || ts.isTypeAssertionExpression(outer) || ts.isNonNullExpression(outer) || ts.isSatisfiesExpression(outer)) {
-            inner = outer;
-            outer = outer.parent;
+        else if (!isNamePosition(node)) {
+          if (NEVER_ALIAS.has(node.text)) safety(node, `No dynamic code (${node.text}).`);
+          else if (BARE_BANNED.has(node.text) && !declared.has(node.text)) safety(node, `No ${node.text}: a mini-app stays inside its frame and reaches RMS only through @rms/sdk.`);
+          else if (GLOBALS.has(node.text) && !declared.has(node.text)) {
+            // document and navigator only as document.something: never stored or passed on.
+            let outer: ts.Node = parent;
+            let inner: ts.Node = node;
+            while (ts.isParenthesizedExpression(outer) || ts.isAsExpression(outer) || ts.isTypeAssertionExpression(outer) || ts.isNonNullExpression(outer) || ts.isSatisfiesExpression(outer)) {
+              inner = outer;
+              outer = outer.parent;
+            }
+            const accessed = (ts.isPropertyAccessExpression(outer) || ts.isElementAccessExpression(outer)) && outer.expression === inner;
+            if (!accessed && !ts.isTypeQueryNode(outer)) safety(node, `Use ${node.text} only as ${node.text}.something. Do not store it or pass it on.`);
           }
-          const accessed = (ts.isPropertyAccessExpression(outer) || ts.isElementAccessExpression(outer)) && outer.expression === inner;
-          if (!accessed && !ts.isTypeQueryNode(outer) && !ts.isQualifiedName(outer)) safety(node, `Use ${node.text} only as ${node.text}.something. Do not store it or pass it on.`);
         }
       } else if (ts.isPropertyAccessExpression(node)) {
         const base = globalName(node.expression);
@@ -165,9 +243,11 @@ export const scanCode = (appDir: string, files: AppFile[]): ScanResult => {
         const key = node.argumentExpression;
         if (base !== null) {
           if (!ts.isStringLiteralLike(key)) safety(node, `No computed access on ${base}.`);
-          else if (BANNED_NAMES[key.text] !== undefined || WINDOW_EXITS.has(key.text)) safety(node, `${BANNED_NAMES[key.text] ?? "A mini-app stays inside its frame."} (${key.text})`);
-        } else if (ts.isStringLiteralLike(key) && BANNED_NAMES[key.text] !== undefined) {
-          safety(node, `${BANNED_NAMES[key.text]} (${key.text})`);
+          else if (BANNED_NAMES.has(key.text) || WINDOW_EXITS.has(key.text)) safety(node, `${BANNED_NAMES.get(key.text) ?? "A mini-app stays inside its frame."} (${key.text})`);
+        } else if (ts.isStringLiteralLike(key) && BANNED_NAMES.has(key.text)) {
+          safety(node, `${BANNED_NAMES.get(key.text)} (${key.text})`);
+        } else if (!ts.isStringLiteralLike(key) && !ts.isNumericLiteral(key) && ts.isPropertyAccessExpression(unwrap(node.expression)) && globalName((unwrap(node.expression) as ts.PropertyAccessExpression).expression) !== null) {
+          safety(node, "No computed access on the page's objects.");
         }
       }
       ts.forEachChild(node, visit);

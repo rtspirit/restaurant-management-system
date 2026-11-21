@@ -84,6 +84,7 @@ export const listDetail = (input: Input, catalog: SandboxCatalog, component: str
           `      <Page title=${jsx(input.title)} narrow>`,
           "        <EditForm",
           '          row={editing === "new" ? null : editing}',
+          "          masked={list.data?.masked ?? []}",
           "          onDone={(id) => {",
           "            setEditing(null);",
           "            if (id) setSelectedId(id);",
@@ -110,7 +111,7 @@ export const listDetail = (input: Input, catalog: SandboxCatalog, component: str
     '            onBack={() => setSelectedId("")}',
     "            detail={",
     "              selected ? (",
-    `                <Detail row={selected}${withForm ? ' onEdit={() => setEditing(selected)} onRemoved={() => setSelectedId("")}' : ""} />`,
+    `                <Detail row={selected} masked={list.data?.masked ?? []}${withForm ? ' onEdit={() => setEditing(selected)} onRemoved={() => setSelectedId("")}' : ""} />`,
     "              ) : (",
     `                <EmptyState title=${jsx(`Pick ${withArticle(noun)}`)}>Choose one from the list to see everything about it.</EmptyState>`,
     "              )",
@@ -124,14 +125,14 @@ export const listDetail = (input: Input, catalog: SandboxCatalog, component: str
     "}",
     "",
     ...(withForm
-      ? ["type DetailProps = { row: Record<string, unknown>; onEdit: () => void; onRemoved: () => void };", "", "function Detail({ row, onEdit, onRemoved }: DetailProps) {"]
-      : ["function Detail({ row }: { row: Record<string, unknown> }) {"]),
+      ? ["type DetailProps = { row: Record<string, unknown>; masked: readonly string[]; onEdit: () => void; onRemoved: () => void };", "", "function Detail({ row, masked, onEdit, onRemoved }: DetailProps) {"]
+      : ["function Detail({ row, masked }: { row: Record<string, unknown>; masked: readonly string[] }) {"]),
     "  const rms = useRms();",
     ...(withForm ? ["  const save = useMutation();", "  const [confirming, setConfirming] = useState(false);"] : []),
     "  return (",
     `    <Card title={showValue(row, ${lit(title.key)}, ${lit(title.type)}, rms) || "Untitled"}${withForm ? ' action={<Button variant="secondary" onClick={onEdit}>Change</Button>}' : ""}>`,
     '      <Stack gap="m">',
-    `        <DetailList rows={FIELDS.filter((f) => f.key !== ${lit(title.key)}).map((f) => ({ label: f.label, value: showValue(row, f.key, f.type, rms) || "Not set" }))} />`,
+    `        <DetailList rows={FIELDS.filter((f) => f.key !== ${lit(title.key)} && !masked.includes(f.key)).map((f) => ({ label: f.label, value: showValue(row, f.key, f.type, rms) || "Not set" }))} />`,
     ...(withForm
       ? [
           "        <Problem error={save.error} />",

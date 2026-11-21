@@ -22,7 +22,8 @@ export const shellOriginFrom = (value: string | undefined): string | null => {
  *
  * The built files (Wave 3) get their policy from the apps host, also as a header:
  *   default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;
- *   font-src 'self' data:; connect-src 'none'; frame-ancestors <shell origin>
+ *   font-src 'self' data:; connect-src 'none'; form-action 'none'; base-uri 'none';
+ *   frame-ancestors <shell origin>
  */
 export const devPolicy = (shellOrigin: string | null): string =>
   [
@@ -31,7 +32,11 @@ export const devPolicy = (shellOrigin: string | null): string =>
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data:",
     "font-src 'self' data:",
-    "connect-src 'self' ws: wss:",
+    // 'self' covers the dev server's own websocket (ws/wss to the same host and port), and
+    // nothing else: no other host, no other port.
+    "connect-src 'self'",
+    "form-action 'none'",
+    "base-uri 'none'",
     `frame-ancestors ${shellOrigin ?? "'none'"}`,
   ].join("; ");
 

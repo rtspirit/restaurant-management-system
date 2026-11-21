@@ -71,6 +71,18 @@ const BANNED: Array<[string, string]> = [
   ["string code in setTimeout", 'setTimeout("alert(1)", 1);'],
   ["window kept in a variable", "const w = window as any; void w;"],
   ["globalThis", 'void (globalThis as any)["fe" + "tch"];'],
+  ["bare location", 'location.href = "https://example.com";'],
+  ["bare open()", 'open("https://example.com");'],
+  ["bare parent[...]", 'void (parent as any)["post" + "Message"];'],
+  ["bare top", "void top;"],
+  ["bare opener", "void opener;"],
+  ["bare frames", "void frames;"],
+  ["bare self", "void self;"],
+  ["document.defaultView", 'void (document.defaultView as any)["fe" + "tch"];'],
+  ["Function kept in a variable", 'const F = Function; void F("return 1");'],
+  ["eval kept in a variable", "const E = eval; void E;"],
+  ["createElement with a style", 'void (rms as any).createElement("div", { style: {} });'],
+  ["document.createElement", 'void document.createElement("script");'],
 ];
 
 describe("check refuses", () => {
@@ -86,8 +98,37 @@ describe("check refuses", () => {
     ["style=", "export const X = () => <div style={{ color: \"red\" }} />;\n"],
     ["className=", 'export const X = () => <div className="x" />;\n'],
     ["a CSS import", 'import "./look.css";\nexport const X = () => null;\n'],
+    ["a PostCSS import", 'import "./look.pcss";\nexport const X = () => null;\n'],
+    ["an import with a query", 'import look from "./look.ts?raw";\nexport const X = look;\n'],
+    ["<a href> to another page", 'export const X = () => <a href="https://example.com">Go</a>;\n'],
+    ["<form action>", 'export const X = () => <form action="https://example.com" />;\n'],
+    ["<meta httpEquiv refresh>", 'export const X = () => <meta httpEquiv="refresh" content="0;url=https://example.com" />;\n'],
+    ["<iframe>", 'export const X = () => <iframe title="x" />;\n'],
+    ["a spread carrying style onto a host element", 'const p = { style: { color: "red" } };\nexport const X = () => <div {...p} />;\n'],
+    ["a spread carrying className onto a host element", 'const p = { className: "x" };\nexport const X = () => <span {...p} />;\n'],
+    ["a spread carrying dangerouslySetInnerHTML onto a host element", 'const p = { dangerouslySetInnerHTML: { __html: "x" } };\nexport const X = () => <p {...p} />;\n'],
   ])("%s (safety)", async (_name, text) => {
     await withFile("src/components/x.tsx", text, ["safety"], (out) => expect(result(out, "safety")?.ok).toBe(false));
+  });
+
+  it.each([["look.pcss"], ["look.styl"], ["look.sss"]])("a stylesheet file %s (safety)", async (name) => {
+    await withFile(`src/components/${name}`, "a { color: red }\n", ["safety"], (out) => expect(result(out, "safety")?.ok).toBe(false));
+  });
+
+  it.each([
+    ["toString", "const n = 3; void n.toString();"],
+    ["valueOf", "const n = 3; void n.valueOf();"],
+    ["hasOwnProperty", 'const o = { a: 1 }; void Object.prototype.hasOwnProperty.call(o, "a");'],
+    ["constructor", "const o = {}; void o.constructor;"],
+    ["a bare toString", "void toString;"],
+    ["a state named open", "const [open, setOpen] = [false, (v: boolean) => v]; void open; void setOpen;"],
+    ["a prop named top", "const box = { top: 1 }; void box.top;"],
+  ])("passes ordinary code: %s", async (_name, body) => {
+    await withFile("src/screens/ok/index.tsx", screenWith(body), ["safety"], (out) => expect(result(out, "safety")?.problems).toEqual([]));
+  });
+
+  it("passes an in-page link and a spread onto a component", async () => {
+    await withFile("src/components/ok.tsx", 'import { Button } from "@rms/ui";\nconst p = { variant: "quiet" as const };\nexport const X = () => <><a href="#/vendors">Vendors</a><Button {...p}>Go</Button></>;\n', ["safety"], (out) => expect(result(out, "safety")?.problems).toEqual([]));
   });
 
   it("a stylesheet file (safety)", async () => {

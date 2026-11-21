@@ -1,5 +1,5 @@
 // `dashboard`: big figures from a named query, with an optional bar chart from the same rows.
-// The figures show the LAST row (the latest period); the chart shows every row.
+// Headline figures read the last finished week (all locations) when the report has weeks and scopes; else the last row.
 import type { RunGeneratorInput, SandboxCatalog } from "@rms/contracts";
 import { jsx, lit } from "../app-files.js";
 import { findColumn, findQuery, formatOf, periodCode } from "./named.js";
@@ -14,9 +14,15 @@ export const dashboard = (input: Input, catalog: SandboxCatalog, component: stri
   if (input.chart) findColumn(q, input.chart.value);
   const period = periodCode(q);
   const [lead, ...others] = input.stats;
+  // A report with a `scope` column has a row per location AND one for all of them; one with a
+  // `week_end` column ends with the unfinished current week. Read all locations, finished weeks.
+  const scoped = q.columns.some((c) => c.key === "scope");
+  const weekly = q.columns.some((c) => c.key === "week_end");
 
   const sdk = ["formatAs", "useNamedQuery", "useRms"];
-  if (period.state.length > 0) sdk.push("dateFromToday");
+  if (period.state.length > 0 || weekly) sdk.push("dateFromToday");
+  if (scoped) sdk.push("allLocationsRows");
+  if (weekly) sdk.push("lastFinishedRow");
   if (period.pager) sdk.push("addDays", "formatDate");
   const ui = ["Card", "Dashboard", "Skeleton", "StatLead"];
   if (others.length > 0) ui.push("Stat", "StatGroup");
@@ -27,7 +33,9 @@ export const dashboard = (input: Input, catalog: SandboxCatalog, component: stri
 
   const lines = [
     `// Made by \`rms gen dashboard\` for the report ${q.key}. Editable: change anything in this file.`,
-    "// The figures show the latest row of the report. The chart shows every row.",
+    weekly
+      ? `// The figures show the last finished week${scoped ? " for all locations together" : ""}. The chart shows every week${scoped ? " for all locations" : ""}.`
+      : `// The figures show the latest row of the report. The chart shows every row${scoped ? " for all locations together" : ""}.`,
     `import { ${sorted(sdk)} } from "@rms/sdk";`,
     `import { ${sorted(ui)} } from "@rms/ui";`,
     ...react,
@@ -40,7 +48,8 @@ export const dashboard = (input: Input, catalog: SandboxCatalog, component: stri
     "  const rms = useRms();",
     ...period.state,
     `  const report = useNamedQuery(QUERY, ${period.params});`,
-    "  const latest = report.rows[report.rows.length - 1];",
+    `  const rows = ${scoped ? "allLocationsRows(report.rows)" : "report.rows"};`,
+    weekly ? "  const latest = lastFinishedRow(rows, dateFromToday(0));" : "  const latest = rows[rows.length - 1];",
     "",
     "  return (",
     `    <Dashboard title=${jsx(input.title)}${period.pager ? ` controls={${period.pager}}` : ""}>`,
@@ -70,7 +79,7 @@ export const dashboard = (input: Input, catalog: SandboxCatalog, component: stri
           `          <Card title=${jsx(input.chart.label)}>`,
           "            <BarChart",
           `              label=${jsx(input.chart.label)}`,
-          "              items={report.rows.map((row, i) => ({",
+          "              items={rows.map((row, i) => ({",
           "                id: String(i),",
           `                label: formatAs(row[${lit(chartCategory.key)}], ${lit(formatOf(chartCategory))}, rms),`,
           `                value: Number(row[${lit(input.chart.value)}]) || 0,`,
@@ -87,5 +96,5 @@ export const dashboard = (input: Input, catalog: SandboxCatalog, component: stri
     "}",
     "",
   ];
-  return { code: lines.join("\n"), notes: [`The figures read the latest row of ${q.key}. If the owner means a total or another row, change how \`latest\` is chosen.`] };
+  return { code: lines.join("\n"), notes: [weekly ? `The figures read the last finished week of ${q.key}${scoped ? ", all locations together" : ""}.` : `The figures read the latest row of ${q.key}. If the owner means a total or another row, change how \`latest\` is chosen.`] };
 };

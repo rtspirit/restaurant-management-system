@@ -20,6 +20,7 @@ export { RmsProvider, useMutation, useNamedQuery, useQuery, useRms, useRmsClient
 export type { RmsProviderProps, UseMutationResult, UseNamedQueryResult, UseQueryResult } from "./react";
 export { addDays, dateFromToday, formatAs, formatDate, formatMoney, formatNumber, formatPercent, fromInput, humanize, moneyToMinor, showValue, toInput } from "./format";
 export type { FromInput, Place } from "./format";
+export { allLocationsRows, lastFinishedRow } from "./rows";
 
 /** The hand-off protocol this SDK speaks. */
 export const SDK_PROTOCOL = FRAME_PROTOCOL;

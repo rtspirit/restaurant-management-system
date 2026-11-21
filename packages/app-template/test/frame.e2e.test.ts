@@ -76,7 +76,10 @@ describe("the template's dev server inside the shell's frame", () => {
     const res = await fetch(`${frameOrigin}/`);
     const policy = res.headers.get("content-security-policy") ?? "";
     expect(policy).toContain(`frame-ancestors ${shellUrl}`);
-    expect(policy).toContain("connect-src 'self' ws: wss:");
+    expect(policy).toContain("connect-src 'self';");
+    expect(policy).not.toMatch(/ws:|wss:/);
+    expect(policy).toContain("form-action 'none'");
+    expect(policy).toContain("base-uri 'none'");
     expect(policy).toContain("default-src 'self'");
     // Never a meta tag: browsers ignore frame-ancestors there.
     expect(await res.text()).not.toMatch(/http-equiv=["']?content-security-policy/i);
@@ -110,6 +113,25 @@ describe("the template's dev server inside the shell's frame", () => {
     expect(look.font).toContain("Nunito Sans");
     expect(look.fontLoaded).toBe(true);
     await page.screenshot({ path: join(SHOTS, "frame-1440.png") });
+    expect(problems).toEqual([]);
+    await page.close();
+  }, 60_000);
+
+  it("shows an edit with no reload: the dev websocket connects under connect-src 'self'", async () => {
+    const page = await browser.newPage();
+    const problems: string[] = [];
+    page.on("console", (m) => {
+      if (m.type() === "error" || /content security policy|refused/i.test(m.text())) problems.push(m.text());
+    });
+    await page.goto(shellUrl);
+    const frame = page.frameLocator("iframe#app");
+    await expect.poll(async () => frame.getByText("Nothing here yet").count(), { timeout: 20_000 }).toBeGreaterThan(0);
+    await page.waitForTimeout(500);
+    const file = join(app.dir, "src/screens/welcome/index.tsx");
+    const before = readFileSync(file, "utf8");
+    writeFileSync(file, before.replace("Nothing here yet", "Hot edit"));
+    await expect.poll(async () => frame.getByText("Hot edit").count(), { timeout: 20_000 }).toBeGreaterThan(0);
+    writeFileSync(file, before);
     expect(problems).toEqual([]);
     await page.close();
   }, 60_000);

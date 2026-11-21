@@ -1,18 +1,19 @@
 // Step 9: the bundle installs and works on its own, the way the sandbox will use it.
 // Unpacked OUTSIDE this repository, so nothing resolves from the workspace by accident.
-// Needs the public npm registry and about a minute, so it runs only when asked:
-//   pnpm --filter @rms/app-template bundle && RMS_BUNDLE_TEST=1 pnpm --filter @rms/app-template exec vitest run test/bundle.slow.test.ts
+// It builds a fresh bundle first, so the bundle always matches the last commit. It needs the
+// public npm registry (npm ci, and npm making the lock file). On a machine with no network,
+// skip it with RMS_BUNDLE_TEST=0; by hand: pnpm --filter @rms/app-template bundle, then this file.
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { renderManifestFile } from "@rms/generators";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { demoCatalog } from "../../generators/src/testing/fixtures.js";
 import { TEMPLATE_DIR } from "./helpers.js";
 
 const BUNDLE = join(TEMPLATE_DIR, "bundle", "template.tgz");
-const run = process.env.RMS_BUNDLE_TEST === "1";
+const run = process.env.RMS_BUNDLE_TEST !== "0";
 const dir = mkdtempSync(join(tmpdir(), "h-bundle-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
@@ -22,6 +23,10 @@ const sh = (cmd: string, args: string[]) => {
 };
 
 describe.skipIf(!run)("the template bundle", () => {
+  beforeAll(() => {
+    execFileSync(process.execPath, [join(TEMPLATE_DIR, "scripts", "bundle.mjs")], { stdio: ["ignore", "ignore", "inherit"] });
+  }, 300_000);
+
   it("holds none of the runner's files and no tests", () => {
     expect(existsSync(BUNDLE), "build it first: pnpm --filter @rms/app-template bundle").toBe(true);
     const list = execFileSync("tar", ["-tzf", BUNDLE], { encoding: "utf8" }).split("\n").map((l) => l.replace(/^\.\//, "")).filter(Boolean);

@@ -43,6 +43,8 @@ beforeAll(async () => {
     frameOrigin,
     context: testContext(),
     rows: { vendor: VENDORS },
+    // As for a role that may not read the note: the screens must leave it out, not show "Not set".
+    masked: { vendor: ["note"] },
     named: { sales_by_day: { columns: [], rows: [] }, prime_cost_by_week: { columns: [], rows: [] } },
   });
   const shell = createHttpServer((_req, res) => {
@@ -79,6 +81,7 @@ describe("the generated vendor list in the preview frame", () => {
     await frame.getByRole("button", { name: /Harbour Fish Co/ }).click({ timeout: 20_000 });
     await expect.poll(() => frame.getByText("Delivers Tuesday and Friday").count()).toBe(0);
     await expect.poll(() => frame.getByText("sam@harbourfish.example").count()).toBeGreaterThan(0);
+    expect(await frame.getByText("Note", { exact: true }).count()).toBe(0);
     await page.screenshot({ path: join(SHOTS, "vendors-1440.png") });
     expect(problems).toEqual([]);
     await page.close();
@@ -100,6 +103,7 @@ describe("the generated vendor list in the preview frame", () => {
     const { page } = await open(1440, 900);
     const frame = page.frameLocator("iframe#app");
     await frame.getByRole("button", { name: "Add a vendor" }).first().click({ timeout: 20_000 });
+    expect(await frame.getByLabel("Note").count()).toBe(0);
     await frame.getByLabel("Name").fill("Copper Pot Bakery");
     await frame.getByLabel("Days to pay").fill("ten");
     await frame.getByRole("button", { name: "Save" }).click();
@@ -110,6 +114,7 @@ describe("the generated vendor list in the preview frame", () => {
     await frame.getByRole("button", { name: /Copper Pot Bakery/ }).waitFor({ timeout: 10_000 });
     const seen = (await page.evaluate("window.__seen")) as Array<{ type: string; route?: string; body?: { ops?: Array<{ op: string; values: Record<string, unknown> }> } }>;
     const write = seen.find((m) => m.type === "rms.data" && m.route === "batch");
+    expect(Object.keys(write?.body?.ops?.[0]?.values ?? {})).not.toContain("note");
     expect(write?.body?.ops?.[0]).toMatchObject({ op: "insert", model: "vendor", values: { name: "Copper Pot Bakery", terms_days: 10, active: true } });
     for (const m of seen) expect(Object.keys(m).sort()).toEqual(m.type === "rms.ready" ? ["rms", "type"] : ["body", "id", "rms", "route", "type"]);
     await page.close();

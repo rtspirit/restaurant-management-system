@@ -19,6 +19,7 @@ export function VendorsScreen() {
       <Page title="Vendors" narrow>
         <EditForm
           row={editing === "new" ? null : editing}
+          masked={list.data?.masked ?? []}
           onDone={(id) => {
             setEditing(null);
             if (id) setSelectedId(id);
@@ -43,7 +44,7 @@ export function VendorsScreen() {
             onBack={() => setSelectedId("")}
             detail={
               selected ? (
-                <Detail row={selected} onEdit={() => setEditing(selected)} onRemoved={() => setSelectedId("")} />
+                <Detail row={selected} masked={list.data?.masked ?? []} onEdit={() => setEditing(selected)} onRemoved={() => setSelectedId("")} />
               ) : (
                 <EmptyState title="Pick a vendor">Choose one from the list to see everything about it.</EmptyState>
               )
@@ -60,16 +61,16 @@ export function VendorsScreen() {
   );
 }
 
-type DetailProps = { row: Record<string, unknown>; onEdit: () => void; onRemoved: () => void };
+type DetailProps = { row: Record<string, unknown>; masked: readonly string[]; onEdit: () => void; onRemoved: () => void };
 
-function Detail({ row, onEdit, onRemoved }: DetailProps) {
+function Detail({ row, masked, onEdit, onRemoved }: DetailProps) {
   const rms = useRms();
   const save = useMutation();
   const [confirming, setConfirming] = useState(false);
   return (
     <Card title={showValue(row, "name", "text", rms) || "Untitled"} action={<Button variant="secondary" onClick={onEdit}>Change</Button>}>
       <Stack gap="m">
-        <DetailList rows={FIELDS.filter((f) => f.key !== "name").map((f) => ({ label: f.label, value: showValue(row, f.key, f.type, rms) || "Not set" }))} />
+        <DetailList rows={FIELDS.filter((f) => f.key !== "name" && !masked.includes(f.key)).map((f) => ({ label: f.label, value: showValue(row, f.key, f.type, rms) || "Not set" }))} />
         <Problem error={save.error} />
         <Row>
           <Button variant="quiet" onClick={() => setConfirming(true)}>
@@ -106,15 +107,16 @@ function Detail({ row, onEdit, onRemoved }: DetailProps) {
 
 const FORM_FIELDS = [{ key: "name", type: "text", required: true }, { key: "contact_name", type: "text", required: false }, { key: "email", type: "text", required: false }, { key: "phone", type: "text", required: false }, { key: "terms_days", type: "integer", required: false }, { key: "account_number", type: "text", required: false }, { key: "active", type: "boolean", required: true }] as const;
 
-type FormProps = { row: Record<string, unknown> | null; onDone: (id?: string) => void };
+// `masked`: fields this user may not see (the Data API leaves them out). They are left off the form and never sent.
+type FormProps = { row: Record<string, unknown> | null; masked: readonly string[]; onDone: (id?: string) => void };
 
-function EditForm({ row, onDone }: FormProps) {
+function EditForm({ row, masked, onDone }: FormProps) {
   const rms = useRms();
   const save = useMutation();
   const [draft, setDraft] = useState<Record<string, string>>(() =>
     row === null
       ? { "name": "", "contact_name": "", "email": "", "phone": "", "terms_days": "", "account_number": "", "active": "true" }
-      : Object.fromEntries(FORM_FIELDS.map((f) => [f.key, toInput(row[f.key], f.type, rms)])),
+      : Object.fromEntries(FORM_FIELDS.filter((f) => !masked.includes(f.key)).map((f) => [f.key, toInput(row[f.key], f.type, rms)])),
   );
   const [errors, setErrors] = useState<Record<string, string>>({});
   const set = (key: string, value: string) => setDraft((d) => ({ ...d, [key]: value }));
@@ -123,6 +125,7 @@ function EditForm({ row, onDone }: FormProps) {
     const values: Record<string, unknown> = {};
     const problems: Record<string, string> = {};
     for (const f of FORM_FIELDS) {
+      if (masked.includes(f.key)) continue;
       const read = fromInput(draft[f.key] ?? "", f.type, rms);
       if (!read.ok) problems[f.key] = read.message;
       else if (read.value === null && f.required) problems[f.key] = "Fill this in.";
@@ -154,13 +157,27 @@ function EditForm({ row, onDone }: FormProps) {
         </>
       }
     >
-      <TextField label="Name" value={draft["name"] ?? ""} onChange={(event) => set("name", event.target.value)} error={errors["name"] ?? ""} />
-      <TextField label="Contact" value={draft["contact_name"] ?? ""} onChange={(event) => set("contact_name", event.target.value)} error={errors["contact_name"] ?? ""} />
-      <TextField label="Email" value={draft["email"] ?? ""} onChange={(event) => set("email", event.target.value)} error={errors["email"] ?? ""} />
-      <TextField label="Phone" value={draft["phone"] ?? ""} onChange={(event) => set("phone", event.target.value)} error={errors["phone"] ?? ""} />
-      <TextField label="Days to pay" inputMode="numeric" value={draft["terms_days"] ?? ""} onChange={(event) => set("terms_days", event.target.value)} error={errors["terms_days"] ?? ""} />
-      <TextField label="Our account number with them" value={draft["account_number"] ?? ""} onChange={(event) => set("account_number", event.target.value)} error={errors["account_number"] ?? ""} />
-      <Choice type="checkbox" label="In use" checked={draft["active"] === "true"} onChange={(event) => set("active", event.target.checked ? "true" : "false")} />
+      {masked.includes("name") ? null : (
+        <TextField label="Name" value={draft["name"] ?? ""} onChange={(event) => set("name", event.target.value)} error={errors["name"] ?? ""} />
+      )}
+      {masked.includes("contact_name") ? null : (
+        <TextField label="Contact" value={draft["contact_name"] ?? ""} onChange={(event) => set("contact_name", event.target.value)} error={errors["contact_name"] ?? ""} />
+      )}
+      {masked.includes("email") ? null : (
+        <TextField label="Email" value={draft["email"] ?? ""} onChange={(event) => set("email", event.target.value)} error={errors["email"] ?? ""} />
+      )}
+      {masked.includes("phone") ? null : (
+        <TextField label="Phone" value={draft["phone"] ?? ""} onChange={(event) => set("phone", event.target.value)} error={errors["phone"] ?? ""} />
+      )}
+      {masked.includes("terms_days") ? null : (
+        <TextField label="Days to pay" inputMode="numeric" value={draft["terms_days"] ?? ""} onChange={(event) => set("terms_days", event.target.value)} error={errors["terms_days"] ?? ""} />
+      )}
+      {masked.includes("account_number") ? null : (
+        <TextField label="Our account number with them" value={draft["account_number"] ?? ""} onChange={(event) => set("account_number", event.target.value)} error={errors["account_number"] ?? ""} />
+      )}
+      {masked.includes("active") ? null : (
+        <Choice type="checkbox" label="In use" checked={draft["active"] === "true"} onChange={(event) => set("active", event.target.checked ? "true" : "false")} />
+      )}
     </FormLayout>
   );
 }
