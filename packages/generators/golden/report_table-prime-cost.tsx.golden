@@ -1,0 +1,32 @@
+// Made by `rms gen report_table` for the report prime_cost_by_week. Editable: change anything in this file.
+import { formatAs, useNamedQuery, useRms } from "@rms/sdk";
+import { Page, ReportTable, Skeleton, Stack } from "@rms/ui";
+import { NoNumbers, Problem } from "../../rms/notices";
+
+const QUERY = "prime_cost_by_week";
+const COLUMNS = [{ key: "week_start", label: "Week starting", format: "date", align: "start" }, { key: "location_name", label: "Location", format: "text", align: "start" }, { key: "net_sales", label: "Net sales", format: "money", align: "end" }, { key: "prime_cost", label: "Prime cost", format: "money", align: "end" }, { key: "prime_cost_pct", label: "Prime cost (% of net sales)", format: "percent", align: "end" }] as const;
+
+export function PrimeCostScreen() {
+  const rms = useRms();
+  const report = useNamedQuery(QUERY, {  });
+
+  return (
+    <Page title="Prime cost">
+      <Stack gap="m">
+        <Problem error={report.error} />
+        {report.loading && report.data === null ? (
+          <Skeleton shape="block" label="Loading the report" />
+        ) : report.rows.length === 0 ? (
+          <NoNumbers what="prime cost by week" />
+        ) : (
+          <ReportTable
+            title="Prime cost by week"
+            source="From your books: prime cost by week."
+            columns={COLUMNS.map((c) => ({ key: c.key, label: c.label, align: c.align }))}
+            rows={report.rows.map((row, i) => ({ id: String(i), cells: Object.fromEntries(COLUMNS.map((c) => [c.key, formatAs(row[c.key], c.format, rms)])) }))}
+          />
+        )}
+      </Stack>
+    </Page>
+  );
+}

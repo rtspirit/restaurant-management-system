@@ -1,0 +1,183 @@
+// Made by `rms gen list_detail` for vendor. Editable: change anything in this file.
+import { fromInput, showValue, toInput, useMutation, useQuery, useRms } from "@rms/sdk";
+import { Button, Card, Choice, DetailList, Dialog, EmptyState, FormLayout, ListDetail, Page, Row, Skeleton, Stack, TextField } from "@rms/ui";
+import { useState } from "react";
+import { Problem } from "../../rms/notices";
+
+const MODEL = "vendor";
+const FIELDS = [{ key: "name", label: "Name", type: "text" }, { key: "contact_name", label: "Contact", type: "text" }, { key: "email", label: "Email", type: "text" }, { key: "phone", label: "Phone", type: "text" }, { key: "terms_days", label: "Days to pay", type: "integer" }, { key: "account_number", label: "Our account number with them", type: "text" }, { key: "default_account", label: "Usual cost account", type: "ref" }, { key: "active", label: "In use", type: "boolean" }] as const;
+
+export function VendorsScreen() {
+  const rms = useRms();
+  const list = useQuery({ model: MODEL, sort: [{ field: "name", dir: "asc" }], limit: 500 });
+  const [selectedId, setSelectedId] = useState("");
+  const [editing, setEditing] = useState<Record<string, unknown> | "new" | null>(null);
+  const selected = list.rows.find((row) => String(row.id) === selectedId);
+
+  if (editing !== null) {
+    return (
+      <Page title="Vendors" narrow>
+        <EditForm
+          row={editing === "new" ? null : editing}
+          masked={list.data?.masked ?? []}
+          onDone={(id) => {
+            setEditing(null);
+            if (id) setSelectedId(id);
+          }}
+        />
+      </Page>
+    );
+  }
+
+  return (
+    <Page title="Vendors" actions={<Button icon="plus" onClick={() => setEditing("new")}>{"Add a vendor"}</Button>}>
+      <Stack gap="m">
+        <Problem error={list.error} />
+        {list.loading && list.data === null ? (
+          <Skeleton shape="block" label="Loading vendors" />
+        ) : (
+          <ListDetail
+            label="Vendors"
+            items={list.rows.map((row) => ({ id: String(row.id), title: showValue(row, "name", "text", rms) || "Untitled", subtitle: showValue(row, "contact_name", "text", rms) }))}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            onBack={() => setSelectedId("")}
+            detail={
+              selected ? (
+                <Detail row={selected} masked={list.data?.masked ?? []} onEdit={() => setEditing(selected)} onRemoved={() => setSelectedId("")} />
+              ) : (
+                <EmptyState title="Pick a vendor">Choose one from the list to see everything about it.</EmptyState>
+              )
+            }
+            empty={
+              <EmptyState title="No vendors yet" action={<Button icon="plus" onClick={() => setEditing("new")}>{"Add a vendor"}</Button>}>
+                Add the first one and it shows here.
+              </EmptyState>
+            }
+          />
+        )}
+      </Stack>
+    </Page>
+  );
+}
+
+type DetailProps = { row: Record<string, unknown>; masked: readonly string[]; onEdit: () => void; onRemoved: () => void };
+
+function Detail({ row, masked, onEdit, onRemoved }: DetailProps) {
+  const rms = useRms();
+  const save = useMutation();
+  const [confirming, setConfirming] = useState(false);
+  return (
+    <Card title={showValue(row, "name", "text", rms) || "Untitled"} action={<Button variant="secondary" onClick={onEdit}>Change</Button>}>
+      <Stack gap="m">
+        <DetailList rows={FIELDS.filter((f) => f.key !== "name" && !masked.includes(f.key)).map((f) => ({ label: f.label, value: showValue(row, f.key, f.type, rms) || "Not set" }))} />
+        <Problem error={save.error} />
+        <Row>
+          <Button variant="quiet" onClick={() => setConfirming(true)}>
+            {"Remove this vendor"}
+          </Button>
+        </Row>
+        <Dialog
+          open={confirming}
+          onClose={() => setConfirming(false)}
+          title="Remove this vendor?"
+          actions={
+            <>
+              <Button variant="secondary" onClick={() => setConfirming(false)}>
+                Keep it
+              </Button>
+              <Button
+                busy={save.busy}
+                onClick={() => {
+                  setConfirming(false);
+                  save.remove(MODEL, String(row.id)).then(onRemoved, () => undefined);
+                }}
+              >
+                Remove
+              </Button>
+            </>
+          }
+        >
+          It goes from the list for good. You can add it again later.
+        </Dialog>
+      </Stack>
+    </Card>
+  );
+}
+
+const FORM_FIELDS = [{ key: "name", type: "text", required: true }, { key: "contact_name", type: "text", required: false }, { key: "email", type: "text", required: false }, { key: "phone", type: "text", required: false }, { key: "terms_days", type: "integer", required: false }, { key: "account_number", type: "text", required: false }, { key: "active", type: "boolean", required: true }] as const;
+
+// `masked`: fields this user may not see (the Data API leaves them out). They are left off the form and never sent.
+type FormProps = { row: Record<string, unknown> | null; masked: readonly string[]; onDone: (id?: string) => void };
+
+function EditForm({ row, masked, onDone }: FormProps) {
+  const rms = useRms();
+  const save = useMutation();
+  const [draft, setDraft] = useState<Record<string, string>>(() =>
+    row === null
+      ? { "name": "", "contact_name": "", "email": "", "phone": "", "terms_days": "", "account_number": "", "active": "true" }
+      : Object.fromEntries(FORM_FIELDS.filter((f) => !masked.includes(f.key)).map((f) => [f.key, toInput(row[f.key], f.type, rms)])),
+  );
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const set = (key: string, value: string) => setDraft((d) => ({ ...d, [key]: value }));
+
+  const submit = async () => {
+    const values: Record<string, unknown> = {};
+    const problems: Record<string, string> = {};
+    for (const f of FORM_FIELDS) {
+      if (masked.includes(f.key)) continue;
+      const read = fromInput(draft[f.key] ?? "", f.type, rms);
+      if (!read.ok) problems[f.key] = read.message;
+      else if (read.value === null && f.required) problems[f.key] = "Fill this in.";
+      else if (read.value !== null || row !== null) values[f.key] = read.value;
+    }
+    setErrors(problems);
+    if (Object.keys(problems).length > 0) return;
+    try {
+      const result = row === null ? await save.insert(MODEL, values) : await save.update(MODEL, String(row.id), values);
+      onDone(result.results[0]?.id);
+    } catch {
+      // The reason shows above the buttons, in RMS's own plain words.
+    }
+  };
+
+  return (
+    <FormLayout
+      title={row === null ? "Add a vendor" : "Change this vendor"}
+      onSubmit={() => void submit()}
+      message={<Problem error={save.error} />}
+      actions={
+        <>
+          <Button variant="secondary" type="button" onClick={() => onDone()}>
+            Cancel
+          </Button>
+          <Button type="submit" busy={save.busy}>
+            Save
+          </Button>
+        </>
+      }
+    >
+      {masked.includes("name") ? null : (
+        <TextField label="Name" value={draft["name"] ?? ""} onChange={(event) => set("name", event.target.value)} error={errors["name"] ?? ""} />
+      )}
+      {masked.includes("contact_name") ? null : (
+        <TextField label="Contact" value={draft["contact_name"] ?? ""} onChange={(event) => set("contact_name", event.target.value)} error={errors["contact_name"] ?? ""} />
+      )}
+      {masked.includes("email") ? null : (
+        <TextField label="Email" value={draft["email"] ?? ""} onChange={(event) => set("email", event.target.value)} error={errors["email"] ?? ""} />
+      )}
+      {masked.includes("phone") ? null : (
+        <TextField label="Phone" value={draft["phone"] ?? ""} onChange={(event) => set("phone", event.target.value)} error={errors["phone"] ?? ""} />
+      )}
+      {masked.includes("terms_days") ? null : (
+        <TextField label="Days to pay" inputMode="numeric" value={draft["terms_days"] ?? ""} onChange={(event) => set("terms_days", event.target.value)} error={errors["terms_days"] ?? ""} />
+      )}
+      {masked.includes("account_number") ? null : (
+        <TextField label="Our account number with them" value={draft["account_number"] ?? ""} onChange={(event) => set("account_number", event.target.value)} error={errors["account_number"] ?? ""} />
+      )}
+      {masked.includes("active") ? null : (
+        <Choice type="checkbox" label="In use" checked={draft["active"] === "true"} onChange={(event) => set("active", event.target.checked ? "true" : "false")} />
+      )}
+    </FormLayout>
+  );
+}
