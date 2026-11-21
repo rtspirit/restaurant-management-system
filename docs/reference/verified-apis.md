@@ -23,6 +23,19 @@ Every fact below comes from a page opened on 2026-11-21. Versions come from the 
 15. **Migrations with `CREATE ROLE ... PASSWORD '...'` would put secrets in git.** Create roles without a password in migrations, then set passwords by hand or from a secret store. (Our own rule, not from docs.)
 16. **3072-dim embeddings cannot use an HNSW index on `vector`.** Max is 2,000 dimensions for `vector`. Use `text-embedding-3-small` (1536) or index `halfvec(3072)`.
 
+### OpenRouter switch
+
+ADR 0007 moved all model calls to OpenRouter. Details and sources in section 10. The "Model ids for env vars" table just below is for OpenAI direct; use the table in section 10 instead.
+
+- **Codex through OpenRouter is documented by OpenRouter, with `wire_api = "responses"` and `supports_websockets = false`.** Both sides agree that `responses` is the only wire format today. Codex dropped `chat` in early 2026. OpenRouter serves `POST /api/v1/responses` and its docs do not call it beta. This is the same custom-provider setup the S1 spike used, with a new `base_url`. NOT CONFIRMED end to end: no one has run a real turn yet.
+- **OpenRouter's Responses API is stateless.** It rejects `store: true` or a `previous_response_id` with a 400 error. NOT CONFIRMED what Codex sends to a custom provider. If the first turn fails with 400, this is the likely cause.
+- **Codex adds OpenAI-only hosted tools.** Set `web_search = "disabled"` and `[features] image_generation = false`. An open Codex issue (#30557) says the image tool was still sent to a non-OpenAI provider in one setup, and another user says the flag works in the CLI. Test it.
+- **Codex has no metadata for most OpenRouter model ids.** With `env_key` auth, Codex does not load OpenRouter's model catalog and shows an "Unknown model" warning. Set `model_context_window` yourself. OpenRouter's own guide uses an `auth` command instead of `env_key` so Codex loads the catalog. NOT CONFIRMED which host and path that catalog call uses.
+- **Embeddings are available.** `POST https://openrouter.ai/api/v1/embeddings` takes `openai/text-embedding-3-small` (1536 dims, $0.02 per 1M tokens) and supports `dimensions`. No second account is needed. The existing 1536-dim plan stays as is.
+- **The AI SDK provider speaks Chat Completions, not Responses.** `@openrouter/ai-sdk-provider` 3.1.0 is the line for `ai@^7`. On Chat Completions, `gpt-6-luna` only calls tools with `reasoning_effort: "none"` (section 2). So the cheap Ask fallback is `anthropic/claude-haiku-5.5`, not `gpt-6-luna`.
+- **Privacy is opt-in.** Default routing allows providers that store data and may train on it. Turn off training at account level in the privacy settings, and send `provider: { data_collection: "deny", zdr: true }` on every Ask request. ZDR can make some models unavailable, and the request then fails with 503. Also check that the guardrail flag `enforce_first_party_harness_models` stays off, or Codex is limited to OpenAI's own models.
+- **Spend cap per key exists, plus a budget endpoint.** Create a key with `limit` (USD) and `limit_reset`. `GET https://openrouter.ai/api/v1/key` returns `limit_remaining` and `usage_daily`. A key over its cap gets `403 Key limit exceeded`. An account with no credit gets `402`. Firewall: allow only `openrouter.ai`. The docs mention no WebSockets for the API.
+
 ### Model ids for env vars
 
 | Env var | Id | Cheaper fallback |
@@ -622,3 +635,259 @@ await client.close();
 - https://raw.githubusercontent.com/modelcontextprotocol/typescript-sdk/main/docs/clients/machine-auth.md
 - https://raw.githubusercontent.com/modelcontextprotocol/typescript-sdk/main/docs/get-started/first-client.md
 - https://registry.npmjs.org/@modelcontextprotocol/server/latest, https://registry.npmjs.org/@modelcontextprotocol/client/latest, https://registry.npmjs.org/@modelcontextprotocol/hono/latest, https://registry.npmjs.org/@modelcontextprotocol/sdk/latest
+
+---
+
+## 10. OpenRouter (added 2026-11-21)
+
+Why: ADR 0007. All in-product model calls (build agent, Ask agent, embeddings) go through OpenRouter with `OPENROUTER_API_KEY`. Pages below were opened on 2026-11-21. No call was made to the OpenRouter API (no key). Model facts come from OpenRouter's public model pages, not from `/api/v1/models`.
+
+### Caveats and NOT CONFIRMED
+- NOT CONFIRMED: a real Codex turn through OpenRouter. Both sides document the setup, but nothing has run. Repeat the S1 spike with the new provider (about 5 minutes once the key is in).
+- NOT CONFIRMED: what Codex sends for `store` and `previous_response_id` to a custom provider. OpenRouter's Responses API is stateless and returns 400 for `store: true` or a non-null `previous_response_id`.
+- NOT CONFIRMED: that `[features] image_generation = false` stops Codex from sending its hosted image tool to a custom provider. Codex issue #30557 (open, Codex 0.142.0, no maintainer reply) says it did not in one setup. A user in the same issue says it works in the CLI but not in the desktop app. The flag is not on the current config-reference page; it comes from the config-basic rule "to disable a feature, set the key to `false`" and from these issues.
+- NOT CONFIRMED: the host and path Codex calls to load OpenRouter's model catalog when using an `auth` command. Probably `openrouter.ai`, but no page says so. With `env_key` Codex does not load it.
+- NOT CONFIRMED: the format of `model_catalog_json`. The docs name the key but do not describe the file.
+- NOT CONFIRMED: the context window of `openai/gpt-6.2-sol` and `anthropic/claude-sonnet-5.5`. Their OpenRouter pages show no context figure. The search list shows 1.05M for `openai/gpt-6.2-sol-pro` and `openai/gpt-6.2-astra`.
+- NOT CONFIRMED: that Kimi K3.1 Pro is "documented to work well with tool calling". Its page only lists `tools` as accepted. The case for it is the OpenRouter rankings ("Implementation" spend share, #2) and its price. The same is true for Claude Sonnet 5.5 (#3). OpenRouter's Codex guide names `~anthropic/claude-sonnet-latest` as an example model, so Claude is at least shown with Codex.
+- NOT CONFIRMED: which OpenAI and Anthropic endpoints pass `data_collection: "deny"` or `zdr: true`. The docs say the per-model Data Policy tag is "best knowledge", not a definitive source. A public list exists at `GET https://openrouter.ai/api/v1/endpoints/zdr`. Not opened (it is an API call).
+- NOT CONFIRMED: whether `@openrouter/ai-sdk-provider` chat models have a typed `provider` setting. The README shows typed `provider` only for `evaluationModel`. Use `extraBody: { provider: ... }`, which the README documents for any body field.
+- NOT CONFIRMED: `@ai-sdk/openai` pointed at OpenRouter's `/responses`. The AI SDK OpenAI provider may send `store: true`, which OpenRouter rejects. Not tested. Use the OpenRouter provider instead.
+- The Codex `wire_api = "chat"` removal date comes from a GitHub discussion by an OpenAI maintainer (removal "won't be removed until Feb 1" 2026), not a changelog. The current config reference lists `responses` as the only value.
+- The Codex docs pages (`developers.openai.com/codex/...`) now 308-redirect to `learn.chatgpt.com/docs/config-file/...`.
+- The guardrail-to-key assignment endpoint comes from the management keys page (`PUT /api/v1/guardrails/policies/assignments/api-keys/{hash}`). OpenRouter is migrating "guardrails" to "guardrail policies". NOT CONFIRMED which endpoint is current; the dashboard (guardrail, "API Keys" section) works either way.
+
+### Facts: API basics
+- Base URL: `https://openrouter.ai/api/v1`. Auth: `Authorization: Bearer <OPENROUTER_API_KEY>`.
+- Endpoints: `POST /api/v1/responses`, `POST /api/v1/chat/completions`, `POST /api/v1/embeddings`, `GET /api/v1/embeddings/models`, `GET /api/v1/generation?id=...`, `GET /api/v1/key`.
+- Responses API: not labelled beta on any page opened. The SDKs keep `Beta.Responses` only as a deprecated alias. Function tools: `{ type: "function", name, description, parameters, strict }`. The model returns `function_call` items (`call_id`, `name`, `arguments` as a JSON string). Send back `{ type: "function_call_output", call_id, output }`. Parallel tool calls are on (`parallel_tool_calls: true` in the sample). Reasoning with effort levels is supported.
+- Streaming: `stream: true`, Server-Sent Events. OpenRouter sends comment lines (starting with `:`) as keep-alives; skip them. Errors after the 200 arrive as a `response.failed` event (Responses) or a chunk with `error` and `finish_reason: "error"` (Chat). The streaming docs do not mention WebSockets.
+- Optional headers: `HTTP-Referer` (your site URL) and `X-OpenRouter-Title` (your app name). `X-Title` is still accepted. The quickstart says these headers are optional; they only put the app on OpenRouter's leaderboards. We do not need them.
+- Unsupported parameters are ignored, not rejected.
+- Rate limits: no platform-level request cap on paid models. Free (`:free`) models: 20 requests/minute, 50/day (1,000/day after buying 10 credits). Cloudflare blocks traffic that "dramatically" exceeds normal use. Upstream providers can still return 429.
+- Error body: `{ "error": { "code": number, "message": string, "metadata"?: {...} } }`. The HTTP status matches `error.code`.
+  - `402`: "Your account or API key has insufficient credits." A 402 can also happen with a positive balance, when requests already in flight have used up the in-flight spending budget.
+  - `403`: guardrail block, moderation flag, or (per key) "Key limit exceeded".
+  - `503`: no provider meets the routing rules. Expect this when privacy filters remove every provider.
+  - Others: 400 bad request, 401 bad key, 408 timeout, 429 rate limit, 502 model down.
+
+### Facts: Codex with OpenRouter
+- Codex config reference: `wire_api` has one value, `responses`, which is the default. `chat` was deprecated in December 2025 and removed in early 2026.
+- OpenRouter's Codex desktop guide: `wire_api = "responses"` ("the only supported value") and `supports_websockets = false` ("Leave false for OpenRouter").
+- So the working combination by both sides' docs is: Responses wire format, WebSockets off, `base_url = "https://openrouter.ai/api/v1"`. It matches the S1 spike setup.
+- Provider keys (config reference): `name`, `base_url`, `env_key`, `wire_api`, `supports_websockets`, `http_headers`, `env_http_headers`, `query_params`, `requires_openai_auth` (default false), `auth.command`, `auth.args`, `auth.timeout_ms`, `auth.refresh_interval_ms`, `request_max_retries` (4), `stream_max_retries` (5), `stream_idle_timeout_ms` (300000), `model_catalog_url`, `supports_standalone_web_search` (default false). `auth` cannot be combined with `env_key`.
+- `model_provider` cannot be set in a project-local `.codex/config.toml`. Pass it with `--config` / `-c` (TOML values, quote strings) or user config. CLI `--config` wins over all config files.
+- OpenRouter's Codex CLI guide uses `auth.command = "sh"`, `args = ["-c", "echo $OPENROUTER_API_KEY"]` instead of `env_key`. Reason given: with `env_key`, Codex does not fetch the OpenRouter model catalog, so non-OpenAI models get an "Unknown model" fallback-metadata warning. For us the key must stay outside the sandbox, so either form only ever prints a dummy value; the firewall replaces the header.
+- A 401 "key is not an OpenRouter key" means Codex sent another provider's key (for example `OPENAI_API_KEY`).
+- Model metadata: `model_context_window` (tokens), `model_auto_compact_token_limit`, `model_reasoning_effort` (`low`, `medium`, `high`, `xhigh`, `max`; levels depend on the model), `model_reasoning_summary` (`auto`, `concise`, `detailed`, `none`), `model_catalog_json` (path to a JSON catalog).
+- Hosted tools to switch off when not on OpenAI: `web_search = "disabled"` (values `disabled`, `cached`, `indexed`, `live`; default `cached`, and `live` under a full-access sandbox) and `[features] image_generation = false`. `features.web_search` is deprecated; use the top-level `web_search`.
+- Guardrail flag `enforce_first_party_harness_models` "limits coding harnesses to their vendor's own models". Leave it off (null) on the build key's guardrail.
+- Codex versions: npm `@openai/codex` latest is 0.171.0. The sandbox image had 0.169.0 in the spike.
+
+### Facts: models (prices from OpenRouter model pages, 2026-11-21)
+Prices are per 1M tokens, input / output, for the "standard" variant. OpenRouter adds no markup. Several providers serve each model at different prices. The router picks among them unless you set `provider.sort` or `order`.
+
+| Use | OpenRouter id | Context | Price (in / out) | Tools | `response_format` |
+|---|---|---|---|---|---|
+| Build, OpenAI | `openai/gpt-6.2-sol` | NOT CONFIRMED | $2 / $10 (OpenAI, Azure, Bedrock); up to $6 / $30 on other OpenAI tiers | yes | yes |
+| Build, alternative | `anthropic/claude-sonnet-5.5` | NOT CONFIRMED | $2 / $10 (Anthropic, Vertex, Bedrock, Azure); $2.20 / $11 on some | yes | yes |
+| Build, alternative | `moonshotai/kimi-k3.1-pro` | 1M (OpenRouter text index) | from $0.24 / $8.40 (Relace); most providers $1.75–2 / $9–10; Bedrock $4.40 / $22 | yes | yes |
+| Build upgrade | `openai/gpt-6.2-astra` | 1.05M | $8 / $40 | not checked | not checked |
+| Cheap OpenAI | `openai/gpt-6-luna` | NOT CONFIRMED | $0.05 / $0.25 (OpenAI), most $0.10 / $0.50 | yes | yes |
+| Cheap Anthropic | `anthropic/claude-haiku-5.5` | 1M (OpenRouter text index) | $0.10 / $0.50 | yes | yes |
+| Cheap open model | `deepseek/deepseek-v4.1-flash` | NOT CONFIRMED | $0.05 / $0.20 up to $1.50 / $6; common $0.30 / $1.20 | yes | yes |
+| Embeddings | `openai/text-embedding-3-small` | not shown | $0.02 | n/a | n/a |
+| Embeddings large | `openai/text-embedding-3-large` | not shown | $0.13 | n/a | n/a |
+| Embeddings cheap | `perplexity/pplx-embed-v1-0.6b` | not shown | $0.004 | n/a | n/a |
+
+- "Tools" and "`response_format`" mean the model page lists `tools`, `tool_choice` and `response_format` as accepted request fields. No page says "structured outputs" by name.
+- Alias ids also exist, for example `~openai/gpt-sol-latest` and `~anthropic/claude-sonnet-latest`. They move to new versions without notice. Pin exact ids.
+- OpenRouter rankings, "Implementation" task, share of spend: Claude Opus 5.5 23.0%, Kimi K3.1 Pro 8.8%, Claude Sonnet 5.5 6.2%, GPT-6.1-Sol 5.6%. This is usage, not a quality test.
+
+Recommended settings:
+
+| Env var | Id | Cheaper fallback | Why |
+|---|---|---|---|
+| `RMS_BUILD_MODEL` | `openai/gpt-6.2-sol` | `moonshotai/kimi-k3.1-pro` | Sol is OpenAI's own model for Codex, so Codex's prompts and tools fit it. Kimi is the cheapest strong coding model in the rankings. Upgrade: `openai/gpt-6.2-astra` (4x Sol) or `anthropic/claude-sonnet-5.5` (same price as Sol). |
+| `RMS_ASK_MODEL` | `openai/gpt-6.2-sol` | `anthropic/claude-haiku-5.5` | The AI SDK provider uses Chat Completions. `gpt-6-luna` there only calls tools with reasoning off (section 2), so it is not the fallback. |
+| `RMS_EMBED_MODEL` | `openai/text-embedding-3-small` (1536 dims) | `perplexity/pplx-embed-v1-0.6b` (dims NOT CONFIRMED; changing model means re-embedding) | Same model and size as the old plan, so the schema stays. |
+
+```bash
+RMS_LLM_BASE_URL=https://openrouter.ai/api/v1
+RMS_BUILD_MODEL=openai/gpt-6.2-sol           # fallback moonshotai/kimi-k3.1-pro
+RMS_ASK_MODEL=openai/gpt-6.2-sol             # fallback anthropic/claude-haiku-5.5
+RMS_EMBED_MODEL=openai/text-embedding-3-small  # 1536 dims
+```
+
+### Facts: embeddings
+- Yes, OpenRouter has embeddings. `POST https://openrouter.ai/api/v1/embeddings`. Not labelled beta.
+- Body: `model` (required), `input` (string, string array, token arrays, or chunk arrays), `dimensions` (integer, optional), `encoding_format` (`float` or `base64`), `input_type`, `provider` (routing, including `data_collection`), `user`.
+- Response: `{ object: "list", model, data: [{ object: "embedding", index, embedding: number[] }], usage: { prompt_tokens, total_tokens, cost } }`.
+- `openai/text-embedding-3-small` returns 1536 dimensions in the guide's example. Batch by passing an array; no numeric batch limit is stated.
+- The embeddings guide's routing example uses `provider: { order: ["openai", "azure"], allow_fallbacks: true, data_collection: "deny" }`.
+
+### Facts: Vercel AI SDK
+- Package: `@openrouter/ai-sdk-provider` **3.1.0** (npm `latest`, published 2026-09-19). Peer deps `ai@^7.0.0`, `zod@^3.25.76 || ^4.1.8`. Node >= 22. ESM-only. The README: "This release line supports `ai@^7.0.0`". Older lines: 2.9.1 for AI SDK v6, 1.5.4 for v5.
+- It uses OpenRouter's chat and completion APIs (README), not `/responses`.
+- `createOpenRouter({ apiKey, baseURL, headers, extraBody })`. Default instance `openrouter` reads `OPENROUTER_API_KEY` (NOT CONFIRMED by name in the README; pass `apiKey` explicitly).
+- Embeddings: `openrouter.textEmbeddingModel('openai/text-embedding-3-small')` with `embed` / `embedMany`.
+- Extra body fields (for example `provider`) go in `providerOptions.openrouter`, in model settings `extraBody`, or in factory `extraBody`. Usage and cost: model setting `usage: { include: true }`, then `result.providerMetadata.openrouter.usage.cost`.
+- OpenRouter's own AI SDK guide still shows `maxSteps` and `parameters`. Those are older AI SDK names. Use the v7 names from section 4 (`stopWhen: isStepCount(n)`, `inputSchema`).
+- Alternative: `@ai-sdk/openai-compatible` **3.0.94** with `createOpenAICompatible({ name, baseURL: "https://openrouter.ai/api/v1", apiKey, includeUsage: true, supportsStructuredOutputs: true })`, `.chatModel(id)`, `.embeddingModel(id)`. It also speaks Chat Completions. Recommended: the OpenRouter provider. It is OpenRouter's official package, documented by both OpenRouter and the AI SDK site, and passes OpenRouter fields and cost data.
+
+### Facts: privacy
+- OpenRouter itself does not store prompts or responses unless you turn on "Private Input & Output Logging" (off by default). It stores metadata (tokens, latency). "OpenRouter Use of Inputs/Outputs" (1% discount for letting OpenRouter use prompts) is off by default. Keep both off.
+- Account level, privacy settings (`openrouter.ai/settings/privacy`): turn off providers that train on inputs (paid and free are separate switches). Enforce ZDR per model group: Anthropic, OpenAI, Google, SpaceXSI, all other models. With ZDR on, "Safety Retention" endpoints (keep data only for abuse checks, no training) are still allowed unless you turn that off.
+- Per request, the `provider` object (Responses, Chat, Embeddings):
+  - `data_collection: "deny"`: "use only providers which do not collect user data". Default `"allow"` = "allow providers which store user data non-transiently and may train on it".
+  - `zdr: true`: route only to ZDR endpoints (plus Safety Retention if your settings allow). It can only add rules, never remove account or guardrail rules.
+  - Also `only`, `ignore`, `order`, `allow_fallbacks` (default true), `require_parameters`, `sort`, `max_price`.
+- Guardrails (per key or workspace): `enforce_zdr_openai`, `enforce_zdr_anthropic`, `enforce_zdr_google`, `enforce_zdr_xai`, `enforce_zdr_other`, `enable_paid_model_training`, `enable_free_model_training`, `allowed_models`, `allowed_providers`.
+- Cost in availability: fewer providers per model. Some models disappear (the ZDR page: with Google on "ZDR only", "most Google models become unavailable"). When nothing is left, the request fails with 503.
+- ZDR does not cover server tools or plugins (web search and so on). In-memory prompt caching is not counted as retention. From 2026-10-27 OpenRouter screens all requests, ZDR included, for CSAM and may keep flagged content.
+- EU or US in-region processing (`eu.openrouter.ai`, `us.openrouter.ai`) needs a Business or Enterprise plan. Not for us.
+
+### Facts: key safety
+- Create a key with a cap: dashboard ("Credit limit", reset interval), or `POST https://openrouter.ai/api/v1/keys` with a management key. Body: `name` (required), `limit` (USD, null = no cap), `limit_reset` (`daily`, `weekly`, `monthly`, or null; resets at midnight UTC), `include_byok_in_limit`, `expires_at` (ISO 8601 with seconds), `workspace_id`. The response returns the key string once.
+- Change a cap: `PATCH /api/v1/keys/{hash}` with the same fields.
+- Management keys cannot call model endpoints. A normal key cannot create keys.
+- Model allow list: not on the key itself. Use a guardrail with `allowed_models` (and `limit_usd` + `reset_interval` for a second budget), assigned to the key. Only one guardrail can be assigned directly to a key.
+- Over the cap: `403` "Key limit exceeded" until reset.
+- Budget counter: `GET https://openrouter.ai/api/v1/key` with the key itself. Returns `data.limit`, `data.limit_remaining`, `data.limit_reset`, `data.usage`, `data.usage_daily`, `data.usage_weekly`, `data.usage_monthly` (USD), `data.expires_at`, `data.effective_budget` (`limit_usd`, `spend_usd`, `remaining_usd`, `resets_at`), `data.is_free_tier`. `data.rate_limit` is deprecated (always -1).
+- Per-request cost: `GET /api/v1/generation?id=...`, or `usage.cost` in the response.
+
+### Facts: firewall allow list
+- One host for everything we use: `openrouter.ai` (all paths under `/api/v1`). The Decisions API (alpha, not used) is `openrouter.ai/api/alpha`.
+- `eu.openrouter.ai` and `us.openrouter.ai` are only for Business or Enterprise in-region routing. Do not allow them.
+- No page mentions WebSockets for the OpenRouter API. Streaming is SSE over normal HTTPS. Codex must have `supports_websockets = false`.
+- Inject `Authorization: Bearer <key>` and pin `Host: openrouter.ai` (the spike found the firewall checks Host against SNI). Inference: since the Authorization header is replaced, any dummy value inside the sandbox works, as with OpenAI in S1.
+- Narrow it with match rules: `POST /api/v1/responses` for Codex, plus a final 403 rule. Codex may also need `GET /api/v1/models` for its catalog (NOT CONFIRMED). The Ask agent and embeddings run in our Vercel functions, not in the sandbox, so they need no firewall rule.
+
+### Snippets
+
+```bash
+# Inside the sandbox, from the S1 spike command with the provider swapped. NOT CONFIRMED end to end.
+# runCommand env: { OPENROUTER_API_KEY: "<any dummy text>" }  (firewall replaces the header)
+codex exec --json --skip-git-repo-check --sandbox danger-full-access --cd /vercel/app \
+  --model "$RMS_BUILD_MODEL" \
+  --config approval_policy='"never"' --config analytics.enabled=false --config check_for_update_on_startup=false \
+  --config web_search='"disabled"' \
+  --config features.image_generation=false \
+  --config model_context_window=400000 \
+  --config model_reasoning_effort='"medium"' \
+  --config model_provider='"openrouter"' \
+  --config model_providers.openrouter.name='"OpenRouter through the firewall"' \
+  --config model_providers.openrouter.base_url='"https://openrouter.ai/api/v1"' \
+  --config model_providers.openrouter.env_key='"OPENROUTER_API_KEY"' \
+  --config model_providers.openrouter.wire_api='"responses"' \
+  --config model_providers.openrouter.supports_websockets=false \
+  "<task>" </dev/null
+# model_context_window: our own pick (NOT CONFIRMED for gpt-6.2-sol); set it at or below the model's real window.
+```
+
+```ts
+// Sandbox firewall rule for OpenRouter (shape from section 3)
+networkPolicy: {
+  allow: {
+    "openrouter.ai": [
+      {
+        match: { path: { startsWith: "/api/v1/responses" }, method: ["POST"] },
+        transform: [{ headers: { Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`, Host: "openrouter.ai" } }],
+      },
+      { response: { statusCode: 403 } },
+    ],
+  },
+},
+```
+
+```ts
+// Ask agent: app/api/ask/route.ts (AI SDK v7, names as in section 4)
+import { streamText, UIMessage, convertToModelMessages, tool, isStepCount,
+         createUIMessageStreamResponse, toUIMessageStream } from "ai";
+import { createOpenRouter } from "@openrouter/ai-sdk-provider";
+import { z } from "zod";
+
+const openrouter = createOpenRouter({
+  apiKey: process.env.OPENROUTER_API_KEY!,
+  baseURL: process.env.RMS_LLM_BASE_URL,            // https://openrouter.ai/api/v1
+  extraBody: { provider: { data_collection: "deny", zdr: true } },  // every request
+});
+
+export async function POST(req: Request) {
+  const { messages }: { messages: UIMessage[] } = await req.json();
+  const result = streamText({
+    model: openrouter(process.env.RMS_ASK_MODEL!, { usage: { include: true } }),
+    messages: await convertToModelMessages(messages),
+    stopWhen: isStepCount(6),
+    tools: {
+      runSql: tool({
+        description: "Run a read-only SQL query on this restaurant's data",
+        inputSchema: z.object({ sql: z.string() }),
+        execute: async ({ sql }) => ({ rows: [] /* call the Ask query tool */ }),
+      }),
+    },
+  });
+  return createUIMessageStreamResponse({ stream: toUIMessageStream({ stream: result.stream }) });
+}
+```
+
+```ts
+// Embeddings
+import { embed, embedMany } from "ai";
+const { embedding } = await embed({
+  model: openrouter.textEmbeddingModel(process.env.RMS_EMBED_MODEL!),   // 1536 numbers
+  value: "Saturday brunch covers",
+});
+```
+
+```bash
+# Budget counter (server side, never in the browser)
+curl -s https://openrouter.ai/api/v1/key -H "Authorization: Bearer $OPENROUTER_API_KEY"
+# -> { "data": { "limit": 20, "limit_remaining": 13.4, "limit_reset": "monthly", "usage_daily": 0.8, ... } }  (values illustrative)
+```
+
+### Sources
+- https://openrouter.ai/docs/quickstart
+- https://openrouter.ai/docs/api/reference/overview
+- https://openrouter.ai/docs/api/reference/limits
+- https://openrouter.ai/docs/api/reference/errors-and-debugging
+- https://openrouter.ai/docs/api/reference/responses/overview
+- https://openrouter.ai/docs/api_reference/responses/tool-calling.md
+- https://openrouter.ai/docs/api_reference/streaming.md
+- https://openrouter.ai/docs/api/reference/embeddings
+- https://openrouter.ai/docs/api_reference/embeddings.md
+- https://openrouter.ai/docs/api/api-reference/embeddings/submit-an-embedding-request.md
+- https://openrouter.ai/collections/embedding-models
+- https://openrouter.ai/docs/cookbook/coding-agents/codex-cli.md
+- https://openrouter.ai/docs/cookbook/coding-agents/codex-desktop.md
+- https://openrouter.ai/docs/guides/routing/provider-selection.md
+- https://openrouter.ai/docs/guides/features/zdr.md
+- https://openrouter.ai/docs/guides/privacy/data-collection.md
+- https://openrouter.ai/docs/guides/privacy/provider-logging.md
+- https://openrouter.ai/docs/guides/features/guardrails.md
+- https://openrouter.ai/docs/api/api-reference/guardrails/create-a-guardrail.md
+- https://openrouter.ai/docs/guides/overview/auth/management-api-keys.md
+- https://openrouter.ai/docs/guides/best-practices/capping-shared-agent-keys.md
+- https://openrouter.ai/docs/api/api-reference/api-keys/create-a-new-api-key.md
+- https://openrouter.ai/docs/api/api-reference/api-keys/get-current-api-key.md
+- https://openrouter.ai/docs/guides/community/vercel-ai-sdk.md
+- https://openrouter.ai/docs/llms.txt, https://openrouter.ai/docs/_llms/docs, https://openrouter.ai/docs/_llms/api-reference (indexes)
+- https://openrouter.ai/openai/gpt-6.2-sol, https://openrouter.ai/openai/gpt-6.2-sol/providers, https://openrouter.ai/openai/gpt-6.2-sol/llms.txt
+- https://openrouter.ai/openai/gpt-6-luna, https://openrouter.ai/openai/gpt-6-luna/llms.txt
+- https://openrouter.ai/anthropic/claude-sonnet-5.5, https://openrouter.ai/anthropic/claude-sonnet-5.5/providers, https://openrouter.ai/anthropic/claude-sonnet-5.5/llms.txt
+- https://openrouter.ai/anthropic/claude-haiku-5.5/llms.txt
+- https://openrouter.ai/moonshotai/kimi-k3.1-pro, https://openrouter.ai/moonshotai/kimi-k3.1-pro/llms.txt
+- https://openrouter.ai/deepseek/deepseek-v4.1-flash/llms.txt
+- https://openrouter.ai/anthropic (model ids and `~` aliases)
+- https://openrouter.ai/models?q=claude-sonnet-5.5 (list with context and price for `gpt-6.2-astra`, `gpt-6.2-sol-pro`)
+- https://openrouter.ai/rankings?category=programming
+- https://openrouter.ai/for-ai (text index: context for Haiku 5.5, Kimi K3.1 Pro)
+- https://learn.chatgpt.com/docs/config-file/config-reference.md (developers.openai.com/codex/config-reference redirects here)
+- https://learn.chatgpt.com/docs/config-file/config-advanced (developers.openai.com/codex/config-advanced redirects here)
+- https://learn.chatgpt.com/docs/config-file/config-basic
+- https://github.com/openai/codex/discussions/7782 (chat wire API deprecation, OpenAI maintainer)
+- https://github.com/openai/codex/issues/30557 (image_generation sent to non-OpenAI providers, open)
+- https://registry.npmjs.org/@openrouter/ai-sdk-provider (README, dist-tags, publish date), https://registry.npmjs.org/@openrouter/ai-sdk-provider/latest
+- https://registry.npmjs.org/@ai-sdk/openai-compatible/latest, https://registry.npmjs.org/@openai/codex/latest, https://registry.npmjs.org/ai/latest
+- https://ai-sdk.dev/providers/community-providers/openrouter
+- https://ai-sdk.dev/providers/openai-compatible-providers
