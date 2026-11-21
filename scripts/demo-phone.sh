@@ -4,6 +4,10 @@
 #   scripts/demo-phone.sh          start phone mode (builds the web app, starts the servers)
 #   scripts/demo-phone.sh stop     stop phone mode and rebuild the normal laptop-only web app
 #   scripts/demo-phone.sh status   say what is running
+#   scripts/demo-phone.sh start --no-signups
+#                                  as start, but nobody can create a new restaurant while it runs
+#                                  (the API gets RMS_MAX_RESTAURANTS=0). Off by default: the demo
+#                                  itself signs up a restaurant. "stop" ends it with the API.
 #
 # Settings (environment, all optional):
 #   PHONE_ADDRESS=name|ip   how the phone reaches the laptop. Default "name" (this Mac's .local
@@ -117,7 +121,7 @@ stop_all() {
 
 status() {
   if [ ! -f "$ENV_PHONE" ]; then say "Phone mode is not running."; return 0; fi
-  say "Phone mode settings:"; sed -nE 's/^(WEB_URL|APPS_URL)=/  \1=/p' "$ENV_PHONE"
+  say "Phone mode settings:"; sed -nE 's/^(WEB_URL|APPS_URL)=/  \1=/p; s/^# (New restaurants: off).*/  \1/p' "$ENV_PHONE"
   local f
   for f in "$STATE"/*.port; do [ -f "$f" ] || continue; local p; p="$(cat "$f")"; say "  $(basename "${f%.port}"): port $p $([ -n "$(listener "$p")" ] && echo up || echo DOWN)"; done
 }
@@ -136,6 +140,13 @@ start_bg() { # name port dir cmd... (environment comes from the caller)
 }
 
 start() {
+  local no_signups="" arg
+  for arg in "$@"; do
+    case "$arg" in
+      --no-signups) no_signups=1 ;;
+      *) die "unknown option '$arg'. The only option is --no-signups." ;;
+    esac
+  done
   [ -f "$ENV_LOCAL" ] || die "no .env.local. Run scripts/dev-db-roles.sh first."
   [ -f "$ENV_PHONE" ] && die "already running. Use: scripts/demo-phone.sh stop"
   command -v lsof >/dev/null || die "lsof is missing."
@@ -182,6 +193,7 @@ start() {
   {
     echo "# Phone mode, written by scripts/demo-phone.sh at $(date -u +%Y-%m-%dT%H:%M:%SZ). Removed by 'stop'. Not secret."
     echo "RMS_LOCAL_DEMO=1"
+    [ -n "$no_signups" ] && echo "# New restaurants: off (--no-signups). The API runs with RMS_MAX_RESTAURANTS=0."
     echo "WEB_URL=$web_origin"
     [ -n "$apps_origin" ] && echo "APPS_URL=$apps_origin"
     echo "RMS_LOCAL_DEMO_ORIGINS=$web_origin${apps_origin:+,$apps_origin}"
@@ -206,7 +218,7 @@ start() {
   # The API keeps WEB_URL on the laptop address: the build preview (ADR 0008) takes its shell
   # origin from it and stays on this laptop. The phone address reaches the API as an extra origin.
   WEB_URL="http://$laptop_host:$WEB_PORT" WEB_EXTRA_ORIGINS="$web_origin" ADMIN_URL="http://$console_host:$CONSOLE_PORT" API_PORT="$API_PORT" API_HOST=0.0.0.0 \
-    start_bg api "$API_PORT" "$ROOT/apps/api" "$ROOT/apps/api/node_modules/.bin/tsx" --env-file=../../.env.local src/dev.ts
+    start_bg api "$API_PORT" "$ROOT/apps/api" env ${no_signups:+RMS_MAX_RESTAURANTS=0} "$ROOT/apps/api/node_modules/.bin/tsx" --env-file=../../.env.local src/dev.ts
   start_bg web "$WEB_PORT" "$ROOT/apps/web" "$ROOT/apps/web/node_modules/.bin/next" start --port "$WEB_PORT" --hostname 0.0.0.0
   if [ "$CONSOLE_PORT" != off ]; then
     NEXT_PUBLIC_API_URL="http://127.0.0.1:$API_PORT" NEXT_PUBLIC_SUPABASE_URL="$sb_local" \
@@ -230,7 +242,7 @@ start() {
 }
 
 case "${1:-start}" in
-  start) start ;;
+  start) [ $# -gt 0 ] && shift; start "$@" ;;
   stop) stop_all ;;
   status) status ;;
   *) die "unknown command '$1'. Use start, stop or status." ;;

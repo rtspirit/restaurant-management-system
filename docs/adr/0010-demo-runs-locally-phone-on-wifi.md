@@ -19,13 +19,20 @@ Nothing is deployed for the demo. Everything runs on Rahul's laptop. The phone p
 
 `http://<laptop>` is not a secure context in a browser. Checked: nothing RMS needs breaks. Sign-in with a password, the session cookies (`SameSite=Lax`, not `Secure`) and `crypto.getRandomValues` all work there. Nothing in the web app, console, `@rms/ui` or the mini-app SDK uses `crypto.subtle`, `crypto.randomUUID`, service workers or the clipboard in the browser. So no local HTTPS and no certificate on the phone.
 
-## The risk
+## Risk on shared Wi-Fi
 
-While phone mode runs, **anyone on the same Wi-Fi can reach the demo**: the web app, the API and the local sign-in service. The script says so in one line every time it starts.
+While phone mode runs, **anyone on the same Wi-Fi can reach the demo**: the web app and the API. The script says so in one line every time it starts. `start --no-signups` stops new restaurants while it runs (off by default: the demo signs one up).
 
-Separately, and true with or without phone mode: the local Supabase containers already listen on every address, including the database (port 54322) with the standard local development password, and the laptop's firewall is off. Anyone on the same network can reach that database whenever Supabase is running. Changing it means restarting the containers, which nine agents are using today, so it is not changed now.
+The security review of phone mode found more. All of it is true with or without phone mode, whenever the local Supabase stack runs and the laptop is on a network:
 
-**Advice:** run the demo on a trusted network, or better, on the phone's own hotspot with the laptop joined to it. Do not run it on venue or hotel Wi-Fi.
+- The local sign-in service accepts its well-known default keys from any device on the network. With them, anyone can list the accounts and take any of them over (set a password, sign in as the owner or the maintainer).
+- The local database accepts its default login from the network.
+- The local mail catcher is open to the network.
+- Sign-up is open: anyone can make an account, and (unless phone mode runs with `--no-signups`) a restaurant.
+
+Containment today is the network itself: use the phone's own hotspot, with only the laptop and the demo phone on it. Rahul accepted this for the demo day. Everything is torn down after (`scripts/demo-phone.sh stop`, then stop Supabase). No system or firewall settings are changed.
+
+The security review's checks for these are in `tests/security/phone-mode/known-limits.test.ts`.
 
 ## Deliberately not done
 
