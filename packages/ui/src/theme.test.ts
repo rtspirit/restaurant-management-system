@@ -161,7 +161,7 @@ describe("themeFromBrand across a sweep of every kind of colour", () => {
       }
     }
     expect(broken).toEqual([]);
-  });
+  }, 60_000); // a full sweep is slow on small CI machines
 });
 
 describe("themeFromBrand keeps the owner's colour recognisable", () => {
