@@ -23,7 +23,6 @@ const users: string[] = [];
 let staffToken = "";
 let memberToken = "";
 let strangerToken = "";
-const BAD = "0193a3c0-0000-7000-8000-0000000000f8";
 
 const signUp = async (): Promise<{ id: string; token: string }> => {
   const res = await fetch(`${supabase()}/auth/v1/signup`, {
@@ -95,9 +94,6 @@ describe.skipIf(!hasDb)("maintainer console API", () => {
     created.t2 = await record(ORG_A, ["new_connection"]);
     created.t3a = await record(ORG_A, ["public_share"]);
     created.t3b = await record(ORG_B, ["new_dependency"]);
-    // A hand-made row whose tier disagrees with its signals, as an old fixture would be.
-    await sql`insert into platform.change_sets (id, org_id, origin, actor, signals, tier, summary, decision)
-              values (${BAD}, ${ORG_B}, 'system', 'system:fixture', ${["public_share"]}::text[], 'T1', 'hand-made', 'pending_maintainer')`;
   });
 
   afterAll(async () => {
@@ -135,7 +131,9 @@ describe.skipIf(!hasDb)("maintainer console API", () => {
     for (const i of mine(body.items)) expect(["Admin Test Kitchen", "Admin Test Pizza"]).toContain(i.restaurantName);
   });
 
-  it("shows one restaurant's changes newest first, flagging a malformed row instead of failing", async () => {
+  // A malformed stored row (tier disagreeing with signals) can no longer be inserted; its
+  // handling is unit-tested in @rms/governance (mapper, drain and approve refusal).
+  it("shows one restaurant's changes newest first", async () => {
     const a = (await (await call(`/admin/feed?org=${toPublicId("org", ORG_A)}`, { token: staffToken })).json()) as { items: Item[] };
     expect(a.items.map((i) => i.id)).toEqual([created.t3a, created.t2, created.t0].map((c) => c?.id));
     expect(a.items.map((i) => [i.tier, i.decision, i.restaurantName])).toEqual([
@@ -147,7 +145,6 @@ describe.skipIf(!hasDb)("maintainer console API", () => {
     expect(bRes.status).toBe(200);
     const b = (await bRes.json()) as { items: Array<Item & { mismatch?: boolean }> };
     expect(b.items.map((i) => [i.id, i.mismatch ?? false])).toEqual([
-      [toPublicId("chg", BAD), true],
       [created.t3b?.id, false],
       [created.t1?.id, false],
     ]);
@@ -185,10 +182,7 @@ describe.skipIf(!hasDb)("maintainer console API", () => {
     const qbRes = await call(`/admin/queue?org=${toPublicId("org", ORG_B)}`, { token: staffToken });
     expect(qbRes.status).toBe(200);
     const qb = (await qbRes.json()) as { items: Array<Item & { mismatch?: boolean }> };
-    expect(qb.items.map((i) => [i.id, i.mismatch ?? false])).toEqual([
-      [created.t3b?.id, false],
-      [toPublicId("chg", BAD), true],
-    ]);
+    expect(qb.items.map((i) => [i.id, i.mismatch ?? false])).toEqual([[created.t3b?.id, false]]);
     expect((await call("/admin/queue", { token: staffToken })).status).toBe(200);
     expect((await call("/admin/queue?org=bad", { token: staffToken })).status).toBe(400);
 

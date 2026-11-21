@@ -92,9 +92,9 @@ adminRoutes.post("/changes/:id/decision", async (c) => {
     return c.json({ change });
   } catch (e) {
     if (e instanceof GovernanceError) {
-      return e.reason === "not_found"
-        ? fail(404, "not_found", "That change was not found.")
-        : fail(409, "conflict", "This change is not waiting for a decision.");
+      if (e.reason === "not_found") return fail(404, "not_found", "That change was not found.");
+      if (e.reason === "not_allowed") return fail(409, "conflict", "This change does not match its rules. It can only be rejected.");
+      return fail(409, "conflict", "This change is not waiting for a decision.");
     }
     throw e;
   }

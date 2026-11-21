@@ -3,6 +3,9 @@ import type { FeedItem } from "@/lib/api";
 
 const when = (iso: string) => new Date(iso).toLocaleString();
 
+/** Many demo restaurants share a name and a restaurant can rename itself: show its id's tail too. */
+const shortId = (orgId: string) => orgId.slice(-6);
+
 /** One row per change set. Maintainer words: tier codes and signal names are fine here. */
 export function ChangeTable({ items, caption, actions }: { items: FeedItem[]; caption: string; actions?: (item: FeedItem) => ReactNode }) {
   return (
@@ -27,7 +30,9 @@ export function ChangeTable({ items, caption, actions }: { items: FeedItem[]; ca
             <td>
               <time dateTime={item.createdAt}>{when(item.createdAt)}</time>
             </td>
-            <td>{item.restaurantName}</td>
+            <td>
+              {item.restaurantName} <small title={item.orgId}>({shortId(item.orgId)})</small>
+            </td>
             <td>{item.tier}</td>
             <td>
               {item.decision}

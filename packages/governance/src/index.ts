@@ -2,6 +2,9 @@
 export { type AuditInput, writeAudit } from "./audit.js";
 export {
   type ChangeRow,
+  type OwnerChangeFields,
+  canApprove,
+  ownerChanges,
   type Decision,
   GovernanceError,
   INITIAL_DECISION,
@@ -14,5 +17,5 @@ export {
   toChangeSet,
 } from "./changes.js";
 export { type FeedFilter, type FeedItem, listFeed, listQueue } from "./feed.js";
-export { type DrainResult, drainOutbox } from "./outbox.js";
-export { maintainerSummary, ownerSummaryFor, safeOwnerSummary } from "./summaries.js";
+export { type DrainResult, type NotificationSpec, drainOutbox, notificationsFor } from "./outbox.js";
+export { type ChangeSubject, cleanName, hasMaintainerWords, maintainerSummary, ownerSummaryFor } from "./summaries.js";

@@ -18,7 +18,7 @@ import {
 } from "@rms/contracts";
 import { type Sql, type Tx, actorText, newUuid } from "@rms/db";
 import { orgUuidOf, writeAudit } from "./audit.js";
-import { maintainerSummary, ownerSummaryFor, safeOwnerSummary, sortSignals } from "./summaries.js";
+import { type ChangeSubject, hasMaintainerWords, maintainerSummary, ownerSummaryFor, sortSignals } from "./summaries.js";
 
 type Origin = (typeof ChangeOrigin.options)[number];
 export type Decision = ChangeSet["decision"];
@@ -94,10 +94,11 @@ export type RecordChangeInput = {
   origin: Origin;
   actor: Actor;
   signals: readonly ChangeSignal[];
-  /** Maintainer summary. Defaults to a rule-based one. */
-  summary?: string;
-  /** Owner summary, plain words. Replaced by a rule-based one if it is not plain words. */
-  ownerSummary?: string;
+  /**
+   * What the change is about. Both summaries are built from the signals and this by fixed rules;
+   * no caller-written sentence is stored. `name` is data: cleaned, capped and quoted.
+   */
+  subject?: ChangeSubject;
   /** Keys and shapes only, never field values tagged personal, payroll or financial. */
   diff?: Record<string, unknown>;
   runUuid?: string | null;
@@ -115,18 +116,20 @@ export const recordChange = async (tx: Tx, input: RecordChangeInput): Promise<Re
   const decision = INITIAL_DECISION[tier];
   const orgUuid = orgUuidOf(input.orgUuid);
   const appUuid = input.appUuid ? (input.appUuid.startsWith("app_") ? toUuid(input.appUuid) : input.appUuid) : null;
-  const summary = (input.summary?.trim() || maintainerSummary(origin, signals)).slice(0, 500);
-  const ownerSummary = safeOwnerSummary(input.ownerSummary, signals);
+  const summary = maintainerSummary(origin, signals, input.subject).slice(0, 500);
+  const ownerSummary = ownerSummaryFor(signals, input.subject);
   const id = newUuid();
 
-  const [row] = await tx<ChangeRow[]>`
+  // The restaurant-facing login may read back only id, org, app, origin, run, owner summary,
+  // decision and the timestamps, so only those are returned; the rest is what we computed.
+  const [row] = await tx<{ id: string; created_at: Date }[]>`
     insert into platform.change_sets
       (id, org_id, app_id, origin, run_id, actor, signals, tier, summary, owner_summary, diff, decision, applied_at)
     values
       (${id}, ${orgUuid}, ${appUuid}, ${origin}, ${input.runUuid ?? null}, ${actorText(input.actor)}, ${signals}::text[],
        ${tier}, ${summary}, ${ownerSummary}, ${tx.json((input.diff ?? {}) as never)}, ${decision},
        ${decision === "applied" ? tx`now()` : null})
-    returning id, org_id, app_id, origin, actor, signals, tier, summary, owner_summary, decision, decided_at, created_at`;
+    returning id, created_at`;
   if (!row) throw new Error("Change set was not recorded");
 
   await writeOutbox(tx, {
@@ -141,10 +144,24 @@ export const recordChange = async (tx: Tx, input: RecordChangeInput): Promise<Re
     action: "change.record",
     targetType: "change_set",
     targetId: id,
-    meta: { tier, decision, origin, signalCount: signals.length },
+    // No tier codes or signal names: the restaurant can read its own audit rows.
+    meta: { decision, origin, signalCount: signals.length },
     requestId: input.requestId ?? null,
   });
-  return toChangeSet(row);
+  return toChangeSet({
+    id,
+    org_id: orgUuid,
+    app_id: appUuid,
+    origin,
+    actor: actorText(input.actor),
+    signals,
+    tier,
+    summary,
+    owner_summary: ownerSummary,
+    decision,
+    decided_at: null,
+    created_at: row.created_at,
+  });
 };
 
 const RETURNING = "id, org_id, app_id, origin, actor, signals, tier, summary, owner_summary, decision, decided_at, created_at";
@@ -184,11 +201,22 @@ export const confirmByOwner = async (
       action: "change.confirm",
       targetType: "change_set",
       targetId: id,
-      meta: { tier: row.tier },
+      meta: { decision: "applied" },
       requestId: input.requestId ?? null,
     });
     return toChangeSet(row);
   }) as Promise<RecordedChange>;
+};
+
+/**
+ * Whether a stored change may be approved: held for a maintainer, tier T3, and the tier matches
+ * its signals. A row that fails any of these can still be rejected, never approved.
+ */
+export const canApprove = (row: { decision: string; tier: string; signals: readonly string[] }): boolean => {
+  if (row.decision !== "pending_maintainer" || row.tier !== "T3") return false;
+  const parsed = row.signals.map((s) => ChangeSignalSchema.safeParse(s));
+  if (parsed.some((p) => !p.success)) return false;
+  return tierForSignals(parsed.map((p) => p.data as ChangeSignal)) === row.tier;
 };
 
 /**
@@ -209,10 +237,11 @@ export const decideByStaff = async (
   const decision: Decision = input.decision === "approve" ? "approved" : "rejected";
   const note = input.note?.trim() ? input.note.trim().slice(0, 1000) : null;
   return adminSql.begin(async (tx) => {
-    const [current] = await tx<{ decision: Decision; org_id: string }[]>`
-      select decision, org_id from platform.change_sets where id = ${id} for update`;
+    const [current] = await tx<{ decision: Decision; org_id: string; tier: string; signals: string[] }[]>`
+      select decision, org_id, tier, signals from platform.change_sets where id = ${id} for update`;
     if (!current) throw new GovernanceError("not_found");
     if (current.decision !== "pending_maintainer") throw new GovernanceError("not_pending");
+    if (decision === "approved" && !canApprove(current)) throw new GovernanceError("not_allowed");
     await tx`
       insert into platform.change_reviews (id, change_set_id, staff_id, decision, note)
       values (${newUuid()}, ${id}, ${input.staffUuid}, ${decision}, ${note})`;
@@ -254,10 +283,35 @@ export const OWNER_STATUS: Record<Decision, OwnerChangeNotice["status"]> = {
   rejected: "declined",
 };
 
-/** The change as the owner sees it: plain words, no tier codes, no signal names. */
-export const ownerNotice = (change: ChangeSet & { ownerSummary?: string }): OwnerChangeNotice => ({
-  id: change.id,
-  summary: change.ownerSummary !== undefined ? safeOwnerSummary(change.ownerSummary, change.signals) : ownerSummaryFor(change.signals),
-  status: OWNER_STATUS[change.decision],
-  at: change.decidedAt ?? change.createdAt,
-});
+/** The fields an owner's view is built from. All readable by the restaurant-facing login. */
+export type OwnerChangeFields = Pick<ChangeSet, "id" | "decision" | "createdAt" | "decidedAt"> & { ownerSummary: string };
+
+/** The change as the owner sees it, from the owner summary and decision only. */
+export const ownerNotice = (change: OwnerChangeFields): OwnerChangeNotice => {
+  const text = change.ownerSummary.trim();
+  return {
+    id: change.id,
+    summary: text.length === 0 || hasMaintainerWords(text) ? "A change to your restaurant" : text.slice(0, 240),
+    status: OWNER_STATUS[change.decision],
+    at: change.decidedAt ?? change.createdAt,
+  };
+};
+
+/**
+ * The restaurant's own changes, newest first, in owner words. Works inside `withOrg(apiDb(), ...)`:
+ * it selects only the columns the restaurant-facing login may read.
+ */
+export const ownerChanges = async (tx: Tx, limit = 50): Promise<OwnerChangeNotice[]> => {
+  const rows = await tx<{ id: string; owner_summary: string; decision: Decision; created_at: Date; decided_at: Date | null }[]>`
+    select id, owner_summary, decision, created_at, decided_at from platform.change_sets
+    order by created_at desc, id desc limit ${Math.min(Math.max(limit, 1), 200)}`;
+  return rows.map((r) =>
+    ownerNotice({
+      id: toPublicId("chg", r.id),
+      ownerSummary: r.owner_summary,
+      decision: r.decision,
+      createdAt: r.created_at.toISOString(),
+      decidedAt: r.decided_at ? r.decided_at.toISOString() : null,
+    }),
+  );
+};

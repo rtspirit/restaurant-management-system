@@ -66,9 +66,15 @@ export default function QueuePage() {
                 onChange={(e) => setNotes((n) => ({ ...n, [item.id]: e.target.value }))}
               />
               <br />
-              <button type="button" onClick={() => void decide(item, "approve")}>
-                Approve
-              </button>{" "}
+              {item.mismatch ? (
+                <p>This change does not match its rules, so it can only be rejected.</p>
+              ) : (
+                <>
+                  <button type="button" onClick={() => void decide(item, "approve")}>
+                    Approve
+                  </button>{" "}
+                </>
+              )}
               <button type="button" onClick={() => void decide(item, "reject")}>
                 Reject
               </button>

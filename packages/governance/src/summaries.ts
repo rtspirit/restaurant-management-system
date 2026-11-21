@@ -1,7 +1,12 @@
-// Rule-based wording for change sets. No model writes these. Two audiences:
+// Rule-based wording for change sets. No model and no caller writes these sentences. Two audiences:
 //   - maintainers see tier codes and signal names (their own words),
 //   - owners see plain everyday words, never a tier code or a signal name.
-import { type ChangeSignal, ChangeSignal as ChangeSignalSchema, SIGNAL_TIER } from "@rms/contracts";
+// The only caller-supplied text is a subject name, which is treated as data: cleaned, capped and
+// always placed in quotes inside a fixed sentence.
+import { type ChangeSignal, SIGNAL_TIER } from "@rms/contracts";
+
+/** What a change is about. `name` is data (an app or connection name), never wording. */
+export type ChangeSubject = { kind: "app" | "connection" | "settings" | "listing"; name?: string | undefined };
 
 /** One plain phrase per signal, for the owner. */
 const OWNER_PHRASE: Record<ChangeSignal, string> = {
@@ -24,36 +29,62 @@ const OWNER_PHRASE: Record<ChangeSignal, string> = {
   security_check_blocked: "A safety check stopped something",
 };
 
-/** Signals, strongest first, without repeats. */
-export const sortSignals = (signals: readonly ChangeSignal[]): ChangeSignal[] =>
-  [...new Set(signals)].filter((s) => s in SIGNAL_TIER).sort((a, b) => (SIGNAL_TIER[b] > SIGNAL_TIER[a] ? 1 : SIGNAL_TIER[b] < SIGNAL_TIER[a] ? -1 : a.localeCompare(b)));
+const KIND_WORD: Record<ChangeSubject["kind"], string> = {
+  app: "mini-app",
+  connection: "connection",
+  settings: "settings",
+  listing: "Marketplace listing",
+};
 
-/** Maintainer summary: origin plus signal names, strongest first. */
-export const maintainerSummary = (origin: string, signals: readonly ChangeSignal[]): string => {
+/** Signals, strongest first, without repeats. Unknown names are dropped. */
+export const sortSignals = (signals: readonly ChangeSignal[]): ChangeSignal[] =>
+  [...new Set(signals)]
+    .filter((s) => s in SIGNAL_TIER)
+    .sort((a, b) => (SIGNAL_TIER[b] > SIGNAL_TIER[a] ? 1 : SIGNAL_TIER[b] < SIGNAL_TIER[a] ? -1 : a.localeCompare(b)));
+
+/**
+ * Cleans a subject name: control characters and angle brackets removed, quotes replaced,
+ * whitespace collapsed, trimmed, at most 60 characters. Returns "" when nothing is left.
+ */
+export const cleanName = (name: string | undefined): string =>
+  (name ?? "")
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: removing control characters is the point
+    .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029<>]/g, " ")
+    .replace(/["\u201c\u201d]/g, "'")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 60)
+    .trim();
+
+const subjectText = (subject: ChangeSubject | undefined): string => {
+  if (!subject) return "";
+  const name = cleanName(subject.name);
+  return name ? `the ${KIND_WORD[subject.kind]} "${name}"` : `the ${KIND_WORD[subject.kind]}`;
+};
+
+/** Maintainer summary: fixed sentence with origin, signal names (strongest first) and subject. */
+export const maintainerSummary = (origin: string, signals: readonly ChangeSignal[], subject?: ChangeSubject): string => {
   const sorted = sortSignals(signals);
-  return sorted.length === 0 ? `${origin}: no signals` : `${origin}: ${sorted.join(", ")}`;
+  const what = sorted.length === 0 ? "no signals" : sorted.join(", ");
+  const about = subjectText(subject);
+  return about ? `${origin} change to ${about}: ${what}` : `${origin} change: ${what}`;
 };
 
 /** Owner summary in plain words, at most 240 characters. */
-export const ownerSummaryFor = (signals: readonly ChangeSignal[]): string => {
+export const ownerSummaryFor = (signals: readonly ChangeSignal[], subject?: ChangeSubject): string => {
   const sorted = sortSignals(signals);
-  if (sorted.length === 0) return "A small change";
-  const first = OWNER_PHRASE[sorted[0] as ChangeSignal];
+  const first = sorted.length === 0 ? "A small change" : OWNER_PHRASE[sorted[0] as ChangeSignal];
   const rest = sorted.length - 1;
-  return rest === 0 ? first : `${first}, and ${rest} other ${rest === 1 ? "change" : "changes"}`;
+  const main = rest > 0 ? `${first}, and ${rest} other ${rest === 1 ? "change" : "changes"}` : first;
+  let about = subjectText(subject);
+  // A name that happens to look like maintainer words is left out of the owner's sentence.
+  if (hasMaintainerWords(about)) about = subject ? `the ${KIND_WORD[subject.kind]}` : "";
+  return (about ? `${main}, for ${about}` : main).slice(0, 240);
 };
 
 const TIER_CODE = /\bT[0-3]\b/i;
-const SIGNAL_NAMES = ChangeSignalSchema.options;
+const SIGNAL_NAMES = Object.keys(SIGNAL_TIER);
 
-/**
- * Keeps a caller-written owner summary only if it is plain words: short, one line, no tier
- * code and no signal name. Otherwise the rule-based summary is used.
- */
-export const safeOwnerSummary = (text: string | undefined, signals: readonly ChangeSignal[]): string => {
-  const t = text?.trim() ?? "";
-  if (t.length === 0 || t.length > 240 || /[\r\n]/.test(t) || TIER_CODE.test(t)) return ownerSummaryFor(signals);
-  const lower = t.toLowerCase();
-  if (SIGNAL_NAMES.some((s) => lower.includes(s))) return ownerSummaryFor(signals);
-  return t;
-};
+/** True when text holds a tier code or a signal name (maintainer words). */
+export const hasMaintainerWords = (text: string): boolean =>
+  TIER_CODE.test(text) || SIGNAL_NAMES.some((s) => text.toLowerCase().includes(s));
