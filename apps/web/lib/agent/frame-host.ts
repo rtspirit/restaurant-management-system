@@ -69,6 +69,7 @@ export const grantNeedsRefresh = (grant: { expiresAt: string }, now: number): bo
 
 const dataError = (code: DataError["error"]["code"], message: string): DataError => ({ error: { code, message, requestId: "shell" } });
 const TOO_BIG = dataError("invalid_request", "That is too much to send at once.");
+const UNREADABLE = dataError("invalid_request", "That could not be sent. Check what was typed and try again.");
 const TOO_MANY = dataError("limit", "Too much is happening at once. Try again in a moment.");
 const NO_ANSWER = dataError("internal", "RMS is not answering just now. Try again in a moment.");
 
@@ -160,8 +161,20 @@ export function createFrameHost(options: FrameHostOptions): FrameHost | null {
     // By name, from the fixed list. There is no way to pass an address or a path.
     if (!Object.hasOwn(DATA_ROUTES, message.route)) return;
     const path = DATA_ROUTES[message.route];
-    // Serialised once: what is measured is what is sent.
-    const body = JSON.stringify(message.body === undefined ? {} : message.body);
+    // Serialised once: what is measured is what is sent. A message can carry things JSON cannot
+    // (a big integer, a value that contains itself). That must never throw in here: it would be
+    // an error on the RMS page and no answer for the frame. It is refused like any bad request.
+    let body: string;
+    try {
+      body = JSON.stringify(message.body === undefined ? {} : message.body);
+    } catch {
+      answer(message.id, 400, UNREADABLE);
+      return;
+    }
+    if (typeof body !== "string") {
+      answer(message.id, 400, UNREADABLE);
+      return;
+    }
     if (new TextEncoder().encode(body).length > FRAME_LIMITS.maxBodyBytes) {
       answer(message.id, 400, TOO_BIG);
       return;

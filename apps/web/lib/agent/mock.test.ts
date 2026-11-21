@@ -186,9 +186,15 @@ describe("a practice build, through the real stream client", () => {
     const failed = seen.view.items.at(-1);
     expect(failed).toMatchObject({ kind: "failed", retryable: true });
     expect(failed && "text" in failed ? failed.text : "").not.toMatch(/error|exception|timeout|stack|\d{3}/i);
-    await send(sessionId, seen, { text: "Try again" });
+    // Trying again is its own call. The words are never sent as a message.
+    if (!api.retry || !seen.view.runId) throw new Error("the practice routes can retry");
+    await api.retry(seen.view.runId);
+    expect(await follow(sessionId, seen)).toBe("finished");
     expect(seen.view.phase).toBe("your-turn");
     expect(seen.view.preview?.version).toBe(1);
+    expect(seen.events.filter((e) => e.type === "user.message")).toHaveLength(1);
+    // A run that did not fail cannot be tried again.
+    expect(await api.retry(seen.view.runId ?? "").catch((error: unknown) => (error as AgentApiError).code)).toBe("invalid_request");
   });
 
   it("something RMS cannot do yet is refused in plain words, not half-built", async () => {

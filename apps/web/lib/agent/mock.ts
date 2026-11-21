@@ -282,8 +282,6 @@ function script(session: PracticeSession, sent: { text?: string; reply?: RunRepl
   if (session.stage === "q1" || session.stage === "q2" || session.stage === "duplicate") return propose(text);
   if (session.stage === "plan") return propose(text);
   if (session.stage === "built") {
-    const lastStop = session.events.findLast((e) => e.type in STOP_STATUS);
-    if (lastStop?.type === "run.failed" && session.plan) return buildBeats(session).slice(1);
     const undo = /\bundo\b|put it back/i.test(text);
     const appId = session.appId ?? newId("app");
     return [
@@ -526,6 +524,23 @@ export const practiceAgentApi: AgentApi = {
       context: context(session),
       runId: run.runId as `run_${string}`,
     };
+  },
+
+  async retry(runId): Promise<StartRunResponse> {
+    if (practiceControls.offline) throw new AgentApiError("unavailable", "RMS is not answering just now. Try again in a moment.");
+    const session = Object.values(load().sessions).find((s) => s.run?.runId === runId);
+    if (!session || !session.run) throw new AgentApiError("not_found", "That build could not be found.");
+    if (session.run.status !== "failed" || !session.plan) throw new AgentApiError("invalid_request", "There is nothing to try again.");
+    // A new run that repeats the build. No message from the owner is stored.
+    const next = newId("run");
+    session.run = { runId: next, status: "running", beats: [] };
+    session.token = `practice-run-${hex(32)}`;
+    append(session, { type: "run.started", runId: next, sessionId: session.sessionId as `ses_${string}`, mode: "build" });
+    session.stage = "built";
+    session.run.beats = buildBeats(session).slice(1);
+    save();
+    wake(session.sessionId);
+    return { sessionId: session.sessionId as `ses_${string}`, runId: next, eventsUrl: `/agent/v1/sessions/${session.sessionId}/events` };
   },
 
   async cancel(runId): Promise<void> {

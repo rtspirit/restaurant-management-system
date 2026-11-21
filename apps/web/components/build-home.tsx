@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Button, Composer, Conversation, Dock, EmptyState, Message, Narrow, Notice, Row, Section, Stack, Text } from "@rms/ui";
 import { agentApi } from "@/lib/agent/api";
 import { AgentApiError, type AgentApi } from "@/lib/agent/client";
+import { practiceAgentApi } from "@/lib/agent/mock";
 import { MiniAppList } from "./mini-app-list";
 import type { MiniAppSummary } from "./shell-data";
 
@@ -13,18 +14,28 @@ const IDEAS = ["See how much money I’m making", "Keep a list of my suppliers",
 
 export type BuildHomeProps = {
   miniApps: MiniAppSummary[];
-  /** The build routes to use. Left out everywhere except tests. */
+  /** The build routes to use. For tests only: left out, the page's own place decides. */
   api?: AgentApi;
 };
+
+/**
+ * Which routes a first message goes to. A page under /gallery ALWAYS gets the practice
+ * stand-in, whatever the rest of the app uses: the gallery is open without signing in, and a
+ * message typed there must never start a real build or spend anything.
+ */
+export const buildApiFor = (pathname: string, signedIn: AgentApi = agentApi): AgentApi =>
+  pathname === "/gallery" || pathname.startsWith("/gallery/") ? practiceAgentApi : signedIn;
 
 /**
  * The Build tab. It invites the owner to say what they need and lists their mini-apps.
  * Sending the first message starts a build and goes to its conversation.
  */
-export function BuildHome({ miniApps, api = agentApi }: BuildHomeProps) {
+export function BuildHome({ miniApps, api: given }: BuildHomeProps) {
   const router = useRouter();
+  const pathname = usePathname();
   // In the gallery the conversation opens in the gallery too, so it can be tried without signing in.
-  const inGallery = usePathname().startsWith("/gallery");
+  const inGallery = pathname === "/gallery" || pathname.startsWith("/gallery/");
+  const api = given ?? buildApiFor(pathname);
   const [draft, setDraft] = useState("");
   const [sent, setSent] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -42,7 +53,9 @@ export function BuildHome({ miniApps, api = agentApi }: BuildHomeProps) {
     } catch (error) {
       setSent(null);
       setDraft(text);
-      setProblem(error instanceof AgentApiError ? error.message : "RMS could not start that just now. Try again in a moment.");
+      // The build routes are not there to answer: say so plainly, and that nothing happened.
+      const notReady = error instanceof AgentApiError && error.code === "not_found";
+      setProblem(notReady ? "Building is not switched on yet. Nothing was made or changed." : error instanceof AgentApiError ? error.message : "RMS could not start that just now. Try again in a moment.");
     }
   };
 

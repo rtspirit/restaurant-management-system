@@ -75,7 +75,9 @@ export function BuildSession({ sessionId, profile, homeHref = "/mini-apps", sess
     );
   }
 
-  const alive = view.phase === "working" || view.phase === "your-turn";
+  // `run.done` means the owner sent the next thing and its run is about to start: the preview
+  // stays as it is. Only a run that failed or was stopped takes its preview with it.
+  const run = view.phase === "working" || view.phase === "your-turn" ? "alive" : view.phase === "done" ? "between" : "ended";
   const building = view.phase === "working" && view.items.some((item) => item.kind === "plan" && item.confirmed);
 
   return (
@@ -86,6 +88,7 @@ export function BuildSession({ sessionId, profile, homeHref = "/mini-apps", sess
       sending={session.sending}
       busy={session.busy}
       stopping={session.stopping}
+      canRetry={session.canRetry}
       practice={api.practice}
       phoneLink={() => `${window.location.origin}${sessionPath(sessionId)}`}
       actions={session.actions}
@@ -95,7 +98,7 @@ export function BuildSession({ sessionId, profile, homeHref = "/mini-apps", sess
           sessionId={sessionId}
           preview={view.preview}
           runCount={view.runCount}
-          alive={alive}
+          run={run}
           building={building}
           settled={session.settled}
           brandColour={profile.brandColour}

@@ -30,7 +30,9 @@ async function follow(connections: Array<(after: number) => Response | Promise<R
   const events: AgentEvent[] = [];
   const waits: number[] = [];
   const statuses: StreamStatus[] = [];
+  const skipped: number[] = [];
   const following = followSession({
+    onSkip: (seq) => skipped.push(seq),
     open: async (after) => {
       asked.push(after);
       const next = connections[asked.length - 1];
@@ -47,7 +49,7 @@ async function follow(connections: Array<(after: number) => Response | Promise<R
     },
   });
   const end = await following.ended;
-  return { end, asked, events, waits, statuses, lastSeq: following.lastSeq() };
+  return { end, asked, events, waits, statuses, skipped, lastSeq: following.lastSeq() };
 }
 
 const firstRun = MONEY_SESSION.slice(0, 4); // run.started, user.message, question, run.waiting
@@ -140,6 +142,45 @@ describe("following a session", () => {
   it("an event that goes missing sends it back for the gap, not past it", async () => {
     const result = await follow([() => body([...build.slice(0, 2).map(stored), ...build.slice(3, 5).map(stored)]), () => body(build.slice(2).map(stored))], { after: 12 });
     expect(result.asked).toEqual([12, 14]);
+    expect(result.events).toEqual(build);
+  });
+
+  it("a stored event that cannot be read is stepped over, not waited on for ever", async () => {
+    // Event 15 comes from a newer server: it has its number and a shape this screen does not know.
+    const strange = `id: 15\nevent: agent\ndata: ${JSON.stringify({ type: "run.rested", seq: 15, at: AT })}\n\n`;
+    const result = await follow([() => body([...build.slice(0, 2).map(stored), strange, ...build.slice(3).map(stored)])], { after: 12 });
+    expect(result.end).toBe("finished");
+    expect(result.asked).toEqual([12]); // one connection: no reconnecting at the same place
+    expect(result.waits).toEqual([]);
+    expect(result.skipped).toEqual([15]);
+    expect(result.events.map((e) => e.seq)).toEqual([13, 14, 16, 17, 18, 19, 20, 21, 22, 23, 24]);
+    expect(result.lastSeq).toBe(24);
+  });
+
+  it("when the unreadable one is the stop event, it asks the session and ends instead of knocking for ever", async () => {
+    const garbled = "id: 24\nevent: agent\ndata: {not json\n\n";
+    let asks = 0;
+    const result = await follow([() => body([...build.slice(0, 11).map(stored), garbled])], {
+      after: 12,
+      stillWorking: async () => {
+        asks += 1;
+        return false;
+      },
+    });
+    expect(result.end).toBe("finished");
+    expect(result.asked).toEqual([12]);
+    expect(result.skipped).toEqual([24]);
+    expect(result.lastSeq).toBe(24);
+    expect(asks).toBe(1);
+  });
+
+  it("an unreadable message is only stepped over when it is the very next one", async () => {
+    const noNumber = "event: agent\ndata: {not json\n\n";
+    const old = "id: 13\nevent: agent\ndata: {not json\n\n";
+    const ahead = "id: 19\nevent: agent\ndata: {not json\n\n";
+    const result = await follow([() => body([...build.slice(0, 2).map(stored), noNumber, old, ahead]), () => body(build.slice(2).map(stored))], { after: 12 });
+    expect(result.skipped).toEqual([]);
+    expect(result.asked).toEqual([12, 14]); // the one from further ahead is a gap: ask again from here
     expect(result.events).toEqual(build);
   });
 

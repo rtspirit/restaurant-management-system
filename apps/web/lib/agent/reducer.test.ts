@@ -1,7 +1,7 @@
 import { AgentEvent } from "@rms/contracts";
 import { describe, expect, it } from "vitest";
 import { MONEY_SESSION, RECORDED, RECORDED_STATES, record, type EventBody } from "./fixtures";
-import { EMPTY_VIEW, afterReconnect, applyEvent, reduceEvents, type BuildView } from "./reducer";
+import { EMPTY_VIEW, afterReconnect, applyEvent, reduceEvents, settleRun, skipEvent, type BuildView } from "./reducer";
 
 const view = (state: keyof typeof RECORDED): BuildView => reduceEvents(RECORDED[state]);
 const kinds = (v: BuildView) => v.items.map((item) => item.kind);
@@ -72,6 +72,44 @@ describe("numbering", () => {
     expect(result.outcome).toBe("gap");
     expect(result.view).toBe(before);
     expect(result.view.lastSeq).toBe(8);
+  });
+
+  it("an event that could not be read is stepped over, so the next one is not a gap forever", () => {
+    const before = view("question"); // lastSeq 8
+    const next = RECORDED.plan[9]; // seq 10
+    if (!next) throw new Error("fixture");
+    // Without stepping over 9, 10 is refused, and so is everything after it.
+    expect(applyEvent(before, next).outcome).toBe("gap");
+    const stepped = skipEvent(before, 9);
+    expect(stepped.lastSeq).toBe(9);
+    expect(stepped.items).toBe(before.items);
+    expect(applyEvent(stepped, next).outcome).toBe("applied");
+    // Only the very next number can be stepped over.
+    expect(skipEvent(before, 11)).toBe(before);
+    expect(skipEvent(before, 8)).toBe(before);
+  });
+
+  it("when the stop event was the unreadable one, the session's answer takes the screen off Stop", () => {
+    const working = view("progress");
+    expect(working.phase).toBe("working");
+    expect(settleRun(working, "running")).toBe(working);
+    expect(settleRun(working, "paused")).toBe(working);
+
+    const waiting = settleRun(working, "waiting");
+    expect(waiting).toMatchObject({ phase: "your-turn", waitingFor: "reply" });
+    expect(settleRun({ ...working, preview: { appId: "app_x", appName: "Money", version: 1 } }, "waiting").waitingFor).toBe("review");
+
+    const failed = settleRun(working, "failed");
+    expect(failed.phase).toBe("failed");
+    expect(failed.items.at(-1)).toMatchObject({ kind: "failed", retryable: false });
+    expect(failed.items.find((item) => item.kind === "steps")?.steps.some((s) => s.state === "now")).toBe(false);
+
+    expect(settleRun(working, "cancelled")).toMatchObject({ phase: "cancelled" });
+    expect(settleRun(working, "done").phase).toBe("done");
+    expect(settleRun(working, null).phase).toBe("done");
+    // A screen that is not showing Stop is left alone.
+    const idle = view("preview");
+    expect(settleRun(idle, "failed")).toBe(idle);
   });
 
   it("live-only events never move the place", () => {
@@ -164,8 +202,7 @@ describe("what the owner sees", () => {
     expect(v.items.at(-1)).toMatchObject({ kind: "failed", retryable: true });
     const steps = v.items.find((item) => item.kind === "steps");
     expect(steps?.steps.some((s) => s.state === "now")).toBe(false);
-    expect(steps).toMatchObject({ halted: true });
-    expect(steps?.steps.at(-1)).toEqual({ id: "s3", label: "Checking the numbers add up", state: "todo" });
+    expect(steps?.steps.at(-1)).toEqual({ id: "s3", label: "Checking the numbers add up", state: "stopped" });
   });
 
   it("stopping says so, clears whatever was waiting, and leaves no step turning", () => {
@@ -173,16 +210,15 @@ describe("what the owner sees", () => {
     expect(stopped.phase).toBe("cancelled");
     expect(stopped.items.at(-1)?.kind).toBe("stopped");
     expect(stopped.items.find((item) => item.kind === "steps")?.steps.some((s) => s.state === "now")).toBe(false);
-    expect(stopped.items.find((item) => item.kind === "steps")?.halted).toBe(true);
+    expect(stopped.items.find((item) => item.kind === "steps")?.steps.map((s) => s.state)).toEqual(["done", "done", "stopped"]);
     // A card whose work finished is never marked.
-    expect(reduceEvents(RECORDED.preview).items.find((item) => item.kind === "steps")?.halted).toBe(false);
+    expect(reduceEvents(RECORDED.preview).items.find((item) => item.kind === "steps")?.steps.some((s) => s.state === "stopped")).toBe(false);
   });
 
   it("a step that fails says so in words", () => {
     const failed = reduceEvents(record([{ type: "step", id: "s3", label: "Checking the numbers add up", state: "failed" } satisfies EventBody]).map((e) => ({ ...e, seq: 21 })), view("progress"));
     const card = failed.items.find((item) => item.kind === "steps");
-    expect(card?.halted).toBe(true);
-    expect(card?.steps.at(-1)).toEqual({ id: "s3", label: "Checking the numbers add up", state: "todo" });
+    expect(card?.steps.at(-1)).toEqual({ id: "s3", label: "Checking the numbers add up", state: "stopped" });
   });
 
   it("events meant for Ask still count but draw nothing", () => {

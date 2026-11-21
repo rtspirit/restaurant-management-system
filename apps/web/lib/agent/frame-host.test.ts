@@ -283,6 +283,29 @@ describe("body cap", () => {
     ]);
   });
 
+  it("a body JSON cannot hold (a big integer, a value that contains itself, a function) is refused in plain words and never throws", async () => {
+    const t = setup();
+    t.hello();
+    t.posted.length = 0;
+    const loop: Record<string, unknown> = { model: "vendor" };
+    loop.self = loop;
+    expect(() => t.ask("aaaaaaaa0001", "batch", { n: 10n })).not.toThrow();
+    expect(() => t.ask("aaaaaaaa0002", "batch", loop)).not.toThrow();
+    expect(() => t.ask("aaaaaaaa0003", "batch", () => 1)).not.toThrow();
+    await t.settle();
+    expect(t.calls).toEqual([]);
+    expect(t.posted).toHaveLength(3);
+    for (const { message, to } of t.posted) {
+      expect(to).toBe(FRAME);
+      expect(message).toMatchObject({ type: "rms.data.result", status: 400, body: { error: { code: "invalid_request", requestId: "shell" } } });
+      expect(ShellToFrame.safeParse(message).success).toBe(true);
+    }
+    // The host is still working afterwards.
+    t.ask("aaaaaaaa0004", "query", { model: "vendor" });
+    await t.settle();
+    expect(t.calls).toHaveLength(1);
+  });
+
   it("the size is counted in bytes, and a body just under the limit goes through as it came", async () => {
     const t = setup();
     t.hello();

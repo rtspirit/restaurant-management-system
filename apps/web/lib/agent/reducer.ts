@@ -3,11 +3,12 @@
 // The build screen is drawn from this and nothing else, so replaying a session's stored events
 // from the start gives exactly the screen a person who watched it live ended on. That is what
 // "never loses their place" rests on, and what the tests beside this file check.
-import { LIVE_ONLY_EVENTS, type AgentEvent, type BuildPlan, type RunReply } from "@rms/contracts";
+import { LIVE_ONLY_EVENTS, type AgentEvent, type BuildPlan, type RunReply, type RunStatus } from "@rms/contracts";
 
 type Choice = Extract<RunReply, { kind: "choose" }>["choice"];
 
-export type ThreadStep = { id: string; label: string; state: "done" | "now" | "todo" };
+/** `stopped`: the step was started and did not finish (it failed, or the run was stopped or failed around it). */
+export type ThreadStep = { id: string; label: string; state: "done" | "now" | "todo" | "stopped" };
 
 /** One thing in the conversation, top to bottom. */
 export type ThreadItem =
@@ -18,8 +19,7 @@ export type ThreadItem =
   | { kind: "duplicate"; key: string; id: string; matches: { appId: string; appName: string; reason: string }[]; choice: Choice | null }
   | { kind: "marketplace"; key: string; id: string; listings: { listingId: string; title: string; reason: string }[]; choice: Choice | null }
   | { kind: "plan"; key: string; id: string; plan: BuildPlan; confirmed: boolean }
-  /** `halted`: the work stopped short, so anything not done reads "Did not finish" instead of "Not started". */
-  | { kind: "steps"; key: string; steps: ThreadStep[]; halted: boolean }
+  | { kind: "steps"; key: string; steps: ThreadStep[] }
   | { kind: "failed"; key: string; text: string; retryable: boolean }
   | { kind: "stopped"; key: string };
 
@@ -98,7 +98,7 @@ export const CHOICE_WORDS: Record<Choice, string> = {
   build_anyway: "Build a separate one",
 };
 
-const STEP_STATE = { pending: "todo", active: "now", done: "done", failed: "todo" } as const;
+const STEP_STATE = { pending: "todo", active: "now", done: "done", failed: "stopped" } as const;
 
 const replaceLast = <T extends ThreadItem["kind"]>(
   items: ThreadItem[],
@@ -117,16 +117,17 @@ const replaceLast = <T extends ThreadItem["kind"]>(
   return items;
 };
 
-/** A run stopped short: a step still turning is put down, and the card says it did not finish. */
+/** A run stopped short: a step still turning is put down, and says it did not finish. */
 const settleSteps = (items: ThreadItem[]): ThreadItem[] => {
   const last = items.findLast((item) => item.kind === "steps");
   if (!last || last.kind !== "steps" || !last.steps.some((step) => step.state === "now")) return items;
   return replaceLast(items, "steps", (item) => item.key === last.key, (item) => ({
     ...item,
-    halted: true,
-    steps: item.steps.map((step) => (step.state === "now" ? { ...step, state: "todo" } : step)),
+    steps: item.steps.map((step) => (step.state === "now" ? { ...step, state: "stopped" } : step)),
   }));
 };
+
+const settleStepsAfterStop = (items: ThreadItem[], status: RunStatus | null): ThreadItem[] => (status === "waiting" ? items : settleSteps(items));
 
 function applyReply(view: BuildView, reply: RunReply, key: string): BuildView {
   if (reply.kind === "answer") {
@@ -190,15 +191,14 @@ export function applyEvent(view: BuildView, event: AgentEvent): { view: BuildVie
     }
     case "step": {
       const step: ThreadStep = { id: event.id, label: event.label, state: STEP_STATE[event.state] };
-      const halted = event.state === "failed";
       const last = view.items[view.items.length - 1];
       // Steps of one stretch of work share a card. Anything said in between starts a new one.
       if (last && last.kind === "steps") {
         const known = last.steps.some((s) => s.id === step.id);
         const steps = known ? last.steps.map((s) => (s.id === step.id ? step : s)) : [...last.steps, step];
-        return done({ ...base, items: [...view.items.slice(0, -1), { ...last, steps, halted: last.halted || halted }] });
+        return done({ ...base, items: [...view.items.slice(0, -1), { ...last, steps }] });
       }
-      return done({ ...base, items: [...view.items, { kind: "steps", key, steps: [step], halted }] });
+      return done({ ...base, items: [...view.items, { kind: "steps", key, steps: [step] }] });
     }
     case "preview.ready":
       return done({ ...base, preview: { appId: event.appId, appName: event.appName, version: (view.preview?.version ?? 0) + 1 } });
@@ -223,6 +223,30 @@ export function reduceEvents(events: readonly AgentEvent[], from: BuildView = EM
   let view = from;
   for (const event of events) view = applyEvent(view, event).view;
   return view;
+}
+
+/**
+ * A stored event arrived that could not be read, and the stream client stepped over it. The
+ * place moves on with it, or every later event would be refused as a gap. Nothing is drawn.
+ */
+export function skipEvent(view: BuildView, seq: number): BuildView {
+  return seq === view.lastSeq + 1 ? { ...view, lastSeq: seq } : view;
+}
+
+/**
+ * The stream ended while the screen still shows RMS working: the stop event was the one that
+ * could not be read. The session says how the run really ended, and the screen follows it, so
+ * the owner is never left looking at Stop for a run that is over.
+ */
+export function settleRun(view: BuildView, status: RunStatus | null): BuildView {
+  if (view.phase !== "working" || status === "running" || status === "paused") return view;
+  const base: BuildView = { ...view, typing: "", pending: null, waitingFor: null, items: settleStepsAfterStop(view.items, status) };
+  if (status === "waiting") return { ...base, items: view.items, phase: "your-turn", waitingFor: view.preview ? "review" : "reply" };
+  if (status === "failed") {
+    return { ...base, phase: "failed", items: [...base.items, { kind: "failed", key: `settled-${view.lastSeq}`, text: "That did not finish. Nothing you had is lost. Tell me what to do next.", retryable: false }] };
+  }
+  if (status === "cancelled") return { ...base, phase: "cancelled", items: [...base.items, { kind: "stopped", key: `settled-${view.lastSeq}` }] };
+  return { ...base, phase: "done" };
 }
 
 /** After a reconnect the half-arrived words are gone: the finished message comes with the replay. */

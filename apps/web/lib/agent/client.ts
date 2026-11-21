@@ -40,6 +40,11 @@ export type AgentApi = {
   events: (sessionId: string, after: number, signal: AbortSignal) => Promise<Response>;
   preview: (sessionId: string) => Promise<PreviewGrant>;
   cancel: (runId: string) => Promise<void>;
+  /**
+   * Runs a failed run again, as a new run in the same session, without storing a new message
+   * from the owner. Left out when the routes cannot do it: the screen then shows no "Try again".
+   */
+  retry?: (runId: string) => Promise<StartRunResponse>;
   /** Calls the Data API with a frame's own token. Never with the owner's session. */
   data: DataCall;
 };
@@ -69,6 +74,22 @@ async function send(route: string, init: RequestInit): Promise<unknown> {
   return response.json().catch(() => null);
 }
 
+/**
+ * STUB, WAITING ON TASK I. There is no "try again" call on the API yet, and the words "try
+ * again" sent as a message would be stored as an answer or as a change to the plan.
+ * What is needed, as one signature in the runner and one route:
+ *
+ *   retryRun(tenant: TenantContext, runId: string): Promise<StartRunResponse>
+ *   POST /agent/v1/runs/:runId/retry   (no body)  ->  StartRunResponse
+ *
+ * It starts a new run in the same session that repeats the failed run's own input. It stores
+ * `run.started` and no `user.message`. It answers `not_found` for someone else's run and
+ * `invalid_request` when that run did not fail.
+ * When it exists: put the route here (ideally from AGENT_ROUTES). Nothing else changes, and the
+ * "Try again" button appears by itself.
+ */
+const RETRY_ROUTE: string | null = null;
+
 /** The RMS API, signed in as the owner. */
 export const realAgentApi: AgentApi = {
   practice: false,
@@ -87,6 +108,7 @@ export const realAgentApi: AgentApi = {
   cancel: async (runId) => {
     await send(path(AGENT_ROUTES.cancel, { runId }), { method: "POST" });
   },
+  ...(RETRY_ROUTE !== null ? { retry: async (runId: string) => StartRunResponse.parse(await send(path(RETRY_ROUTE, { runId }), { method: "POST" })) } : {}),
   // Plain `fetch`, on purpose: `apiFetch` would attach the owner's own session, and a frame's
   // request must carry the frame's token and nothing else (ADR 0008).
   data: async (route, token, body, signal) => {

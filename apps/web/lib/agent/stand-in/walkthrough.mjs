@@ -3,8 +3,9 @@
 // /gallery/build/live with a real frame on another site and the data hand-off through it.
 // It CHECKS what it sees and saves screenshots to docs/design/wave2/task-j/.
 //
-// Before running: build and serve the web app on a spare port, and start the stand-in frame
-// for that origin (docs/briefs/wave2-task-j-notes.md has the three commands).
+// Before running: build and serve the web app on a spare port with PREVIEW_URL set to the
+// stand-in's address (the app frames nothing else), and start the stand-in frame for that
+// origin (docs/briefs/wave2-task-j-notes.md has the three commands).
 //   RMS_WEB=http://localhost:3060 node apps/web/lib/agent/stand-in/walkthrough.mjs
 //
 // Local only. No sign-in, no model, no database, no real restaurant.
@@ -196,6 +197,22 @@ try {
   check("stand-in: opened on its own it says “Open this from RMS”", await page.getByText("Open this from RMS").isVisible());
   const policy = (await (await page.request.get(`${FRAME}/`)).headers())["content-security-policy"] ?? "";
   check("stand-in: only the shell may frame it, and it may not call the network", policy.includes(`frame-ancestors ${WEB}`) && policy.includes("connect-src 'none'"));
+  const shellPolicy = (await (await page.request.get(`${WEB}/gallery/build`)).headers())["content-security-policy"] ?? "";
+  check("web app: it may frame the preview's own site and no other, and nobody may frame it", shellPolicy === `frame-ancestors 'none'; frame-src ${FRAME}`);
+
+  // A mini-app that sends its own frame somewhere else is refused by the browser.
+  await page.goto(`${WEB}/gallery/build?state=first`, { waitUntil: "networkidle" });
+  const refused = await page.evaluate(
+    () =>
+      new Promise((resolve) => {
+        document.addEventListener("securitypolicyviolation", (event) => resolve(event.violatedDirective), { once: true });
+        const frame = document.createElement("iframe");
+        frame.src = "https://example.com/";
+        document.body.append(frame);
+        setTimeout(() => resolve("shown"), 4000);
+      }),
+  );
+  check("web app: a frame pointed at any other site is refused", refused === "frame-src");
   await context.close();
 } finally {
   await browser.close();

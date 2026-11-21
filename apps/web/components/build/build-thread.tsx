@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
-import { Answers, BulletList, Button, Card, Message, Notice, Row, Stack, Stepper, Text } from "@rms/ui";
-import type { BuildView, ThreadItem } from "@/lib/agent/reducer";
+import { Answers, BulletList, Button, Card, Message, Notice, Row, Stack, Stepper, Text, type StepperProps } from "@rms/ui";
+import type { BuildView, ThreadItem, ThreadStep } from "@/lib/agent/reducer";
 
 export type ThreadActions = {
   /** Answer the question that is waiting, with one of its choices. */
@@ -21,13 +21,29 @@ export type BuildThreadProps = {
   sending: string | null;
   /** A reply is being sent: buttons wait so nothing is sent twice. */
   busy: boolean;
+  /** "Try again" can be offered on a failure that allows it. */
+  canRetry: boolean;
   actions: ThreadActions;
 };
 
 type QuestionItem = Extract<ThreadItem, { kind: "question" }>;
 
-/** When the work stopped short, a step that is not done did not finish. "Not started" would be untrue. */
-const HALTED_WORDS = { done: "Done", now: "In progress", todo: "Did not finish" };
+/**
+ * How a card of steps is handed to `Stepper`. The ONE place that knows `Stepper` has no shape
+ * yet for a step that did not finish.
+ *
+ * Today: a stopped step is drawn as the hollow ring, and a card that holds one says "Did not
+ * finish" where it would say "Not started" (that would be untrue).
+ * When `Stepper` gains its own `stopped` status, this whole function becomes
+ * `return { steps };` and nothing else changes.
+ */
+function stepperProps(steps: ThreadStep[]): Pick<StepperProps, "steps" | "words"> {
+  if (!steps.some((step) => step.state === "stopped")) return { steps: steps as StepperProps["steps"] };
+  return {
+    steps: steps.map((step) => ({ ...step, state: step.state === "stopped" ? "todo" : step.state })),
+    words: { done: "Done", now: "In progress", todo: "Did not finish" },
+  };
+}
 
 /** The plan in the owner's words: what it will show, then the smaller print. */
 function PlanCards({ item }: { item: Extract<ThreadItem, { kind: "plan" }> }) {
@@ -77,7 +93,7 @@ function PlanCards({ item }: { item: Extract<ThreadItem, { kind: "plan" }> }) {
  * The build conversation, drawn from the view and nothing else. Put it inside a `Conversation`.
  * Only the one thing that is waiting for the owner has buttons: everything older is read-only.
  */
-export function BuildThread({ view, sending, busy, actions }: BuildThreadProps) {
+export function BuildThread({ view, sending, busy, canRetry, actions }: BuildThreadProps) {
   const out: ReactNode[] = [];
   let answered: QuestionItem[] = [];
   const flushAnswered = () => {
@@ -206,7 +222,7 @@ export function BuildThread({ view, sending, busy, actions }: BuildThreadProps) 
         out.push(
           <Message key={item.key} from="rms" plain={false}>
             <Card as="div">
-              <Stepper label="Progress" steps={item.steps} {...(item.halted ? { words: HALTED_WORDS } : {})} />
+              <Stepper label="Progress" {...stepperProps(item.steps)} />
             </Card>
           </Message>,
         );
@@ -217,7 +233,7 @@ export function BuildThread({ view, sending, busy, actions }: BuildThreadProps) 
           <Message key={item.key} from="rms" plain={false}>
             <Stack gap="m">
               <Notice kind="problem">{item.text}</Notice>
-              {last && item.retryable ? (
+              {last && item.retryable && canRetry ? (
                 <Row gap="s">
                   <Button disabled={busy} onClick={actions.retry}>
                     Try again

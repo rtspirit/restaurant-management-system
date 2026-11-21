@@ -30,6 +30,11 @@ export type FollowOptions = {
   working: boolean;
   /** Each event, in order. Stored events arrive exactly once and with no gaps. */
   onEvent: (event: AgentEvent) => void;
+  /**
+   * A stored event arrived that this screen cannot read (a newer server, a damaged message). It
+   * is stepped over so the stream does not stall on it: `seq` is the number it carried.
+   */
+  onSkip?: (seq: number) => void;
   onStatus?: (status: StreamStatus) => void;
   /** Asked when a stream ends quietly while we believed RMS was working. False means it is not. */
   stillWorking?: () => Promise<boolean>;
@@ -67,7 +72,7 @@ export function parseAgentEvent(data: string): AgentEvent | null {
 }
 
 export function followSession(options: FollowOptions): Following {
-  const { open, onEvent, onStatus, stillWorking } = options;
+  const { open, onEvent, onSkip, onStatus, stillWorking } = options;
   const sleep = options.sleep ?? defaultSleep;
   const abort = new AbortController();
   let last = options.after;
@@ -79,6 +84,8 @@ export function followSession(options: FollowOptions): Following {
       let paused = false;
       let dropped = false;
       let moved = false;
+      /** Something was stepped over on this connection, so what we believe about the run may be stale. */
+      let unread = false;
       try {
         const response = await open(last, abort.signal);
         if (response.status === 401) return "signed-out";
@@ -90,7 +97,22 @@ export function followSession(options: FollowOptions): Following {
           if (abort.signal.aborted) return "stopped";
           if (message.event !== EVENT_STREAM.event) continue;
           const event = parseAgentEvent(message.data);
-          if (!event) continue;
+          if (!event) {
+            // It cannot be read. If it is the very next stored event, step over it: holding the
+            // place would make every later event a gap, and the screen would never move again.
+            // (If it was the stop event, the quiet end below asks the session what happened.)
+            const seq = message.id !== null && /^\d{1,15}$/.test(message.id) ? Number(message.id) : null;
+            if (seq === null || seq <= last) continue;
+            if (seq !== last + 1) {
+              dropped = true;
+              break;
+            }
+            last = seq;
+            moved = true;
+            unread = true;
+            onSkip?.(seq);
+            continue;
+          }
           if (isStored(event)) {
             if (event.seq <= last) continue; // seen already
             if (event.seq !== last + 1) {
@@ -120,7 +142,7 @@ export function followSession(options: FollowOptions): Following {
       if (!dropped) {
         if (!working) return "finished";
         // It ended quietly while we thought RMS was working. Check before knocking again.
-        if (!moved && stillWorking) {
+        if ((!moved || unread) && stillWorking) {
           const really = await stillWorking().catch(() => true);
           if (abort.signal.aborted) return "stopped";
           if (!really) return "finished";

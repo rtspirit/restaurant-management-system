@@ -23,6 +23,8 @@ export type BuildWorkbenchProps = {
   busy: boolean;
   /** Stop has been pressed and RMS has not answered yet. */
   stopping: boolean;
+  /** A failed build can be run again with one press. Without it the owner says what to do next. */
+  canRetry: boolean;
   /** A practice run: nothing is built or saved, and the screen says so. */
   practice: boolean;
   /** The preview itself: a `Frame`, or a stand-in for it in the gallery. */
@@ -55,7 +57,7 @@ const onThisComputerOnly = (link: string): boolean => {
  * The build screen: the conversation beside the preview, with the main actions bottom right.
  * It holds no data of its own. The real screen and the gallery both draw it from a view.
  */
-export function BuildWorkbench({ view, connection, problem, sending, busy, stopping, practice, preview, phoneLink, actions }: BuildWorkbenchProps) {
+export function BuildWorkbench({ view, connection, problem, sending, busy, stopping, canRetry, practice, preview, phoneLink, actions }: BuildWorkbenchProps) {
   const [phone, setPhone] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [draft, setDraft] = useState("");
@@ -106,7 +108,7 @@ export function BuildWorkbench({ view, connection, problem, sending, busy, stopp
         side={
           <>
             <Conversation label={CONVERSATION}>
-              <BuildThread view={view} sending={sending} busy={busy} actions={{ ...actions, changePlan }} />
+              <BuildThread view={view} sending={sending} busy={busy} canRetry={canRetry} actions={{ ...actions, changePlan }} />
             </Conversation>
             {connection === "reconnecting" ? (
               <Row gap="s">

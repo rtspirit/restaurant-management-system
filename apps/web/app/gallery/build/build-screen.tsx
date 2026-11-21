@@ -48,6 +48,7 @@ export function BuildScreen({ state }: { state: RecordedState }) {
       sending={null}
       busy={false}
       stopping={false}
+      canRetry
       practice={false}
       preview={preview}
       phoneLink={() => `${window.location.origin}/mini-apps/build/ses_0193a3c0000070008000000000000060`}
@@ -57,7 +58,7 @@ export function BuildScreen({ state }: { state: RecordedState }) {
         choose: (to, choice) => reply({ kind: "choose", to, choice }),
         buildPlan: (to) => add({ type: "user.reply", reply: { kind: "confirm", to, ok: true } }, { type: "plan.confirmed" }, { type: "run.waiting", for: "reply" }),
         confirm: (to, ok) => reply({ kind: "confirm", to, ok }),
-        retry: () => add({ type: "user.message", text: "Try again" }, { type: "run.waiting", for: "reply" }),
+        retry: () => add({ type: "run.started", runId: "run_0193a3c0000070008000000000000069", sessionId: "ses_0193a3c0000070008000000000000060", mode: "build" }),
         undo: () => add({ type: "user.message", text: "Undo that last change" }, { type: "run.waiting", for: "review" }),
         stop: () => add({ type: "run.cancelled" }),
       }}
