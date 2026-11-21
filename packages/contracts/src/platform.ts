@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { Actor, Role } from "./auth.js";
-import { ChangeSetId, OrgId } from "./ids.js";
+import { ChangeSetId, OrgId, ParentModelKey } from "./ids.js";
 
 /** Shapes shared between sign-up (A), parent data (B), the Data API (D) and the console (F). */
 
@@ -88,3 +88,18 @@ export const MeResponse = z.object({
   restaurant: MyRestaurant.nullable(),
 });
 export type MeResponse = z.infer<typeof MeResponse>;
+
+/**
+ * What `GET /auth/parent/:model` returns: one of the restaurant's set-up lists (menu, staff,
+ * locations and so on) for RMS's own screens. The restaurant is the signed-in member's own.
+ * Row values use the Data API's field formats. A column the member's role may not see is
+ * named in `masked` and is absent from `columns` and from every row.
+ */
+export const ParentListResponse = z.object({
+  model: ParentModelKey,
+  name: z.string(),
+  columns: z.array(z.object({ key: z.string(), label: z.string(), type: z.string() })),
+  rows: z.array(z.record(z.string(), z.unknown())),
+  masked: z.array(z.string()),
+});
+export type ParentListResponse = z.infer<typeof ParentListResponse>;

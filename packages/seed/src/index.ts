@@ -11,9 +11,26 @@ export {
   listAuthUsers,
   deleteAuthUsers,
   checkConnectionIsLocal,
+  checkSameDatabase,
   createDemoUsers,
   resetDemo,
   DEFAULT_DEMO_USERS,
   type AuthAdmin,
   type DemoUserSpec,
+  type ResetOptions,
 } from "./reset.js";
+export { runResetCli } from "./reset-cli.js";
+export { checkLibraryTemplates, installPlatformLibrary, type TemplateProblem } from "./library.js";
+export {
+  type BooksApp,
+  type BooksClient,
+  type BooksRoute,
+  type LoadBooksOptions,
+  type LoadBooksResult,
+  type SeedBooksOptions,
+  type SeededBooks,
+  booksManifest,
+  ensureBooksApp,
+  loadDemoBooks,
+  seedDemoBooks,
+} from "./books.js";

@@ -1,21 +1,18 @@
 // Data API level attacks, written against DATA_ROUTES and the wire shapes in @rms/contracts.
 //
-// Task D builds the routes in parallel. While apps/api/src/routes/data.ts is still the empty stub
-// (POST /data/v1/catalog answers 404), every test here is SKIPPED and the run says so loudly.
-// Set RMS_REQUIRE_DATA_API=1 (the lead does at integration) to turn that skip into a failure.
-//
-// These tests have NOT run against a real Data API yet. Expect to adjust fixtures at integration,
-// never the assertions about refusal.
-import { describe, expect, it } from "vitest";
+// Since Wave 1 integration these run against the real routes, and a stub is a FAILURE: if
+// POST /data/v1/catalog ever answers 404 again, the first test below fails and says so.
+// (RMS_REQUIRE_DATA_API=0 turns that back into a loud skip, for work on the suite itself.)
+import { afterAll, describe, expect, it } from "vitest";
 import { DATA_ERROR_STATUS, DATA_ROUTES, type DataErrorCode, toPublicId } from "@rms/contracts";
 import api from "../../../apps/api/src/index.js";
 import { holds, platform, sweep } from "../helpers/actors.js";
 import { type ClaimOpts, appToken, bearer, hmacToken, realSecret, runToken, stamped, appClaims } from "../helpers/tokens.js";
-import { CANARY, NAMED_QUERY_KEY, ORG, type OrgKey, ids, orgPublicId } from "../helpers/world.js";
+import { CANARY, NAMED_QUERY_KEY, ORG, type OrgKey, ids, orgPublicId, restoreStoreRows } from "../helpers/world.js";
 
 const probe = await api.request(DATA_ROUTES.catalog, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
 const STUB = probe.status === 404;
-const REQUIRED = process.env.RMS_REQUIRE_DATA_API === "1";
+const REQUIRED = process.env.RMS_REQUIRE_DATA_API !== "0";
 
 if (STUB) {
   // Straight to stderr, so no reporter setting can hide it.
@@ -26,7 +23,7 @@ if (STUB) {
       "#  DATA API ATTACK TESTS SKIPPED                                     #",
       "#  apps/api/src/routes/data.ts is still the empty stub (404).        #",
       "#  Nothing in tests/security/data-api ran. Re-run after task D       #",
-      "#  merges, with RMS_REQUIRE_DATA_API=1 so a stub fails the suite.    #",
+      "#  merges. Without RMS_REQUIRE_DATA_API=0 this fails the suite.      #",
       "######################################################################",
       "",
       "",
@@ -40,7 +37,7 @@ describe("Data API availability", () => {
     expect(probe.status).not.toBe(404);
   });
 
-  it.runIf(REQUIRED)("the Data API routes exist (RMS_REQUIRE_DATA_API=1)", () => {
+  it.runIf(REQUIRED)("the Data API routes exist", () => {
     expect(probe.status, "POST /data/v1/catalog is still a 404: the Data API attack tests cannot run").not.toBe(404);
   });
 });
@@ -76,6 +73,12 @@ const expectRefused = (r: Reply, codes: DataErrorCode[]) => {
   expect(typeof r.json.error?.message).toBe("string");
   expect(typeof r.json.error?.requestId).toBe("string");
 };
+
+// These tests write through the real routes. The database tests that run after this file expect
+// the test world exactly as it was built, so the store tables are put back when this file ends.
+afterAll(async () => {
+  if (!STUB) await restoreStoreRows(platform());
+});
 
 const tok = (k: OrgKey, opts: ClaimOpts = {}) => appToken(k, opts);
 const A = ids("a");

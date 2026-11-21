@@ -6,7 +6,7 @@
 import {
   AppManifest,
   type AuditEntry,
-  ModelDefinition,
+  type ModelDefinition,
   NamedActionDefinition,
   NamedQueryDefinition,
   type StoreEnv,
@@ -14,6 +14,7 @@ import {
   toUuid,
 } from "@rms/contracts";
 import { type Tx, actorText, apiDb, newUuid, withOrg } from "@rms/db";
+import { effectiveDefinition } from "@rms/models";
 import { DataApiError } from "./errors.js";
 import { Params, run } from "./sql.js";
 
@@ -60,31 +61,26 @@ const placeholders = (p: Params, keys: readonly string[]): string => keys.map((k
  * restaurant in that environment are simply absent. Live requests see only models that are
  * live. Builds and previews also see models that are still draft.
  *
- * NOTE FOR INTEGRATION: a restaurant's draft tables can be ahead of live, and
- * `org_models.definition` holds the DRAFT definition. Once the model compiler is merged, the
- * body of this function becomes a call to its `effectiveDefinition(sql, orgUuid, key, env)`
- * per key, so a live request is checked against the live shape. Until then, a field that
- * exists only in draft would be accepted by a live request and then fail at the database
- * with a plain "internal" error: wrong answer code, but nothing is read or written.
+ * A restaurant's draft tables can be ahead of live: `org_models.definition` holds the DRAFT
+ * shape. The model compiler's `effectiveDefinition` takes the changes that are not live yet
+ * back out for a live request, so a published mini-app is always checked against the shape its
+ * live tables really have. A field that exists only in draft does not exist for a live request.
  *
  * `orgUuid` and `env` MUST come from the verified token. `tx` must be fenced to that org.
  */
 export const loadDefinitions = async (tx: Tx, orgUuid: string, keys: readonly string[], env: StoreEnv): Promise<Map<string, ModelDefinition>> => {
   const out = new Map<string, ModelDefinition>();
-  const unique = [...new Set(keys)];
-  if (unique.length === 0) return out;
-  const p = new Params();
-  const org = p.add(orgUuid, "uuid");
-  const status = env === "live" ? "status = 'live'" : "status in ('draft', 'live')";
-  const rows = await run(
-    tx,
-    `select key, definition::text as definition from platform.org_models where org_id = ${org} and ${status} and key in (${placeholders(p, unique)})`,
-    p.values,
-  );
-  for (const r of rows) {
-    const parsed = ModelDefinition.safeParse(parseJson(r.definition));
-    if (!parsed.success || parsed.data.key !== r.key) throw new DataApiError("internal", undefined, `model definition does not parse: ${String(r.key)}`);
-    out.set(parsed.data.key, parsed.data);
+  for (const key of new Set(keys)) {
+    let def: ModelDefinition | undefined;
+    try {
+      def = await effectiveDefinition(tx, orgUuid, key, env);
+    } catch (e) {
+      // A database failure keeps its own handling. Anything else is a stored definition that no longer parses.
+      if (typeof (e as { code?: unknown }).code === "string") throw e;
+      throw new DataApiError("internal", undefined, `model definition does not parse: ${key}`);
+    }
+    if (def && def.key !== key) throw new DataApiError("internal", undefined, `model definition does not match its key: ${key}`);
+    if (def) out.set(def.key, def);
   }
   return out;
 };
