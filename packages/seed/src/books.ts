@@ -100,6 +100,11 @@ export type BooksApp = { appUuid: string; versionUuid: string };
  * Makes sure the restaurant has the hidden, published "demo data" mini-app the loader writes
  * as. Kind `system`, so screens that list an owner's mini-apps can leave it out. Admin
  * connection only. Safe to run again.
+ *
+ * Call it ONLY while holding the restaurant's loader lock (`seedDemoBooks` and
+ * `ensureDraftSamples` do). A loader that is on with no lock held is what a crash leaves
+ * behind, so `sweepBooksLoader` (API start-up, every Demo POS sync) switches it off at once and
+ * the Data API then refuses its token. Tests that need a published mini-app make their own.
  */
 export const ensureBooksApp = async (adminSql: Sql, orgUuid: string): Promise<BooksApp> =>
   adminSql.begin(async (tx) => {

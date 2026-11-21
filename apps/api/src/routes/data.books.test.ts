@@ -7,10 +7,10 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { mintAppToken } from "@rms/auth";
 import { DATA_ROUTES, type TenantContext, toPublicId } from "@rms/contracts";
-import { adminDb, closeAll, newStorePrefix, newUuid, withStore } from "@rms/db";
+import { type Sql, adminDb, closeAll, newStorePrefix, newUuid, withStore } from "@rms/db";
 import { requireTestEnv } from "@rms/db/testing";
 import { LIBRARY, ensureModels } from "@rms/models";
-import { type BooksClient, type BooksRoute, type LoadBooksResult, createDemoRestaurant, ensureBooksApp, installPlatformLibrary, loadDemoBooks, removeRestaurants } from "@rms/seed";
+import { type BooksClient, type BooksRoute, type LoadBooksResult, booksManifest, createDemoRestaurant, installPlatformLibrary, loadDemoBooks, removeRestaurants, sweepBooksLoader } from "@rms/seed";
 import app from "../index.js";
 
 requireTestEnv("DATABASE_URL", "DATABASE_ADMIN_URL", "RMS_TOKEN_SECRET");
@@ -27,6 +27,27 @@ const usd = (dollars: number) => dollars * 100;
 
 type Reply = { status: number; body: any; text: string };
 type Who = { org: string; app: string; ver: string; user: string; role: "owner" | "staff"; locations?: string[] };
+
+/**
+ * Publishes an ordinary mini-app that may use the whole library, for this test only.
+ *
+ * NOT the hidden "demo data" loader (`ensureBooksApp`): that one may only be on while a load
+ * holds its lock, and every loader sweep (API start-up, each Demo POS sync, other test runs on
+ * the shared database) rightly switches it off otherwise. An ordinary mini-app is never swept.
+ */
+const publishBooksTestApp = async (sql: Sql, orgUuid: string): Promise<{ appUuid: string; versionUuid: string }> => {
+  const appUuid = newUuid();
+  const versionUuid = newUuid();
+  const manifest = JSON.stringify(booksManifest());
+  await sql.begin(async (tx) => {
+    const [next] = await tx<{ n: number }[]>`select coalesce(max(number), 0) + 1 as n from platform.apps where org_id = ${orgUuid}`;
+    await tx`insert into platform.apps (id, org_id, slug, number, name, kind, status) values (${appUuid}, ${orgUuid}, 'books-test', ${next?.n ?? 1}, 'Books test', 'custom', 'published')`;
+    await tx`insert into platform.app_versions (id, app_id, org_id, number, manifest, status, summary)
+             values (${versionUuid}, ${appUuid}, ${orgUuid}, 1, ${manifest}::text::jsonb, 'published', 'Books test')`;
+    await tx`update platform.apps set current_version_id = ${versionUuid}, published_version_id = ${versionUuid} where id = ${appUuid} and org_id = ${orgUuid}`;
+  });
+  return { appUuid, versionUuid };
+};
 
 /** Every response body, by the restaurant whose token asked. */
 const seen: Record<string, string[]> = { [M.org]: [], [S.org]: [] };
@@ -88,7 +109,7 @@ describe("the books, end to end", () => {
       await createDemoRestaurant(sql, { template: r.template, orgUuid: r.org, storePrefix: r.prefix });
       // No `library` option: the tables come from the library as installed in the database.
       await ensureModels(sql, r.org, keys);
-      const made = await ensureBooksApp(sql, r.org);
+      const made = await publishBooksTestApp(sql, r.org);
       whos.push({ org: r.org, app: made.appUuid, ver: made.versionUuid, user: r.owner, role: "owner" });
     }
     [ownerM, ownerS] = whos as [Who, Who];
@@ -124,6 +145,17 @@ describe("the books, end to end", () => {
       expect(r.posted.stockCounts).toBe(r.rows.stock_count);
       expect(r.setUp.accountsAndRules).toBeGreaterThan(40);
       expect(r.setUp.calendar).toBeGreaterThan(9);
+    }
+  });
+
+  // Regression: this file used to borrow the hidden "demo data" loader and leave it switched on
+  // with no load running. Any loader sweep on the same database (API start-up, every Demo POS
+  // sync, another test run) then switched it off mid-test, and every call answered 401.
+  it("a loader sweep from anywhere leaves this mini-app switched on", async () => {
+    await sweepBooksLoader(adminDb());
+    for (const w of [ownerM, ownerS]) {
+      ok(await call(w, "catalog", {}));
+      expect(ok(await call(w, "query", { model: "sales_day", limit: 1 })).rows).toHaveLength(1);
     }
   });
 
