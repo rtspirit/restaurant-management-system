@@ -28,3 +28,22 @@ Date: 2026-11-21. Status: decided by the lead. The security reviewer said BLOCK 
 
 - `tests/security/db-walls.smoke.sh`: 59 database checks, all pass on a database rebuilt from zero, and it leaves nothing behind.
 - `packages/db`: 18 tests, 11 of them on the Ask path with the reviewer's attacks.
+
+## Hosted project: what was checked on 2026-11-21
+
+The database is pushed to the hosted `rms-demo` project and the wall checks pass there (63 checks, run twice).
+
+- **Custom logins through the pooler: work.** `rms_api`, `rms_admin` and the per-restaurant Ask login all connect through the hosted pooler with the username form `<role>.<project ref>`.
+- **Changing the Ask login's password takes effect at once.** The old password stops working immediately. So a fresh 15-minute login per Ask session works on hosted.
+- **A role name that is dropped and made again does not.** The pooler keeps the old login for that name for a while, and sign-in fails. The product never reuses a store prefix (they are random), and the wall checks now use fresh prefixes each run. Never reuse a store prefix.
+- **The sign-in signing secret is not readable from the database on hosted.** On the local stack it is (the public development default), which is why one test is marked "local stack only".
+- **No temp tables for restaurant roles: holds on hosted too.**
+- Still to do on hosted before the demo: push `config.toml` so the auto-generated API exposes nothing, raise the minimum password length, turn email confirmation on or cap sign-ups.
+
+## Closed after the Wave 1 attack suite (migration `20261121120400_hardening_2.sql`)
+
+- A restaurant's login can change a version or a listing only while it is a draft.
+- Two more links are checked by restaurant: a version's parent version, and a memory entry's replacement.
+- Removing a store works even if one of its roles left a large object behind.
+- An Ask answer is limited by size (about 1 MB), not only by rows.
+- The Ask envelope sets the caller's locations itself.
