@@ -114,7 +114,7 @@ export const LockedHashes = z.object({
 export type LockedHashes = z.infer<typeof LockedHashes>;
 
 /** The only packages mini-app code may import. Nothing installs at build time. */
-export const ALLOWED_APP_IMPORTS = ["react", "react/jsx-runtime", "@rms/ui", "@rms/sdk"] as const;
+export const ALLOWED_APP_IMPORTS = ["react", "@rms/ui", "@rms/sdk"] as const;
 
 /**
  * Everything the template's `package.json` may list. `check` and publish fail on anything else.

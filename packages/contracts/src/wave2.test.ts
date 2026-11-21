@@ -32,7 +32,7 @@ export const WAVE2_SAMPLES: Record<string, Sample> = {
   CheckInput: { schema: c.CheckInput, value: { only: ["locked", "types"] } },
   "ConnectRequest (catalog)": { schema: c.ConnectRequest, value: { kind: "catalog", key: "demo_pos" } },
   "ConnectRequest (custom)": { schema: c.ConnectRequest, value: { kind: "custom", name: "My POS", url: "https://pos.example.com/mcp", token: "a-long-token-value" }, allowed: ["token"] },
-  ApproveToolsRequest: { schema: c.ApproveToolsRequest, value: { tools: ["get_daily_sales"] } },
+  ApproveToolsRequest: { schema: c.ApproveToolsRequest, value: { tools: ["get_daily_sales"], toolsVersion: "a".repeat(64) } },
   SyncRequest: { schema: c.SyncRequest, value: { from: "2026-09-21", to: "2026-11-15" } },
   DemoPosRangeInput: { schema: c.DemoPosRangeInput, value: { from: "2026-11-09", to: "2026-11-15", location: "downtown" } },
   DemoPosNoInput: { schema: c.DemoPosNoInput, value: {} },
@@ -241,7 +241,7 @@ describe("the app template and the build agent's tools", () => {
   });
 
   it("mini-app code may import only React, the design system and the SDK", () => {
-    expect([...c.ALLOWED_APP_IMPORTS].sort()).toEqual(["@rms/sdk", "@rms/ui", "react", "react/jsx-runtime"]);
+    expect([...c.ALLOWED_APP_IMPORTS].sort()).toEqual(["@rms/sdk", "@rms/ui", "react"]);
     const all = [...c.ALLOWED_APP_DEPENDENCIES.dependencies, ...c.ALLOWED_APP_DEPENDENCIES.devDependencies] as string[];
     for (const banned of ["postgres", "pg", "@supabase/supabase-js", "axios", "tailwindcss", "@rms/db", "@rms/auth", "@rms/data"]) expect(all).not.toContain(banned);
   });
@@ -322,13 +322,22 @@ describe("connections and Demo POS", () => {
     no(c.ConnectRequest.safeParse({ kind: "catalog", key: "demo_pos", url: "https://evil.test" }));
     no(c.ConnectRequest.safeParse({ kind: "catalog", key: "Demo POS" }));
   });
-  it("a connection as the owner sees it has no address, token or hash", () => {
+  it("a connection as the owner sees it has no address or token, only the version of the list shown", () => {
     const view = c.ConnectionView.parse({
       id: `con_${hex}`, name: "Demo POS", catalogKey: "demo_pos", status: "connected", statusText: "Connected.", tools: [], lastSyncedAt: null, canSync: true,
-      url: "https://x.test", token: "secret", toolsHash: "abc", secretId: uuid,
+      toolsVersion: "b".repeat(64), url: "https://x.test", token: "secret", toolsHash: "abc", secretId: uuid,
     });
-    expect(Object.keys(view).sort()).toEqual(["canSync", "catalogKey", "id", "lastSyncedAt", "name", "status", "statusText", "tools"]);
+    expect(Object.keys(view).sort()).toEqual(["canSync", "catalogKey", "id", "lastSyncedAt", "name", "status", "statusText", "tools", "toolsVersion"]);
   });
+  it("allow needs the version of the list shown, in its exact form", () => {
+    const tools = ["get_daily_sales"];
+    expect(c.ApproveToolsRequest.safeParse({ tools }).success).toBe(false);
+    for (const toolsVersion of ["", "abc", "B".repeat(64), "g".repeat(64), `${"a".repeat(64)} `, 42]) {
+      expect(c.ApproveToolsRequest.safeParse({ tools, toolsVersion }).success, String(toolsVersion)).toBe(false);
+    }
+    expect(c.ApproveToolsRequest.safeParse({ tools, toolsVersion: "0".repeat(64), orgId: "org_x" }).success).toBe(false);
+  });
+  it("a connection token lives one minute", () => expect(c.TOKEN_TTL.connection).toBe(60));
   it("the tool list hash text does not depend on order", () => {
     const a = { name: "get_labour", description: "d", readOnly: true, inputSchema: { type: "object", properties: { to: {}, from: {} } } };
     const b = { name: "get_daily_sales", description: "d", readOnly: true, inputSchema: { properties: { from: {}, to: {} }, type: "object" } };

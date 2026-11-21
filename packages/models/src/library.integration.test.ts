@@ -1,13 +1,14 @@
 // Lead-owned integration test: the real library packs through the real compiler, on a real database.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { adminDb, closeAll, ident, provisionStore } from "@rms/db";
+import { adminDb, closeAll, ident, newStorePrefix, newUuid, provisionStore } from "@rms/db";
 import { requireTestEnv } from "@rms/db/testing";
 import { LIBRARY, ensureModels, installLibrary } from "./index.js";
 
 requireTestEnv("DATABASE_URL", "DATABASE_ADMIN_URL");
 
-const ORG = "0193a3c0-0000-7000-8000-000000000081";
-const PREFIX = "o_818181818101";
+// Fresh id and store prefix on every run, so parallel runs on the shared local database never meet.
+const ORG = newUuid();
+const PREFIX = newStorePrefix();
 
 const cleanup = async () => {
   const sql = adminDb();
@@ -17,10 +18,10 @@ const cleanup = async () => {
   await sql`delete from platform.organizations where id = ${ORG}`;
 };
 
-describe("the real library on a real store", () => {
+// Shared local database: under parallel runs these wait on other runs. Give them time.
+describe("the real library on a real store", { timeout: 60_000 }, () => {
   beforeAll(async () => {
-    await cleanup();
-    await adminDb()`insert into platform.organizations (id, slug, name, store_prefix) values (${ORG}, 'libtest-81', 'Library Test', ${PREFIX})`;
+    await adminDb()`insert into platform.organizations (id, slug, name, store_prefix) values (${ORG}, ${`libtest-${PREFIX.slice(2)}`}, 'Library Test', ${PREFIX})`;
     await provisionStore(adminDb(), ORG);
   });
   afterAll(async () => {

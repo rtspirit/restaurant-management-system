@@ -1,0 +1,42 @@
+// Made by `rms gen report_table` for the report sales_by_day. Editable: change anything in this file.
+import { addDays, dateFromToday, formatAs, formatDate, useNamedQuery, useRms } from "@rms/sdk";
+import { Page, Pager, ReportTable, Skeleton, Stack } from "@rms/ui";
+import { useState } from "react";
+import { NoNumbers, Problem } from "../../rms/notices";
+
+const QUERY = "sales_by_day";
+const COLUMNS = [{ key: "business_date", label: "Business date", format: "date", align: "start" }, { key: "net_sales", label: "Net sales", format: "money", align: "end" }, { key: "gross_sales", label: "Gross sales", format: "money", align: "end" }, { key: "discounts", label: "Discounts", format: "money", align: "end" }, { key: "comps", label: "Comps", format: "money", align: "end" }, { key: "sales_tax", label: "Sales tax collected", format: "money", align: "end" }, { key: "tips", label: "Tips", format: "money", align: "end" }, { key: "guests", label: "Guests", format: "number", align: "end" }, { key: "checks", label: "Checks", format: "number", align: "end" }] as const;
+const TOTALS = ["net_sales", "gross_sales", "discounts", "comps", "sales_tax", "tips", "guests", "checks"] as const;
+
+const sum = (rows: Record<string, unknown>[], key: (typeof TOTALS)[number]): number =>
+  rows.reduce<number>((total, row) => {
+    const value = row[key];
+    return total + (typeof value === "number" ? value : 0);
+  }, 0);
+
+export function SalesScreen() {
+  const rms = useRms();
+  const [weekOf, setWeekOf] = useState(() => dateFromToday(-7));
+  const report = useNamedQuery(QUERY, { "week_of": weekOf });
+
+  return (
+    <Page title="Sales" actions={<Pager label={`Week of ${formatDate(weekOf, rms.locale)}`} previousLabel="Week before" nextLabel="Week after" onPrevious={() => setWeekOf((d) => addDays(d, -7))} onNext={() => setWeekOf((d) => addDays(d, 7))} />}>
+      <Stack gap="m">
+        <Problem error={report.error} />
+        {report.loading && report.data === null ? (
+          <Skeleton shape="block" label="Loading the report" />
+        ) : report.rows.length === 0 ? (
+          <NoNumbers what="sales by day" />
+        ) : (
+          <ReportTable
+            title="Sales by day"
+            source="From your books: sales by day."
+            columns={COLUMNS.map((c) => ({ key: c.key, label: c.label, align: c.align }))}
+            rows={report.rows.map((row, i) => ({ id: String(i), cells: Object.fromEntries(COLUMNS.map((c) => [c.key, formatAs(row[c.key], c.format, rms)])) }))}
+            total={{ "business_date": "Total", ...Object.fromEntries(TOTALS.map((key) => [key, formatAs(sum(report.rows, key), COLUMNS.find((c) => c.key === key)?.format ?? "number", rms)])) }}
+          />
+        )}
+      </Stack>
+    </Page>
+  );
+}

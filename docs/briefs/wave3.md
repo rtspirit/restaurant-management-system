@@ -115,6 +115,8 @@ INSTALL (P)         Slice Yard's owner opens the Marketplace, sees the listing (
 
 **Where the code is** (ADR 0009): source and built files are rows in `platform.objects`, behind `ObjectStore` in `@rms/db`. The restaurant-facing login can read its own restaurant's objects and write only the source of its own draft versions. Built files and listings are written with `adminDb()`, and a listing's stored source can only be read with `adminDb()`. Nobody updates an object.
 
+**The web app only frames what it was BUILT to frame.** Its `frame-src` lists `PREVIEW_URL`, `APPS_URL` and the sandbox pattern, read when the web app is built (`apps/web/next.config.ts`, task J). After `APPS_URL` is set or changed, the web app must be built again or the browser refuses the frame before any RMS code runs.
+
 **Local addresses today:** the web app on port 3000, the console on 3001, the apps host on 3002, the API on 8787. The apps host must be a different HOST from the web app, not just a different port (cookies ignore the port): on the laptop the web app is on `127.0.0.1` and the apps host on `localhost`, so `APPS_URL=http://localhost:3002` in the local settings (the lead adds it). `openApp` refuses to make a grant otherwise (`canFrameApp`).
 
 ---

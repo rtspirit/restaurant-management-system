@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "bundle": "pnpm --filter @rms/contracts --filter @rms/generators build && node scripts/bundle.mjs"
   },
   "dependencies": {
     "@rms/sdk": "workspace:*",
