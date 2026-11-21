@@ -61,11 +61,13 @@ test.describe("beat 1: a new owner signs up and finds their restaurant ready", (
     // tests make them too): the page then says it could not set up the restaurant. Fail fast with
     // what the page said rather than waiting out the clock.
     consoleWatch.allow(/status of 503/);
+    const answered = page.waitForResponse((res) => new URL(res.url()).pathname === "/auth/onboarding" && res.request().method() === "POST", { timeout: 90_000 });
     await page.getByRole("button", { name: "Finish" }).click();
-    const problem = page.getByText("We could not set up your restaurant just now. Please try again.");
-    const where = async () => (new URL(page.url()).pathname === "/" ? "home" : (await problem.count()) > 0 ? "could not set up" : "waiting");
-    await expect.poll(where, { timeout: 90_000 }).not.toBe("waiting");
-    expect(await where(), 'Onboarding should land on Home. "could not set up" means the API refused: the 25-restaurant limit on the shared database may be reached by other tests.').toBe("home");
+    const res = await answered;
+    // The API's error code and plain message (never a token): says why, when it refuses.
+    const why = res.ok() ? "" : await res.json().then((b: { error?: { code?: string; message?: string } }) => `${b.error?.code}: ${b.error?.message}`).catch(() => "");
+    expect(res.status(), `Onboarding was refused (${res.status()} ${why}). at_capacity means the shared database already holds 25 restaurants.`).toBeLessThan(300);
+    await page.waitForURL((url) => url.pathname === "/", { timeout: 30_000 });
     await settle(page);
 
     // Home: "Hello", the restaurant's name, "No mini-apps yet", Build a mini-app, Look in the Marketplace.
