@@ -1,5 +1,5 @@
 // @rms/contracts: shared zod schemas and types. Owned by the lead. Ask the lead for changes.
-export const CONTRACTS_VERSION = "0.3.0";
+export const CONTRACTS_VERSION = "0.3.1";
 
 export * from "./ids.js";
 export * from "./auth.js";

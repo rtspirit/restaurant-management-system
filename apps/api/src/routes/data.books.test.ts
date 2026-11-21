@@ -15,10 +15,10 @@ import app from "../index.js";
 
 requireTestEnv("DATABASE_URL", "DATABASE_ADMIN_URL", "RMS_TOKEN_SECRET");
 
-// Integration test ids: uuid suffix d0 to df, store prefixes o_d1d1d1d1d1xx.
+// Integration test ids: uuid suffix 70 to 7f, store prefixes o_7171717171xx. (d0 to df belongs to the @rms/db tests.)
 const uuid = (suffix: string) => `0193a3c0-0000-7000-8000-0000000000${suffix}`;
-const M = { org: uuid("d3"), prefix: "o_d1d1d1d1d103", owner: uuid("d5"), staff: uuid("d6"), template: "marigold" as const };
-const S = { org: uuid("d4"), prefix: "o_d1d1d1d1d104", owner: uuid("d7"), staff: uuid("d8"), template: "slice_yard" as const };
+const M = { org: uuid("73"), prefix: "o_717171717103", owner: uuid("75"), staff: uuid("76"), template: "marigold" as const };
+const S = { org: uuid("74"), prefix: "o_717171717104", owner: uuid("77"), staff: uuid("78"), template: "slice_yard" as const };
 
 const CANARY_M = "CANARY-MARIGOLD-4c1d7e90-books";
 const CANARY_S = "CANARY-SLICEYARD-9a2b6f13-books";

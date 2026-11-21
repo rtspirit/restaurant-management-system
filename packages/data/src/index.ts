@@ -22,6 +22,7 @@ export { runCatalog } from "./catalog.js";
 export { DataApiError, errorResponse, toDataApiError } from "./errors.js";
 export { runNamedAction, runNamedQuery } from "./named.js";
 export { runQuery } from "./query.js";
+export { type ParentRead, readParent } from "./parent-read.js";
 export { TemplateError, parseTemplate, renderTemplate } from "./template.js";
 export { FUNCTIONS, checkNamedAction, checkNamedQuery, checkTemplate } from "./template-check.js";
 export { decodeCursor, encodeCursor } from "./cursor.js";

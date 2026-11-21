@@ -4,11 +4,14 @@ import { Hono } from "hono";
 import { adminRoutes } from "./routes/admin.js";
 import { authRoutes } from "./routes/auth.js";
 import { dataRoutes } from "./routes/data.js";
+import { parentRoutes } from "./routes/parent.js";
 
 const app = new Hono();
 
 app.get("/health", (c) => c.json({ ok: true }));
 app.route("/auth", authRoutes);
+// After authRoutes, so its cross-origin rule (the web app only, no wildcard) covers this too.
+app.route("/auth", parentRoutes);
 app.route("/data", dataRoutes);
 app.route("/admin", adminRoutes);
 

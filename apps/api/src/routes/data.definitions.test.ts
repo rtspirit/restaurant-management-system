@@ -16,10 +16,10 @@ import app from "../index.js";
 
 requireTestEnv("DATABASE_URL", "DATABASE_ADMIN_URL", "RMS_TOKEN_SECRET");
 
-// Integration test ids: uuid suffix d0 to df, store prefixes o_d1d1d1d1d1xx.
-const ORG = "0193a3c0-0000-7000-8000-0000000000d1";
-const PREFIX = "o_d1d1d1d1d101";
-const OWNER = "0193a3c0-0000-7000-8000-0000000000d2";
+// Integration test ids: uuid suffix 70 to 7f, store prefixes o_7171717171xx. (d0 to df belongs to the @rms/db tests.)
+const ORG = "0193a3c0-0000-7000-8000-000000000071";
+const PREFIX = "o_717171717101";
+const OWNER = "0193a3c0-0000-7000-8000-000000000072";
 const APP = newUuid();
 const VER_LIVE = newUuid();
 const VER_DRAFT = newUuid();
