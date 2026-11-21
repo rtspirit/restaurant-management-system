@@ -214,30 +214,149 @@ describe("the apps host", () => {
   it("origins from settings are exact, few, and never a wildcard", () => {
     expect(c.exactOrigins("http://localhost:3000")).toEqual(["http://localhost:3000"]);
     expect(c.exactOrigins("https://rms.example.com/some/path?x=1")).toEqual(["https://rms.example.com"]);
-    expect(c.exactOrigins("http://localhost:3000, https://rms.example.com", "https://rms.example.com")).toEqual(["http://localhost:3000", "https://rms.example.com"]);
-    expect(c.exactOrigins(undefined, null, "", " , ")).toEqual([]);
-    expect(c.exactOrigins("*", "https://*.example.com", "not an address", "javascript:alert(1)", "http://example.com")).toEqual([]);
+    expect(c.exactOrigins("http://localhost:3000, https://rms.example.com,https://rms.example.com")).toEqual(["http://localhost:3000", "https://rms.example.com"]);
+    for (const empty of [undefined, null, "", " , "]) expect(c.exactOrigins(empty)).toEqual([]);
+    expect(c.exactOrigins("*, https://*.example.com, not an address, javascript:alert(1), http://example.com")).toEqual([]);
     expect(c.exactOrigins("https://a.example.com,https://b.example.com,https://c.example.com,https://d.example.com,https://e.example.com")).toHaveLength(c.APPS_HOST.maxOrigins);
   });
 
-  it("a frame address makes a grant that parses, and never from the shell's own site", () => {
-    const url = c.appFrameUrl("http://127.0.0.1:3002", app, ver);
-    expect(url).toBe(`http://127.0.0.1:3002/a/${app}/${ver}/`);
+  it("a network address is an origin only in local demo mode, and a public http address never is", () => {
+    const lan = "http://192.168.1.20:3000, http://rahuls-mac.local:3000";
+    expect(c.exactOrigins(lan)).toEqual([]);
+    expect(c.exactOrigins(lan, "strict")).toEqual([]);
+    expect(c.exactOrigins(lan, "local_demo")).toEqual(["http://192.168.1.20:3000", "http://rahuls-mac.local:3000"]);
+    expect(c.exactOrigins("http://rms.example.com, http://8.8.8.8:3000, http://*.local:3000", "local_demo")).toEqual([]);
+  });
+
+  it("a frame address makes an app grant that parses", () => {
+    const url = c.appFrameUrl("http://localhost:3002", app, ver);
+    expect(url).toBe(`http://localhost:3002/a/${app}/${ver}/`);
     expect(c.parseAppsHostPath(new URL(url).pathname)).toEqual({ appId: app, versionId: ver, path: "index.html" });
-    expect(() => c.appFrameUrl("http://127.0.0.1:3002/x", app, ver)).toThrow();
+    expect(() => c.appFrameUrl("http://localhost:3002/x", app, ver)).toThrow();
     expect(() => c.appFrameUrl("*", app, ver)).toThrow();
-    expect(() => c.appFrameUrl("http://127.0.0.1:3002", "app_x" as c.AppId, ver)).toThrow();
+    expect(() => c.appFrameUrl("http://rms.example.com", app, ver)).toThrow();
+    expect(() => c.appFrameUrl("http://localhost:3002", "app_x" as c.AppId, ver)).toThrow();
     const context = {
       app: { id: app, name: "Money" }, env: "live", user: { name: "Asha", role: "staff" },
       restaurant: { name: "Marigold Kitchen", brandColour: null }, locations: [], currency: "USD", locale: "en-US",
     };
-    const grant = { kind: "app", appId: app, appName: "Money", versionId: ver, url, frameOrigin: "http://127.0.0.1:3002", token: "t".repeat(40), expiresAt: now, context };
+    const grant = { kind: "app", appId: app, appName: "Money", versionId: ver, url, frameOrigin: "http://localhost:3002", token: "t".repeat(40), expiresAt: now, context };
     ok(c.AppGrant.safeParse(grant));
-    no(c.AppGrant.safeParse({ ...grant, frameOrigin: "http://localhost:3002" }));
-    no(c.AppGrant.safeParse({ ...grant, url: `http://localhost:3002/a/${app}/${ver}/`, frameOrigin: "http://localhost:3002" }));
+    ok(c.AppGrant.safeParse({ ...grant, url: `http://192.168.1.20:3002/a/${app}/${ver}/`, frameOrigin: "http://192.168.1.20:3002" }));
+    no(c.AppGrant.safeParse({ ...grant, frameOrigin: "http://127.0.0.1:3002" })); // not the origin of its address
+    no(c.AppGrant.safeParse({ ...grant, url: `http://rms.example.com/a/${app}/${ver}/`, frameOrigin: "http://rms.example.com" }));
+    no(c.AppGrant.safeParse({ ...grant, url: `http://8.8.8.8:3002/a/${app}/${ver}/`, frameOrigin: "http://8.8.8.8:3002" }));
     no(c.AppGrant.safeParse({ ...grant, versionId: `run_${hex}` }));
-    expect(c.isSeparateSite("http://127.0.0.1:3002", "http://localhost:3000")).toBe(true);
-    expect(c.isSeparateSite("http://127.0.0.1:3002", "http://127.0.0.1:3000")).toBe(false);
+  });
+});
+
+describe("local and phone demo origins (ADR 0012)", () => {
+  const LAPTOP = { shell: "http://127.0.0.1:3000", apps: "http://localhost:3002" };
+  const PHONE = { shell: "http://rahuls-mac.local:3000", apps: "http://192.168.1.20:3002" };
+  const can = (frameOrigin: string, shellOrigin: string, appsOrigins: string[], mode: c.OriginMode = "local_demo") => c.canFrameApp({ frameOrigin, shellOrigin, appsOrigins, mode });
+
+  it("plain http is only ever for this machine or this network", () => {
+    for (const good of [
+      "http://localhost:3002", "http://127.0.0.1:3000", "http://192.168.1.20:3002", "http://192.168.0.1", "http://10.0.0.7:3000", "http://172.16.0.1:3000", "http://172.31.255.255:3000",
+      "http://rahuls-mac.local:3000", "http://mac.local",
+    ]) ok(c.LocalOrigin.safeParse(good));
+    for (const bad of [
+      "http://rms.example.com", "http://8.8.8.8:3000", "http://172.15.0.1:3000", "http://172.32.0.1:3000", "http://192.169.1.1:3000", "http://11.0.0.1:3000", "http://169.254.1.1:3000",
+      "http://127.0.0.2:3000", "http://0.0.0.0:3000", "http://192.168.1.256:3000", "http://192.168.1:3000", "http://192.168.01.1:3000", "http://192.168.1.20.evil.test:3000",
+      "http://a.b.local:3000", "http://local:3000", "http://mac.local.evil.test:3000", "http://evil.test/rahuls-mac.local", "http://MAC.local:3000", "http://mac.local:3000/", "http://*.local:3000",
+      "https://192.168.1.20:3002", "http://[::1]:3000", "http://localhost.evil.test", "http://user@192.168.1.20:3000", "", "*", "null",
+    ]) {
+      no(c.LocalOrigin.safeParse(bad));
+    }
+    // The strict rule did not move: a network address is still not an Origin.
+    no(c.Origin.safeParse(PHONE.shell));
+    no(c.Origin.safeParse(PHONE.apps));
+  });
+
+  it("the mode is local demo only when the flag is exactly 1 and the server is not a deployed one", () => {
+    expect(c.originMode({})).toBe("strict");
+    expect(c.originMode({ RMS_LOCAL_DEMO: "1" })).toBe("local_demo");
+    for (const flag of ["0", "true", "yes", "", " 1", "01"]) expect(c.originMode({ RMS_LOCAL_DEMO: flag }), flag).toBe("strict");
+    expect(c.originMode({ RMS_LOCAL_DEMO: "1", VERCEL: "1" })).toBe("strict");
+    expect(c.originMode({ RMS_LOCAL_DEMO: "1", RAILWAY_ENVIRONMENT: "production" })).toBe("strict");
+    expect(c.originAllowed(PHONE.shell, "strict")).toBe(false);
+    expect(c.originAllowed(PHONE.shell, "local_demo")).toBe(true);
+    expect(c.originAllowed("https://rms.example.com", "strict")).toBe(true);
+    expect(c.originAllowed("http://rms.example.com", "local_demo")).toBe(false);
+  });
+
+  it("the laptop pair and the phone pair may frame a published mini-app, either way round", () => {
+    expect(can(LAPTOP.apps, LAPTOP.shell, [LAPTOP.apps])).toBe(true);
+    expect(can(PHONE.apps, PHONE.shell, [PHONE.apps])).toBe(true);
+    expect(can("http://127.0.0.1:3002", "http://localhost:3000", ["http://127.0.0.1:3002"])).toBe(true);
+    expect(can("http://rahuls-mac.local:3002", "http://192.168.1.20:3000", ["http://rahuls-mac.local:3002"])).toBe(true);
+    // The laptop pair needs no switch: both are loopback origins, which the strict rule already knows.
+    expect(can(LAPTOP.apps, LAPTOP.shell, [LAPTOP.apps], "strict")).toBe(true);
+    expect(can("https://rms-apps.example.net", "https://rms.example.com", ["https://rms-apps.example.net"], "strict")).toBe(true);
+  });
+
+  it("the same host on another port is never enough, in any mode", () => {
+    for (const mode of ["strict", "local_demo"] as const) {
+      expect(can("http://127.0.0.1:3002", "http://127.0.0.1:3000", ["http://127.0.0.1:3002"], mode)).toBe(false);
+      expect(can("http://localhost:3002", "http://localhost:3000", ["http://localhost:3002"], mode)).toBe(false);
+      expect(can("http://192.168.1.20:3002", "http://192.168.1.20:3000", ["http://192.168.1.20:3002"], mode)).toBe(false);
+      expect(can("http://rahuls-mac.local:3002", "http://rahuls-mac.local:3000", ["http://rahuls-mac.local:3002"], mode)).toBe(false);
+      expect(can("https://apps.rms.example.com", "https://rms.example.com", ["https://apps.rms.example.com"], mode)).toBe(false);
+      expect(can("https://rms.example.com", "https://apps.rms.example.com", ["https://rms.example.com"], mode)).toBe(false);
+    }
+  });
+
+  it("the phone pair is refused unless local demo mode is on", () => {
+    expect(can(PHONE.apps, PHONE.shell, [PHONE.apps], "strict")).toBe(false);
+    expect(can(PHONE.apps, LAPTOP.shell, [PHONE.apps], "strict")).toBe(false);
+    expect(can(LAPTOP.apps, PHONE.shell, [LAPTOP.apps], "strict")).toBe(false);
+  });
+
+  it("the frame must be exactly a configured apps host, and never a public http host", () => {
+    expect(can(PHONE.apps, PHONE.shell, [])).toBe(false);
+    expect(can(PHONE.apps, PHONE.shell, [LAPTOP.apps])).toBe(false);
+    expect(can("http://192.168.1.66:3002", PHONE.shell, [PHONE.apps])).toBe(false);
+    expect(can("http://192.168.1.20:3003", PHONE.shell, [PHONE.apps])).toBe(false);
+    expect(can("http://evil.test", PHONE.shell, ["http://evil.test"])).toBe(false);
+    expect(can("http://8.8.8.8:3002", PHONE.shell, ["http://8.8.8.8:3002"])).toBe(false);
+    expect(can("*", PHONE.shell, ["*"])).toBe(false);
+    expect(can(PHONE.apps, "null", [PHONE.apps])).toBe(false);
+  });
+
+  it("a shell on https never frames plain http", () => {
+    expect(can(LAPTOP.apps, "https://rms.example.com", [LAPTOP.apps])).toBe(false);
+    expect(can(PHONE.apps, "https://rms.example.com", [PHONE.apps])).toBe(false);
+  });
+
+  it("build previews did not loosen: the strict rule and the localhost ban are as they were", () => {
+    expect(c.isSeparateSite(PHONE.apps, PHONE.shell)).toBe(false);
+    expect(c.isSeparateSite("http://192.168.1.20:5173", "http://127.0.0.1:3000")).toBe(false);
+    expect(c.isSeparateSite("http://127.0.0.1:5173", "http://127.0.0.1:3000")).toBe(false);
+    expect(c.isSeparateSite("https://sb-abc123.vercel.run", "http://127.0.0.1:3000")).toBe(true);
+    const context = {
+      app: { id: app, name: "Money" }, env: "draft", user: { name: "Asha", role: "owner" },
+      restaurant: { name: "Marigold Kitchen", brandColour: null }, locations: [], currency: "USD", locale: "en-US",
+    };
+    const preview = { kind: "preview", appId: app, appName: "Money", runId: `run_${hex}`, url: "https://sb-abc123.vercel.run/", frameOrigin: "https://sb-abc123.vercel.run", token: "t".repeat(40), expiresAt: now, context };
+    ok(c.PreviewGrant.safeParse(preview));
+    no(c.PreviewGrant.safeParse({ ...preview, url: "http://localhost:5173/", frameOrigin: "http://localhost:5173" }));
+    no(c.PreviewGrant.safeParse({ ...preview, url: "http://192.168.1.20:5173/", frameOrigin: "http://192.168.1.20:5173" }));
+    no(c.PreviewGrant.safeParse({ ...preview, url: "http://rahuls-mac.local:5173/", frameOrigin: "http://rahuls-mac.local:5173" }));
+  });
+
+  it("a message is compared with a well-formed origin, exactly", () => {
+    const frame = {};
+    expect(c.fromExpectedOrigin({ origin: PHONE.apps, source: frame }, PHONE.apps, frame)).toBe(true);
+    expect(c.fromExpectedOrigin({ origin: "http://192.168.1.20:3003", source: frame }, PHONE.apps, frame)).toBe(false);
+    expect(c.fromExpectedOrigin({ origin: PHONE.apps, source: {} }, PHONE.apps, frame)).toBe(false);
+    expect(c.fromExpectedOrigin({ origin: "http://evil.test", source: frame }, "http://evil.test", frame)).toBe(false);
+    expect(c.fromExpectedOrigin({ origin: "*", source: frame }, "*", frame)).toBe(false);
+  });
+
+  it("the apps host may name a network shell in its policy, once the list was made for the mode", () => {
+    expect(c.appsHostPolicy(c.exactOrigins(PHONE.shell, "local_demo"))).toContain(`frame-ancestors ${PHONE.shell}`);
+    expect(c.appsHostPolicy(c.exactOrigins(PHONE.shell, "strict"))).toContain("frame-ancestors 'none'");
+    expect(c.appsHostPolicy(["http://rms.example.com"])).toContain("frame-ancestors 'none'");
   });
 });
 

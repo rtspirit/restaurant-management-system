@@ -70,8 +70,9 @@ export const navApps = async (_tenant: TenantContext): Promise<NavApp[]> => [];
 /**
  * What the shell needs to show a published mini-app in a frame: the address on the apps host
  * and an app token for this member, this mini-app and its published version. Any member.
- * Refuses unless the apps host is a separate site from the RMS web app, and unless the built
- * files were made for the RMS address in use.
+ * Refuses unless `canFrameApp` allows the apps host's origin inside the RMS web app's (a
+ * different host, not just a different port: ADR 0012), and unless the built files were made
+ * for the RMS address in use.
  */
 export const openApp = async (_tenant: TenantContext, _appId: AppId, _who: { email: string | null }): Promise<AppGrant> => {
   throw new PublishError("unavailable");

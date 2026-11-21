@@ -124,6 +124,103 @@ export const isSeparateSite = (frameOrigin: string, shellOrigin: string): boolea
   return !frame.endsWith(`.${shell}`) && !shell.endsWith(`.${frame}`);
 };
 
+// ------------------------------------------------------------------ local and phone demo origins (ADR 0012)
+
+/**
+ * The demo runs on one laptop, and on a phone on the same Wi-Fi. There a PUBLISHED mini-app is
+ * served by the apps host on the same machine as the RMS web app, over plain http. The rule
+ * that matters does not change: the frame and the shell are on DIFFERENT HOSTS, because cookies
+ * ignore the port and the sign-in cookies can be read by page script. One machine has more than
+ * one name, and a cookie set for one name is never sent to, or readable from, another:
+ *
+ *   on the laptop   shell http://127.0.0.1:3000             apps host http://localhost:3002
+ *   on the phone    shell http://<laptop-name>.local:3000   apps host http://<network address>:3002
+ *
+ * (either way round is as safe: what counts is that the two hosts differ.)
+ *
+ * `LocalOrigin`: plain http on this machine or this network ONLY. The host is `localhost`,
+ * `127.0.0.1`, a private IPv4 address (10.x, 172.16 to 172.31, 192.168.x), or a one-label
+ * `.local` name. It can never be a public host, whatever a settings file says.
+ *
+ * A `LocalOrigin` that is not also an `Origin` is only ever accepted in LOCAL DEMO MODE
+ * (`originMode`), and then only when it is an exact entry of a settings list (`WEB_URL`,
+ * `APPS_URL`). Build previews are not part of this: `PreviewGrant` and `isSeparateSite` keep
+ * the strict rule, in every mode.
+ */
+const IPV4_OCTET = "(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])";
+const PRIVATE_IPV4 = new RegExp(`^(10\\.${IPV4_OCTET}|172\\.(1[6-9]|2[0-9]|3[01])|192\\.168)\\.${IPV4_OCTET}\\.${IPV4_OCTET}$`);
+const LOCAL_NAME = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.local$/;
+
+const isLocalHost = (host: string | null): boolean =>
+  host !== null && (host === "localhost" || host === "127.0.0.1" || PRIVATE_IPV4.test(host) || LOCAL_NAME.test(host));
+
+export const LocalOrigin = z
+  .string()
+  .max(200)
+  .regex(/^http:\/\/[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:\d{1,5})?$/)
+  // Exactly as a browser would report it: an address a browser would rewrite (a short or
+  // zero-padded number, a default port) is not an origin anyone will ever send.
+  .refine((o) => {
+    try {
+      return new URL(o).origin === o;
+    } catch {
+      return false;
+    }
+  }, "Not written the way a browser reports an origin")
+  .refine((o) => isLocalHost(hostOf(o)), "Plain http is only for this machine and this network");
+export type LocalOrigin = z.infer<typeof LocalOrigin>;
+
+/**
+ * Well-formed: an `Origin`, or a `LocalOrigin`. This says an address is SHAPED like one RMS could
+ * use. It never says the address may be used: that is `originAllowed` and `canFrameApp`.
+ */
+export const AnyOrigin = z.union([Origin, LocalOrigin]);
+export type AnyOrigin = z.infer<typeof AnyOrigin>;
+
+/** `strict`: the rule everywhere by default. `local_demo`: the laptop-and-phone demo, switched on by a setting. */
+export type OriginMode = "strict" | "local_demo";
+
+/**
+ * The switch. `RMS_LOCAL_DEMO=1` on the servers, and `NEXT_PUBLIC_RMS_LOCAL_DEMO=1` when the web
+ * app is built for the demo. A deployed server never honours it: `hostedMarkers` are settings
+ * the hosting platforms set themselves.
+ */
+export const LOCAL_DEMO = { flagEnv: "RMS_LOCAL_DEMO", publicFlagEnv: "NEXT_PUBLIC_RMS_LOCAL_DEMO", on: "1", hostedMarkers: ["VERCEL", "RAILWAY_ENVIRONMENT"] } as const;
+
+/** The mode for a server, from its own environment. `strict` unless the flag is exactly "1" and the server is not a deployed one. */
+export const originMode = (env: Record<string, string | undefined>): OriginMode =>
+  env[LOCAL_DEMO.flagEnv] === LOCAL_DEMO.on && LOCAL_DEMO.hostedMarkers.every((m) => !env[m]) ? "local_demo" : "strict";
+
+/** True when `origin` is well-formed for the mode: an `Origin` always, a `LocalOrigin` only in local demo mode. */
+export const originAllowed = (origin: string, mode: OriginMode): boolean =>
+  Origin.safeParse(origin).success || (mode === "local_demo" && LocalOrigin.safeParse(origin).success);
+
+/** Different hosts, and neither a parent domain of the other: no cookie set for one is sent to, or readable from, the other. */
+const hostsAreSeparate = (a: string, b: string): boolean => {
+  const x = hostOf(a);
+  const y = hostOf(b);
+  if (x === null || y === null || x === y) return false;
+  return !x.endsWith(`.${y}`) && !y.endsWith(`.${x}`);
+};
+
+/**
+ * May a shell at `shellOrigin` show a PUBLISHED mini-app from `frameOrigin`? The one rule for
+ * published mini-apps, used by the server when it makes an `AppGrant` and by the shell before
+ * it loads the frame. All of:
+ *   - both origins are well-formed for the mode (`originAllowed`)
+ *   - the frame origin is EXACTLY one of the configured apps-host origins (`appsOrigins`, from settings)
+ *   - the hosts differ, and neither is a parent domain of the other (a different port is not enough)
+ *   - no step down: a shell on https only ever frames https
+ * Build previews do not use this. They keep `isSeparateSite`.
+ */
+export const canFrameApp = (input: { frameOrigin: string; shellOrigin: string; appsOrigins: readonly string[]; mode: OriginMode }): boolean => {
+  const { frameOrigin, shellOrigin, appsOrigins, mode } = input;
+  if (!originAllowed(frameOrigin, mode) || !originAllowed(shellOrigin, mode)) return false;
+  if (!appsOrigins.includes(frameOrigin)) return false;
+  if (shellOrigin.startsWith("https://") && !frameOrigin.startsWith("https://")) return false;
+  return hostsAreSeparate(frameOrigin, shellOrigin);
+};
+
 const grantShape = {
   appId: AppId,
   appName: z.string().max(40),
@@ -155,21 +252,44 @@ const GRANT_RULE = "frameOrigin must be the origin of url, and a frame is never 
 export const PreviewGrant = z.object({ kind: z.literal("preview"), ...grantShape, runId: RunId }).refine(grantHolds, GRANT_RULE);
 export type PreviewGrant = z.infer<typeof PreviewGrant>;
 
+const appGrantHolds = (g: { url: string; frameOrigin: string }): boolean => {
+  try {
+    return new URL(g.url).origin === g.frameOrigin;
+  } catch {
+    return false;
+  }
+};
+
 /**
  * The same hand-off for a PUBLISHED mini-app (Wave 3). The token is an app token: live store,
- * one mini-app, one published version. `url` is on the apps host. Everything else, including
- * every message in this file, is the same, so the shell's frame code does not change.
+ * one mini-app, one published version. `url` is on the apps host. Every message in this file
+ * is the same.
+ *
+ * What differs is the origin rule (ADR 0012). A preview grant's shape refuses a `localhost`
+ * frame, because a preview is checked without knowing the shell's address and the web app was
+ * assumed to be on `localhost`. An app grant has no such shortcut: its frame origin may be any
+ * well-formed origin (`AnyOrigin`), and whether it may be LOADED is `canFrameApp`, which takes
+ * the shell's own origin, the configured apps-host origins and the mode. The server checks it
+ * before it makes the grant. The shell checks it again before it loads the frame. A shell
+ * that loads an app grant without `canFrameApp` is a bug.
  */
-export const AppGrant = z.object({ kind: z.literal("app"), ...grantShape, versionId: AppVersionId }).refine(grantHolds, GRANT_RULE);
+export const AppGrant = z
+  .object({ kind: z.literal("app"), ...grantShape, frameOrigin: AnyOrigin, versionId: AppVersionId })
+  .refine(appGrantHolds, "frameOrigin must be the origin of url");
 export type AppGrant = z.infer<typeof AppGrant>;
 
 /** Either grant. The shell's frame host takes this. */
 export const FrameGrant = z.union([PreviewGrant, AppGrant]);
 export type FrameGrant = z.infer<typeof FrameGrant>;
 
-/** True only for a message the given side may act on. One implementation of the origin rule for both sides. */
+/**
+ * True only for a message the given side may act on. One implementation of the origin rule for both sides.
+ * `expectedOrigin` must be well-formed (`AnyOrigin`): this is an exact comparison with an origin the
+ * caller already decided to trust (a grant that passed its own rule, or the shell origin a mini-app
+ * was built with). It is not the place that decides trust.
+ */
 export const fromExpectedOrigin = (event: { origin: string; source: unknown }, expectedOrigin: string, expectedSource: unknown): boolean =>
-  event.source !== null && event.source === expectedSource && Origin.safeParse(expectedOrigin).success && event.origin === expectedOrigin;
+  event.source !== null && event.source === expectedSource && AnyOrigin.safeParse(expectedOrigin).success && event.origin === expectedOrigin;
 
 /**
  * Settings baked into a mini-app when it is built or served. Public values only.

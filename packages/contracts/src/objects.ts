@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { type AppId, type ListingId, type OrgId, toPublicId, toUuid } from "./ids.js";
 import { EDITABLE_TEMPLATE_FOLDERS, isEditablePath } from "./build.js";
-import { Origin } from "./frame.js";
+import { AnyOrigin } from "./frame.js";
 
 /**
  * Where a mini-app's code is kept (ADR 0009).
@@ -120,7 +120,7 @@ export const BundleIndex = z
   .strictObject({
     format: z.literal(1),
     entry: z.literal(BUNDLE_ENTRY),
-    shellOrigin: Origin,
+    shellOrigin: AnyOrigin,
     builtAt: z.iso.datetime(),
     files: z.array(BundleFile).min(1).max(OBJECT_LIMITS.screens.maxFiles),
   })
