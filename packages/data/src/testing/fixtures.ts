@@ -46,10 +46,17 @@ export const CANARY_B = "CANARY-B-b81e44d0-slice-yard-only";
 
 const access = { owner: "write", staff: "write" } as const;
 
+/**
+ * The pack the test models claim. The Data API reads definitions through the model compiler,
+ * which only accepts pack "custom" for keys that start with `x_` and for check rules. These
+ * test models have plain keys and one commit-time rule, so they sit in a library pack.
+ */
+const PACK = "foundation" as const;
+
 /** The test models. Each is a valid ModelDefinition, parsed below. */
 export const MODELS = [
   ModelDefinition.parse({
-    key: "tip_pool", pack: "custom", version: 1, name: "Tip pools", description: "Tips collected for one business date at one location, to be shared out.",
+    key: "tip_pool", pack: PACK, version: 1, name: "Tip pools", description: "Tips collected for one business date at one location, to be shared out.",
     fields: [
       { key: "business_date", label: "Business date", type: "business_date", required: true },
       { key: "label", label: "Name", type: "text", required: true, maxLength: 80 },
@@ -74,7 +81,7 @@ export const MODELS = [
     ],
   }),
   ModelDefinition.parse({
-    key: "cash_event", pack: "custom", version: 1, name: "Cash events", description: "Money in and out of the till. Never changed once written.",
+    key: "cash_event", pack: PACK, version: 1, name: "Cash events", description: "Money in and out of the till. Never changed once written.",
     appendOnly: true,
     fields: [
       { key: "business_date", label: "Business date", type: "business_date", required: true },
@@ -86,7 +93,7 @@ export const MODELS = [
     rules: [{ kind: "balanced", name: "cash_not_negative", lineModel: "cash_event", lineRef: "id", debit: "amount", credit: "amount" }],
   }),
   ModelDefinition.parse({
-    key: "staff_note", pack: "custom", version: 1, name: "Staff notes", description: "A short note about one member of staff, with the tip pool it relates to.",
+    key: "staff_note", pack: PACK, version: 1, name: "Staff notes", description: "A short note about one member of staff, with the tip pool it relates to.",
     fields: [
       { key: "staff", label: "Staff member", type: "parent_ref", parentModel: "staff", required: true },
       { key: "note", label: "Note", type: "text", required: true },
@@ -95,7 +102,7 @@ export const MODELS = [
     defaultAccess: { owner: "write", staff: "read" },
   }),
   ModelDefinition.parse({
-    key: "owner_ledger", pack: "custom", version: 1, name: "Owner ledger", description: "Private money notes only the owner may see or change.",
+    key: "owner_ledger", pack: PACK, version: 1, name: "Owner ledger", description: "Private money notes only the owner may see or change.",
     locationScoped: false, softDelete: false,
     fields: [
       { key: "memo", label: "Memo", type: "text", required: true },
@@ -104,13 +111,13 @@ export const MODELS = [
     defaultAccess: { owner: "write", staff: "none" },
   }),
   ModelDefinition.parse({
-    key: "secret_plan", pack: "custom", version: 1, name: "Secret plans", description: "A model that exists but is in no mini-app manifest.",
+    key: "secret_plan", pack: PACK, version: 1, name: "Secret plans", description: "A model that exists but is in no mini-app manifest.",
     locationScoped: false,
     fields: [{ key: "plan", label: "Plan", type: "text", required: true }],
     defaultAccess: access,
   }),
   ModelDefinition.parse({
-    key: "draft_idea", pack: "custom", version: 1, name: "Draft ideas", description: "A model that only exists in the draft store so far.",
+    key: "draft_idea", pack: PACK, version: 1, name: "Draft ideas", description: "A model that only exists in the draft store so far.",
     locationScoped: false,
     fields: [{ key: "idea", label: "Idea", type: "text", required: true }],
     defaultAccess: access,
@@ -118,7 +125,7 @@ export const MODELS = [
 ];
 /** Exists for restaurant B only. */
 export const B_ONLY = ModelDefinition.parse({
-  key: "b_only", pack: "custom", version: 1, name: "B only", description: "A model only the second test restaurant has.",
+  key: "b_only", pack: PACK, version: 1, name: "B only", description: "A model only the second test restaurant has.",
   locationScoped: false,
   fields: [{ key: "secret", label: "Secret", type: "text", required: true }],
   defaultAccess: access,
