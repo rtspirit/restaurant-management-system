@@ -63,4 +63,6 @@ Plain words, short sentences, no jargon. Caveats and blockers first.
 - Every transaction that touches a restaurant's store: `set local role o_<id>_rw` (or `_draft_rw`), then `select set_config('rms.locations', 'all' | '<uuid>,<uuid>', true)` and `set_config('rms.actor', ..., true)`. Use `prepare: false` with postgres.js.
 - Migrations live in `supabase/migrations/`. Only the lead adds or edits them. Apply with `pnpm exec supabase migration up`. Rebuild from zero with `pnpm exec supabase db reset` then `scripts/dev-db-roles.sh`.
 - Database walls check: `bash tests/security/db-walls.smoke.sh` (must print `FAILS=0`).
+- Model-written SQL (the Ask agent) runs ONLY through `mintAskLogin`, `openAsk` and `askQuery` in `@rms/db`. Never through `apiDb`, `adminDb` or `withStore`.
+- Publishing, installing, deploying, maintainer decisions and owner confirmations use `adminDb()`. The database refuses them from `rms_api` (ADR 0004).
 - Shared worktrees use ONE local database. Each task uses its own test org ids and store prefixes and cleans up after itself.
