@@ -51,7 +51,8 @@ export const ASK_QUERY_LIMITS = {
   timeoutMs: 5000,
   maxRows: 500,
   maxStatements: 1,
-  maxSqlLength: 8000,
+  /** A little under the 8000 the envelope accepts, so the size probe (the same SQL plus a short wrapper) always fits. */
+  maxSqlLength: 7500,
   /** The most one row may weigh as text. Checked IN THE DATABASE before any row is fetched. */
   maxRowBytes: 8192,
   /** The most a whole answer may weigh as JSON when it is handed to the model. */
@@ -103,11 +104,15 @@ export type AskQueryToolResult = z.infer<typeof AskQueryToolResult>;
  *     reads text as SQL or as a table name, builds a long value, sleeps or writes.
  *   - casts only to `castTypes`. No `reg*` types, so text never becomes a table.
  *   - no INTO, no FOR UPDATE or any other locking, no TABLESAMPLE, no LATERAL function calls
- *     other than `generate_series`, no parameters ($1), no schema-qualified name of any kind.
+ *     other than `generate_series`, no schema-qualified name of any kind.
+ *   - no dollar sign anywhere in the text: no parameters ($1) and no dollar-quoted text. This is
+ *     checked before parsing (`askSqlPrecheck`).
  */
 export const ASK_SQL_RULES = {
   statement: "select",
   maxLength: ASK_QUERY_LIMITS.maxSqlLength,
+  /** Refused anywhere in the text, before parsing. See `askSqlPrecheck`. */
+  forbiddenCharacters: ["$", "\u0000"],
   /** How deeply the statement may nest (subqueries, expressions). */
   maxDepth: 40,
   functions: [
@@ -151,12 +156,54 @@ export const ASK_SQL_RULES = {
 } as const;
 
 /**
- * The size check that closes "one huge cell reaches the server's memory". Before the real
- * query, the tool runs this through `askQuery` with the checked SQL in place of the marker. It
- * returns one small row. If `biggest` is over `ASK_QUERY_LIMITS.maxRowBytes` the real query is
- * never run and the model is told `too_large`.
+ * The first look at model-written SQL, before the parser. Returns why it is refused, or null.
+ *
+ * The dollar sign is refused outright, anywhere, even inside a text value. Three reasons:
+ *   - `$$ ... $$` and `$tag$ ... $tag$` are a second way to write text in PostgreSQL. A checker
+ *     and the server must never disagree about where a text value ends.
+ *   - `$1` is a bound parameter, and the envelope in @rms/db owns those.
+ *   - JavaScript's `String.replace` treats `$$`, `$&` and the like in a replacement as commands,
+ *     so SQL that is ever pasted into other text that way changes on the way in. (Found in
+ *     review: `select $$$$ , 1 , '$$$$ , pg_sleep(100) -- '` passes a parser check and then runs
+ *     `pg_sleep` after such a paste.) Nothing here pastes that way, and this makes sure it
+ *     could not matter if something later did.
+ * The restaurant's data has no use for the character: money is whole cents.
  */
-export const ASK_SIZE_PROBE = {
-  marker: "/*__ASK_SQL__*/",
-  sql: "select coalesce(max(octet_length(_rms_probe::text)), 0)::int8 as biggest, count(*)::int8 as n from (\n/*__ASK_SQL__*/\n) as _rms_probe",
-} as const;
+export const askSqlPrecheck = (sql: string): "empty" | "too_long" | "dollar_sign" | "bad_character" | null => {
+  if (sql.trim().length === 0) return "empty";
+  if (sql.length > ASK_QUERY_LIMITS.maxSqlLength) return "too_long";
+  if (sql.includes("$")) return "dollar_sign";
+  if (sql.includes("\0")) return "bad_character";
+  return null;
+};
+
+/** Thrown by `askProbeSql` for SQL that `askSqlPrecheck` refuses. Callers run the precheck first, so this is a second wall. */
+export class AskSqlRefused extends Error {
+  constructor(readonly reason: NonNullable<ReturnType<typeof askSqlPrecheck>>) {
+    super(`Ask SQL refused: ${reason}`);
+  }
+}
+
+const PROBE_HEAD = "select coalesce(max(octet_length(_rms_probe::text)), 0)::int8 as biggest, count(*)::int8 as n from (\n";
+const PROBE_TAIL = "\n) as _rms_probe";
+
+/**
+ * The size check that closes "one huge cell reaches the server's memory".
+ *
+ * How the tool uses it. `askQuery` in @rms/db is the ONE place a statement is wrapped for
+ * running: it puts whatever text it is given inside `select * from ( ... ) as _rms_ask limit $1`
+ * with the row cap bound. The tool calls `askQuery` twice with plain text and does no wrapping
+ * of its own beyond this function:
+ *   1. `askQuery(login, askProbeSql(checkedSql))`: one small row, `biggest` and `n`. If `biggest`
+ *      is over `ASK_QUERY_LIMITS.maxRowBytes` the tool stops and tells the model `too_large`.
+ *   2. `askQuery(login, checkedSql)`: the rows.
+ *
+ * This function builds its text by joining three strings. It never uses `replace`, a template
+ * with a marker, or any other pattern step on the model's SQL, and it refuses SQL the precheck
+ * refuses. `checkedSql` must already have passed the parser check: this is not a substitute.
+ */
+export const askProbeSql = (checkedSql: string): string => {
+  const refused = askSqlPrecheck(checkedSql);
+  if (refused !== null) throw new AskSqlRefused(refused);
+  return PROBE_HEAD + checkedSql + PROBE_TAIL;
+};

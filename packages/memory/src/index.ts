@@ -10,10 +10,13 @@
 // restaurant's own mini-apps and memory.
 import type { AppProfileDraft, DuplicateCheckResult, SessionId, SessionSummary, TenantContext } from "@rms/contracts";
 
-/** Does this restaurant already have a mini-app that does what `text` asks for? Compares with its OWN mini-apps only. */
+/** Does this restaurant already have a mini-app that does what `text` asks for? Compares with its OWN mini-apps only, and never with a hidden `system` one. */
 export const checkDuplicate = async (_tenant: TenantContext, _text: string): Promise<DuplicateCheckResult> => ({ verdict: "none", matches: [] });
 
-/** Makes or refreshes a mini-app's profile and its embedding. Called when a plan is confirmed and after each build turn. */
+/**
+ * Makes or refreshes a mini-app's profile and its embedding. Called when a plan is confirmed and after each build turn.
+ * `purpose` and `capabilities` replace what is stored. `requests` are appended to the stored ones, never replace them.
+ */
 export const saveAppProfile = async (_tenant: TenantContext, _draft: AppProfileDraft): Promise<void> => {};
 
 /** Writes a short summary of a session from its stored events. Null when there was nothing worth keeping. */

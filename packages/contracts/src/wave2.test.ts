@@ -120,7 +120,7 @@ describe("the frame hand-off", () => {
     app: { id: `app_${hex}`, name: "Vendors" }, env: "draft", user: { name: "Asha", role: "owner" },
     restaurant: { name: "Marigold Kitchen", brandColour: "#E8892B" }, locations: [{ id: uuid, name: "Downtown" }], currency: "USD", locale: "en-US",
   };
-  const grant = { appId: `app_${hex}`, appName: "Vendors", runId: `run_${hex}`, url: "https://sb-abc123.vercel.run/", frameOrigin: "https://sb-abc123.vercel.run", token: "t".repeat(40), expiresAt: now, context };
+  const grant = { kind: "preview", appId: `app_${hex}`, appName: "Vendors", runId: `run_${hex}`, url: "https://sb-abc123.vercel.run/", frameOrigin: "https://sb-abc123.vercel.run", token: "t".repeat(40), expiresAt: now, context };
 
   it("a preview grant's frame origin must be the origin of its address", () => {
     ok(c.PreviewGrant.safeParse(grant));
@@ -128,6 +128,46 @@ describe("the frame hand-off", () => {
     no(c.PreviewGrant.safeParse({ ...grant, frameOrigin: "*" }));
     no(c.PreviewGrant.safeParse({ ...grant, url: "https://evil.test/", frameOrigin: "https://sb-abc123.vercel.run" }));
     no(c.PreviewGrant.safeParse({ ...grant, url: "javascript:alert(1)" }));
+  });
+
+  it("a frame is never served from localhost, where it would share the web app's cookies", () => {
+    no(c.PreviewGrant.safeParse({ ...grant, url: "http://localhost:5173/", frameOrigin: "http://localhost:5173" }));
+    ok(c.PreviewGrant.safeParse({ ...grant, url: "http://127.0.0.1:5173/", frameOrigin: "http://127.0.0.1:5173" }));
+    const web = "http://localhost:3000";
+    expect(c.isSeparateSite("http://127.0.0.1:5173", web)).toBe(true);
+    expect(c.isSeparateSite("https://sb-abc123.vercel.run", "https://rms-web.vercel.app")).toBe(true);
+    // Same host on another port, a child host, a parent host, or anything that does not parse: not separate.
+    expect(c.isSeparateSite("http://localhost:5173", web)).toBe(false);
+    expect(c.isSeparateSite("http://127.0.0.1:5173", "http://127.0.0.1:3000")).toBe(false);
+    expect(c.isSeparateSite("https://apps.rms.example.com", "https://rms.example.com")).toBe(false);
+    expect(c.isSeparateSite("https://rms.example.com", "https://apps.rms.example.com")).toBe(false);
+    expect(c.isSeparateSite("https://rms.example.com", "https://rms.example.com")).toBe(false);
+    expect(c.isSeparateSite("*", web)).toBe(false);
+    expect(c.isSeparateSite("https://sb-abc123.vercel.run", "null")).toBe(false);
+    // Not fooled by a shared ending that is not a parent domain.
+    expect(c.isSeparateSite("https://evilrms.example.com", "https://rms.example.com")).toBe(true);
+  });
+
+  it("a published mini-app gets the same grant with a version in place of a run", () => {
+    const { runId: _runId, ...rest } = grant;
+    const app = { ...rest, kind: "app", versionId: `ver_${hex}`, url: "https://apps.example.net/a/1/", frameOrigin: "https://apps.example.net" };
+    ok(c.AppGrant.safeParse(app));
+    ok(c.FrameGrant.safeParse(app));
+    ok(c.FrameGrant.safeParse(grant));
+    no(c.AppGrant.safeParse({ ...app, versionId: `run_${hex}` }));
+    no(c.AppGrant.safeParse({ ...app, frameOrigin: "https://evil.test" }));
+    no(c.PreviewGrant.safeParse(app));
+    no(c.AppGrant.safeParse(grant));
+    no(c.FrameGrant.safeParse({ ...grant, kind: "other" }));
+    // The two kinds differ only in that one field.
+    expect(Object.keys(c.AppGrant.parse(app)).filter((k) => k !== "versionId" && k !== "kind").sort()).toEqual(
+      Object.keys(c.PreviewGrant.parse(grant)).filter((k) => k !== "runId" && k !== "kind").sort(),
+    );
+  });
+
+  it("a relayed request has a size limit", () => {
+    expect(c.FRAME_LIMITS.maxBodyBytes).toBeGreaterThan(100_000);
+    expect(c.FRAME_LIMITS.maxBodyBytes).toBeLessThanOrEqual(2 * 1024 * 1024);
   });
 
   it("a frame cannot ask for anything but the five data routes, and cannot name an address", () => {
@@ -161,7 +201,7 @@ describe("the frame hand-off", () => {
 describe("the app template and the build agent's tools", () => {
   it("locked files stay locked however the path is spelled", () => {
     for (const p of [
-      "package.json", "./package.json", "package-lock.json", "tsconfig.json", "vite.config.ts", "index.html", "AGENTS.md", "rms.config.ts", "src/main.tsx",
+      "package.json", "./package.json", "package-lock.json", "tsconfig.json", "vite.config.ts", "index.html", "AGENTS.md", "rms.config.ts", ".env.local", "src/main.tsx",
       "src/rms/bridge.ts", "src/rms", "src/rms/deep/er/file.ts", "src//rms/bridge.ts", "src/./rms/bridge.ts", "vendor/rms-ui.tgz", ".rms/locked.json", ".rms/catalog.json",
       // A path that cannot be trusted counts as locked.
       "src/screens/../rms/bridge.ts", "../outside.ts", "/etc/passwd", "src\\rms\\bridge.ts", "", "src/screens/x\0.ts",
@@ -174,6 +214,28 @@ describe("the app template and the build agent's tools", () => {
     for (const p of ["src/rms/bridge.ts", "src/main.tsx", "package.json", "public/x.js", "src/other.ts", "node_modules/@rms/sdk/index.js", "src/screens/../main.tsx", ".env", ".env.local", "vite.config.ts"]) {
       expect(c.isEditablePath(p), p).toBe(false);
     }
+  });
+
+  it("every file the runner writes is locked, and the hash list covers every locked file but itself", () => {
+    for (const p of c.RUNNER_WRITTEN_FILES) expect(c.isLockedPath(p), p).toBe(true);
+    expect([...c.RUNNER_WRITTEN_FILES].sort()).toEqual([".env.local", ".rms/catalog.json", ".rms/locked.json", "rms.config.ts"]);
+    expect(c.APP_TEMPLATE.envFile).toBe(".env.local");
+    for (const p of ["rms.config.ts", ".rms/catalog.json", ".env.local", "package.json", "src/rms/app.tsx", "vendor/rms-ui.tgz"]) expect(c.isHashedPath(p), p).toBe(true);
+    for (const p of [".rms/locked.json", "./.rms/locked.json", "src/screens/vendors/index.tsx", "node_modules/react/index.js", "dist/index.html", "../x"]) {
+      expect(c.isHashedPath(p), p).toBe(false);
+    }
+    for (const p of ["node_modules/react/index.js", "dist/assets/a.js", ".vite/deps/x.js"]) expect(c.isIgnoredPath(p), p).toBe(true);
+    for (const p of ["src/node_modules/x.js", "public/x.js", "src/rms/app.tsx", "node_modules/../package.json"]) expect(c.isIgnoredPath(p), p).toBe(false);
+  });
+
+  it("the hash list holds only locked files and well-formed hashes", () => {
+    const sha = "a".repeat(64);
+    ok(c.LockedHashes.safeParse({ version: 1, writtenAt: now, files: { "package.json": sha, ".env.local": sha, "src/rms/app.tsx": sha } }));
+    no(c.LockedHashes.safeParse({ version: 1, writtenAt: now, files: { "src/screens/vendors/index.tsx": sha } }));
+    no(c.LockedHashes.safeParse({ version: 1, writtenAt: now, files: { ".rms/locked.json": sha } }));
+    no(c.LockedHashes.safeParse({ version: 1, writtenAt: now, files: { "../package.json": sha } }));
+    no(c.LockedHashes.safeParse({ version: 1, writtenAt: now, files: { "package.json": "not-a-hash" } }));
+    no(c.LockedHashes.safeParse({ version: 2, writtenAt: now, files: {} }));
   });
 
   it("mini-app code may import only React, the design system and the SDK", () => {
@@ -307,8 +369,44 @@ describe("Ask", () => {
     expect(c.ASK_QUERY_LIMITS.maxStatements).toBe(1);
     expect(c.ASK_QUERY_LIMITS.maxRowBytes).toBeLessThanOrEqual(16_384);
     expect(c.ASK_QUERY_LIMITS.maxResultBytes).toBeLessThan(1_000_000);
-    expect(c.ASK_SIZE_PROBE.sql).toContain(c.ASK_SIZE_PROBE.marker);
-    expect(c.ASK_SIZE_PROBE.sql.split(c.ASK_SIZE_PROBE.marker)).toHaveLength(2);
+    // The probe is the same SQL plus a short wrapper, and must still fit the envelope's own length limit.
+    const longest = `select ${"1".repeat(c.ASK_QUERY_LIMITS.maxSqlLength - 7)}`;
+    expect(longest).toHaveLength(c.ASK_QUERY_LIMITS.maxSqlLength);
+    expect(c.askProbeSql(longest).length).toBeLessThanOrEqual(8000);
+  });
+
+  // Found in review. A marker-and-replace wrapper turned `$$` into `$`, which moved the end of a
+  // text value, so SQL that passed the parser check ran `pg_sleep` afterwards.
+  const REPLACE_ATTACK = "select $$$$ , 1 , '$$$$ , pg_sleep(100) -- '";
+
+  it("refuses a dollar sign anywhere in model-written SQL, before parsing", () => {
+    expect(c.askSqlPrecheck(REPLACE_ATTACK)).toBe("dollar_sign");
+    for (const sql of [
+      "select $1", "select $$x$$", "select $tag$x$tag$", "select 'costs $5'", "select 1 -- $", "select 1 /* $& */", "select '$`'", "select '$''", "select \"a$b\" from sales_day",
+    ]) expect(c.askSqlPrecheck(sql), sql).toBe("dollar_sign");
+    expect(c.askSqlPrecheck("select 1\0")).toBe("bad_character");
+    expect(c.askSqlPrecheck("   ")).toBe("empty");
+    expect(c.askSqlPrecheck(`select ${"1".repeat(c.ASK_QUERY_LIMITS.maxSqlLength)}`)).toBe("too_long");
+    expect(c.askSqlPrecheck("select sum(net_sales) from sales_day where business_date >= '2026-11-09'")).toBeNull();
+    expect([...c.ASK_SQL_RULES.forbiddenCharacters]).toContain("$");
+  });
+
+  it("the size probe is built by joining text, never by pattern replacement", () => {
+    expect(() => c.askProbeSql(REPLACE_ATTACK)).toThrow(c.AskSqlRefused);
+    for (const sql of ["select $& from x", "select '$`'", "select $1"]) expect(() => c.askProbeSql(sql)).toThrow(c.AskSqlRefused);
+
+    const sql = "select business_date, net_sales from sales_day where note = 'a ''quoted'' value with %s and \\1 and {0}'";
+    const probe = c.askProbeSql(sql);
+    // The SQL is inside the probe exactly as it was given, once, between a fixed head and a fixed tail.
+    expect(probe.split(sql)).toHaveLength(2);
+    const [head, tail] = probe.split(sql) as [string, string];
+    expect(head).toBe(c.askProbeSql("select 1").split("select 1")[0]);
+    expect(tail).toBe("\n) as _rms_probe");
+    expect(head.endsWith("from (\n")).toBe(true);
+    expect(probe).toHaveLength(head.length + sql.length + tail.length);
+    // No marker for anyone to replace.
+    expect(Object.keys(c)).not.toContain("ASK_SIZE_PROBE");
+    expect(head + tail).not.toMatch(/__|\/\*/);
   });
   it("the tool hands back rows or a fixed kind of refusal, never anything else", () => {
     ok(c.AskQueryToolResult.safeParse({ ok: true, columns: ["week", "prime_cost"], rows: [["2026-11-09", 61.3]], truncated: false }));

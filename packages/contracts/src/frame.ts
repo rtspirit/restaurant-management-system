@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { Role, StoreEnv } from "./auth.js";
-import { AppId, RunId } from "./ids.js";
+import { AppId, AppVersionId, RunId } from "./ids.js";
 
 /**
  * How a mini-app's screens talk to RMS. Used today for the build preview (the frame is served
@@ -12,7 +12,7 @@ import { AppId, RunId } from "./ids.js";
  * shell holds the token (a run token for a preview, an app token for a published mini-app) in
  * memory, makes the call, and posts the answer back.
  *
- * Why the shell makes the call (decided for Wave 2, see docs/briefs/wave2-notes.md):
+ * Why the shell makes the call (ADR 0008):
  *   - mini-app code is written by an agent. A token it never sees cannot be leaked by it.
  *   - a preview frame is served from a public sandbox address. A browser will not let such a
  *     page call an API on the developer's own machine without a permission prompt, so previews
@@ -23,15 +23,31 @@ import { AppId, RunId } from "./ids.js";
  *
  * Origin checks. Both sides MUST do all of these, and drop anything else without answering:
  *   Shell:  `event.source` is the frame's own `contentWindow` AND `event.origin` equals
- *           `PreviewGrant.frameOrigin` exactly. It posts only to that origin, never to "*".
+ *           the grant's `frameOrigin` exactly. It posts only to that origin, never to "*".
  *   Frame:  `event.source` is `window.parent` AND `event.origin` equals the shell origin the
  *           mini-app was built with (`FRAME_ENV.shellOrigin`). It posts only to that origin,
  *           never to "*". Opened outside a frame, it shows "Open this from RMS" and does nothing.
  *   Both:   the message parses with the strict schema below. Unknown types and extra keys are dropped.
  *
- * What a frame can never say: which restaurant, user, role, store or token to use. There is no
- * such field. The shell uses the token it got for THIS frame and nothing else: never the
- * owner's own session.
+ * What a frame can never say: which restaurant, user, role, store or token to use, or which
+ * address to call. There is no such field. It names one of five routes from a fixed list
+ * (`FrameDataRoute`), never a URL or a path.
+ *
+ * One grant, one frame. A grant is bound to the one frame element it was asked for (its
+ * `contentWindow`) and to one origin (`frameOrigin`). The shell uses that grant's token for
+ * that frame's requests and for nothing else: never for another frame, never the owner's own
+ * session token (the Data API refuses a session token anyway). When the frame element is
+ * replaced, or a new grant has another origin, the old binding is thrown away with its token.
+ *
+ * Separate sites. The frame must never be served from the shell's own host, or from a parent
+ * or child of it (`isSeparateSite`), because cookies ignore the port: a page on
+ * `localhost:5173` can read the cookies of the web app on `localhost:3000`, and the owner's
+ * sign-in lives there. So in local development the web app is on `localhost` and every preview
+ * is opened from `127.0.0.1`, never from `localhost`. A grant whose frame host is `localhost`
+ * does not parse.
+ *
+ * Size. A relayed request body over `FRAME_LIMITS.maxBodyBytes` is answered with an
+ * `invalid_request` result by the shell and is never sent on.
  */
 export const FRAME_PROTOCOL = 1;
 
@@ -86,33 +102,70 @@ export const Origin = z
   .refine((o) => o.startsWith("https://") || /^http:\/\/(localhost|127\.0\.0\.1)(:\d{1,5})?$/.test(o), "Only https, or http on this machine");
 export type Origin = z.infer<typeof Origin>;
 
+const hostOf = (origin: string): string | null => {
+  try {
+    return new URL(origin).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+};
+
 /**
- * What the web app gets when it asks to show a preview (`AGENT_ROUTES.preview`), and later a
- * published mini-app. Asked for again when `expiresAt` is under two minutes away, when the Data
- * API answers `unauthenticated`, and after every new run (a run token dies with its run).
- *
- * `token` stays in the shell's memory. It is never put in the frame's address, in a message to
- * the frame, in a cookie, or in browser storage.
+ * True when a frame at `frameOrigin` shares no cookies with a shell at `shellOrigin`: the hosts
+ * differ, and neither is a parent domain of the other. Checked by the server when it makes a
+ * grant (against the web app's address) and by the shell before it loads the frame (against
+ * its own `window.location.origin`). False for anything that does not parse.
  */
-export const PreviewGrant = z.object({
+export const isSeparateSite = (frameOrigin: string, shellOrigin: string): boolean => {
+  if (!Origin.safeParse(frameOrigin).success || !Origin.safeParse(shellOrigin).success) return false;
+  const frame = hostOf(frameOrigin);
+  const shell = hostOf(shellOrigin);
+  if (frame === null || shell === null || frame === shell) return false;
+  return !frame.endsWith(`.${shell}`) && !shell.endsWith(`.${frame}`);
+};
+
+const grantShape = {
   appId: AppId,
   appName: z.string().max(40),
-  runId: RunId,
   /** The address to put in the frame. */
   url: z.url(),
   /** The one origin the shell accepts frame messages from. Always the origin of `url`, worked out by the server. */
   frameOrigin: Origin,
+  /** Stays in the shell's memory. Never in the frame's address, a message to the frame, a cookie, or browser storage. */
   token: z.string().min(20),
   expiresAt: z.iso.datetime(),
   context: FrameContext,
-}).refine((g) => {
+};
+
+const grantHolds = (g: { url: string; frameOrigin: string }): boolean => {
   try {
-    return new URL(g.url).origin === g.frameOrigin;
+    return new URL(g.url).origin === g.frameOrigin && hostOf(g.frameOrigin) !== "localhost";
   } catch {
     return false;
   }
-}, "frameOrigin must be the origin of url");
+};
+const GRANT_RULE = "frameOrigin must be the origin of url, and a frame is never served from localhost";
+
+/**
+ * What the web app gets when it asks to show a BUILD PREVIEW (`AGENT_ROUTES.preview`). The
+ * token is a run token: draft store, one mini-app, one run. Asked for again when `expiresAt` is
+ * under two minutes away, when the Data API answers `unauthenticated`, and after every new run
+ * (a run token dies with its run).
+ */
+export const PreviewGrant = z.object({ kind: z.literal("preview"), ...grantShape, runId: RunId }).refine(grantHolds, GRANT_RULE);
 export type PreviewGrant = z.infer<typeof PreviewGrant>;
+
+/**
+ * The same hand-off for a PUBLISHED mini-app (Wave 3). The token is an app token: live store,
+ * one mini-app, one published version. `url` is on the apps host. Everything else, including
+ * every message in this file, is the same, so the shell's frame code does not change.
+ */
+export const AppGrant = z.object({ kind: z.literal("app"), ...grantShape, versionId: AppVersionId }).refine(grantHolds, GRANT_RULE);
+export type AppGrant = z.infer<typeof AppGrant>;
+
+/** Either grant. The shell's frame host takes this. */
+export const FrameGrant = z.union([PreviewGrant, AppGrant]);
+export type FrameGrant = z.infer<typeof FrameGrant>;
 
 /** True only for a message the given side may act on. One implementation of the origin rule for both sides. */
 export const fromExpectedOrigin = (event: { origin: string; source: unknown }, expectedOrigin: string, expectedSource: unknown): boolean =>
@@ -128,4 +181,12 @@ export const FRAME_ENV = { shellOrigin: "VITE_RMS_SHELL_ORIGIN" } as const;
 export const FRAME_ATTRIBUTES = { sandbox: "allow-scripts allow-same-origin allow-forms", referrerPolicy: "no-referrer", allow: "" } as const;
 
 /** Limits both sides keep, so a broken or hostile frame cannot pile work onto the shell. */
-export const FRAME_LIMITS = { maxInFlight: 4, maxQueued: 50, requestTimeoutMs: 20_000, readyRetries: 20, readyEveryMs: 500 } as const;
+export const FRAME_LIMITS = {
+  maxInFlight: 4,
+  maxQueued: 50,
+  requestTimeoutMs: 20_000,
+  readyRetries: 20,
+  readyEveryMs: 500,
+  /** The most one relayed request body may weigh, as JSON text. A full batch of 500 small rows fits. */
+  maxBodyBytes: 512_000,
+} as const;

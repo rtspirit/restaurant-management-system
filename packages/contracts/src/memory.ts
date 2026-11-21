@@ -39,7 +39,12 @@ export const AppProfile = z.object({
 });
 export type AppProfile = z.infer<typeof AppProfile>;
 
-/** What the build flow hands over to make or refresh a profile. */
+/**
+ * What the build flow hands over to make or refresh a profile. `purpose` and `capabilities`
+ * REPLACE what is stored. `requests` are APPENDED to the stored ones (newest last, an exact
+ * repeat is not added twice, the oldest are dropped past ten). Saving a profile never loses an
+ * earlier request.
+ */
 export const AppProfileDraft = AppProfile.omit({ updatedAt: true, appName: true });
 export type AppProfileDraft = z.infer<typeof AppProfileDraft>;
 

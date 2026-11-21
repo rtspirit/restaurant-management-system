@@ -13,9 +13,33 @@ import { ModelAccess, ModelChange } from "./models.js";
 // ------------------------------------------------------------------ the app template
 
 /**
- * Files and folders the build agent may never change. An entry ending in "/" is a whole folder.
- * Checked three times: by `check` inside the sandbox (to tell the agent early), by the runner
- * from OUTSIDE the sandbox after every turn (the one that counts), and again at publish.
+ * Every file in a mini-app's folder is exactly one of three things:
+ *
+ *   locked     RMS's own: the frame, the build setup, the manifest, the settings file. The build
+ *              agent may never change one. Listed here. An entry ending in "/" is a whole folder.
+ *   editable   the agent's work: everything under EDITABLE_TEMPLATE_FOLDERS.
+ *   ignored    made by tools and thrown away: IGNORED_TEMPLATE_FOLDERS.
+ *
+ * A file that is none of the three should not exist, and `check` reports it.
+ *
+ * Four of the locked files are WRITTEN BY THE RUNNER, never shipped in the template bundle and
+ * never written by anything else (RUNNER_WRITTEN_FILES): the manifest, the catalog, the
+ * settings file and the hash list itself.
+ *
+ * Order, every time a build starts or a plan changes. This order is the contract:
+ *   1. the runner writes `rms.config.ts`, `.rms/catalog.json` and `.env.local`
+ *   2. the runner hashes every locked file that exists (`isHashedPath`), reading the files from
+ *      OUTSIDE the sandbox, and keeps that list in the session's state. This is the trusted copy.
+ *   3. the runner writes the same list to `.rms/locked.json` (`LockedHashes`)
+ *   4. only now may a generator or the agent run
+ * So `locked.json` always describes the files as the runner left them, including the three it
+ * wrote in step 1. The copy in the template bundle (if any) is only for trying the template by
+ * hand and is always overwritten.
+ *
+ * Checked three times: by `check` inside the sandbox against `.rms/locked.json` (to tell the
+ * agent early: the agent could edit that file too, so this check proves nothing on its own), by
+ * the runner from outside after every turn against its trusted copy (the one that counts), and
+ * again at publish.
  */
 export const LOCKED_TEMPLATE_FILES = [
   "package.json",
@@ -25,16 +49,27 @@ export const LOCKED_TEMPLATE_FILES = [
   "index.html",
   "AGENTS.md",
   "rms.config.ts",
+  ".env.local",
   "src/main.tsx",
   "src/rms/",
   "vendor/",
   ".rms/",
 ] as const;
 
+/** Locked files only the runner writes. `.env.local` holds public settings only (FRAME_ENV): never a key, a token or an API address. */
+export const RUNNER_WRITTEN_FILES = ["rms.config.ts", ".rms/catalog.json", ".env.local", ".rms/locked.json"] as const;
+
+/** Where the agent writes. */
+export const EDITABLE_TEMPLATE_FOLDERS = ["src/screens/", "src/components/"] as const;
+
+/** Tool output. Never hashed, never checked, never published: publish builds again from clean source. */
+export const IGNORED_TEMPLATE_FOLDERS = ["node_modules/", "dist/", ".vite/"] as const;
+
 const normalisePath = (path: string): string | null => {
   if (path.length === 0 || path.length > 300 || path.includes("\0") || path.includes("\\")) return null;
+  if (path.startsWith("/")) return null;
   const parts = path.split("/").filter((p) => p !== "" && p !== ".");
-  if (parts.length === 0 || parts.includes("..") || path.startsWith("/")) return null;
+  if (parts.length === 0 || parts.includes("..")) return null;
   return parts.join("/");
 };
 
@@ -45,13 +80,38 @@ export const isLockedPath = (path: string): boolean => {
   return LOCKED_TEMPLATE_FILES.some((entry) => (entry.endsWith("/") ? p === entry.slice(0, -1) || p.startsWith(entry) : p === entry));
 };
 
-/** Where the agent writes. Anything outside these folders is refused by `check`, locked or not. */
-export const EDITABLE_TEMPLATE_FOLDERS = ["src/screens/", "src/components/"] as const;
-
 export const isEditablePath = (path: string): boolean => {
   const p = normalisePath(path);
   return p !== null && !isLockedPath(p) && EDITABLE_TEMPLATE_FOLDERS.some((folder) => p.startsWith(folder));
 };
+
+export const isIgnoredPath = (path: string): boolean => {
+  const p = normalisePath(path);
+  return p !== null && IGNORED_TEMPLATE_FOLDERS.some((folder) => p.startsWith(folder));
+};
+
+/**
+ * True for a file whose hash belongs in the hash list: every locked file except the list itself
+ * (a file cannot hold its own hash).
+ */
+export const isHashedPath = (path: string): boolean => {
+  const p = normalisePath(path);
+  return p !== null && isLockedPath(p) && p !== ".rms/locked.json";
+};
+
+/**
+ * `.rms/locked.json`, and the runner's trusted copy of it.
+ * `files`: for every existing file where `isHashedPath` is true, its path (relative to the app
+ * folder, forward slashes) and the SHA-256 of its bytes as 64 lower-case hex characters.
+ * The `locked` check fails when a listed file is missing or has another hash, when a locked
+ * file exists that is not listed, and when a file exists that is not locked, editable or ignored.
+ */
+export const LockedHashes = z.object({
+  version: z.literal(1),
+  writtenAt: z.iso.datetime(),
+  files: z.record(z.string().max(300), z.string().regex(/^[0-9a-f]{64}$/)).refine((files) => Object.keys(files).every(isHashedPath), "Only locked files are listed"),
+});
+export type LockedHashes = z.infer<typeof LockedHashes>;
 
 /** The only packages mini-app code may import. Nothing installs at build time. */
 export const ALLOWED_APP_IMPORTS = ["react", "react/jsx-runtime", "@rms/ui", "@rms/sdk"] as const;
@@ -78,9 +138,11 @@ export const APP_TEMPLATE = {
    * read back: the copy the Data API enforces is `platform.app_versions.manifest`.
    */
   manifestFile: "rms.config.ts",
-  /** Platform-written facts for the agent and the tools: the catalog and the hashes of the locked files. */
+  /** Runner-written facts for the agent and the tools: the catalog and the hashes of the locked files (`LockedHashes`). */
   catalogFile: ".rms/catalog.json",
   lockedHashesFile: ".rms/locked.json",
+  /** Runner-written public settings for the dev server and the build (FRAME_ENV). Locked. */
+  envFile: ".env.local",
   /** The screen list the generators keep up to date. The shell in `src/rms/` reads it to draw navigation. */
   screensFile: "src/screens/index.ts",
   devPort: 5173,
@@ -317,7 +379,7 @@ export type RunGeneratorOutput = z.infer<typeof RunGeneratorOutput>;
 // ---- check
 
 /**
- *   locked    no locked file changed (hashes in `APP_TEMPLATE.lockedHashesFile`), nothing written outside the editable folders
+ *   locked    every file is locked and unchanged (`LockedHashes`), or editable, or ignored. See LOCKED_TEMPLATE_FILES
  *   deps      `package.json` lists only ALLOWED_APP_DEPENDENCIES
  *   imports   mini-app code imports only ALLOWED_APP_IMPORTS and its own files
  *   safety    no network calls, no dynamic code, no direct page manipulation, no styles or class names, no storage, no cookies

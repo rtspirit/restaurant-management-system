@@ -56,6 +56,30 @@ const SAMPLES: Record<string, Sample> = {
   "RunReply (answer)": { schema: c.RunReply, value: { kind: "answer", to: "q1", text: "yes" } },
   "RunReply (confirm)": { schema: c.RunReply, value: { kind: "confirm", to: "q1", ok: true } },
   OnboardingAnswers: { schema: c.OnboardingAnswers, value: { restaurantName: "Alder House", serviceStyle: "full_service", cuisine: "Grill", locationCount: 2, systemsUsed: ["Demo POS"] } },
+  // Wave 2 (contracts 0.4.0). The same examples as WAVE2_SAMPLES in packages/contracts/src/wave2.test.ts.
+  CatalogLookupInput: { schema: c.CatalogLookupInput, value: { kind: "models", search: "vendors", name: "vendor" } },
+  ProposeModelChangesInput: {
+    schema: c.ProposeModelChangesInput,
+    value: { why: "To keep a list of suppliers.", changes: [{ op: "use_template", template: "vendor" }, { op: "add_field", model: "x_notes", field: { key: "extra", label: "Extra", type: "text" } }] },
+  },
+  "RunGeneratorInput (list)": { schema: c.RunGeneratorInput, value: { generator: "list_detail", screen: "vendors", title: "Vendors", model: "vendor", fields: ["name"], form: true } },
+  "RunGeneratorInput (dashboard)": {
+    schema: c.RunGeneratorInput,
+    value: { generator: "dashboard", screen: "money", title: "Money", query: "weekly_pnl", stats: [{ label: "Sales", column: "net_sales", format: "money" }], chart: { label: "By day", category: "day", value: "net_sales", format: "money" } },
+  },
+  CheckInput: { schema: c.CheckInput, value: { only: ["locked", "types"] } },
+  "ConnectRequest (catalog)": { schema: c.ConnectRequest, value: { kind: "catalog", key: "demo_pos" } },
+  // `token` here is the connected system's own token, typed by the owner. It is a legitimate key of this one shape.
+  "ConnectRequest (custom)": { schema: c.ConnectRequest, value: { kind: "custom", name: "My POS", url: "https://pos.example.com/mcp", token: "a-long-token-value" }, allowed: ["token"] },
+  ApproveToolsRequest: { schema: c.ApproveToolsRequest, value: { tools: ["get_daily_sales"] } },
+  SyncRequest: { schema: c.SyncRequest, value: { from: "2026-09-21", to: "2026-11-15" } },
+  DemoPosRangeInput: { schema: c.DemoPosRangeInput, value: { from: "2026-11-09", to: "2026-11-15", location: "downtown" } },
+  DemoPosNoInput: { schema: c.DemoPosNoInput, value: {} },
+  AskRequest: { schema: c.AskRequest, value: { sessionId: `ses_${hex}`, text: "What was my prime cost last week?" } },
+  DuplicateCheckRequest: { schema: c.DuplicateCheckRequest, value: { text: "I want to see how much money I am making" } },
+  // Sent by agent-written code in a frame. `body` is passed on untouched and checked by the Data API's own shapes above.
+  "FrameToShell (ready)": { schema: c.FrameToShell, value: { rms: 1, type: "rms.ready" } },
+  "FrameToShell (data)": { schema: c.FrameToShell, value: { rms: 1, type: "rms.data", id: "req_00000001", route: "query", body: {} }, openMaps: ["body"] },
   // Not requests from a browser, but written by the build agent, which is just as untrusted.
   AppManifest: {
     schema: c.AppManifest,
