@@ -427,10 +427,16 @@ importers:
       '@rms/parent':
         specifier: workspace:*
         version: link:../parent
+      '@supabase/supabase-js':
+        specifier: 2.119.2
+        version: 2.119.2
     devDependencies:
       '@types/node':
         specifier: 26.6.6
         version: 26.6.6
+      tsx:
+        specifier: 4.23.15
+        version: 4.23.15
 
   packages/ui:
     devDependencies:
