@@ -103,12 +103,12 @@ describe("sample numbers in the draft store", () => {
     await adminDb()`insert into platform.agent_sessions (id, org_id, user_id, app_id, mode, model, title, status)
                     values (${session}, ${R.org}, ${R.owner}, ${app?.id as string}, 'build', 'none', 'Sample numbers', 'closed')`;
     await adminDb()`insert into platform.agent_runs (id, session_id, org_id, status) values (${newUuid()}, ${session}, ${R.org}, 'running')`;
-    // What matters is that it ends up switched off with its build gone, not which sweep did it:
-    // the sweep covers every restaurant, so another process on the same database (an API
-    // starting, a Demo POS sync, another test run) may get to this one first.
+    // This test sweeps its own restaurant only. What matters is that the loader ends up switched
+    // off with its build gone, not which sweep did it: another process on the same database (an
+    // API starting, a Demo POS sync) sweeps every restaurant and may get to this one first.
     await expect
       .poll(async () => {
-        await sweepBooksLoader(adminDb());
+        await sweepBooksLoader(adminDb(), { orgUuid: R.org });
         return leftovers();
       }, { timeout: 10_000 })
       .toEqual({ sessions: 0, runs: 0, published: 0 });
@@ -121,7 +121,7 @@ describe("sample numbers in the draft store", () => {
     let sweeps = 0;
     const sweeping = (async () => {
       while (loading) {
-        await sweepBooksLoader(adminDb());
+        await sweepBooksLoader(adminDb(), { orgUuid: R.org });
         sweeps++;
       }
     })();

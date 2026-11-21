@@ -425,6 +425,9 @@ const readWeeks = async (client: BooksClient, from: string, to: string): Promise
 // advisory lock, so it goes away by itself if the process dies. `sweepBooksLoader` switches off
 // any loader app (and removes any sample-numbers build) whose restaurant has no load holding the
 // lock: what a crash left behind. Run it at start-up; the Demo POS sync also runs it first.
+//
+// So a loader that is on with no lock held is, to every sweep on the database, a crashed load.
+// Nothing may switch the loader on outside `withLoaderLock`. Tests publish their own mini-app.
 
 const loaderLockKey = (orgUuid: string) => `rms.books_loader:${orgUuid}`;
 
@@ -439,11 +442,22 @@ const withLoaderLock = async <T>(adminSql: Sql, orgUuid: string, fn: () => Promi
   return (out as { value: T }).value;
 };
 
-/** Switches off loader apps and removes sample-numbers builds that no running load owns. Admin connection. Safe to run any time. */
-export const sweepBooksLoader = async (adminSql: Sql): Promise<{ paused: number; buildsRemoved: number }> => {
+/**
+ * Switches off loader apps and removes sample-numbers builds that no running load owns. Admin
+ * connection. Safe to run any time.
+ *
+ * It only ever touches the hidden loader (slug `demo-data`, kind `system`), never an ordinary
+ * mini-app, and only when it can take that restaurant's loader lock itself: proof that no load
+ * is running there. With `orgUuid` it looks at that one restaurant and no other (tests do
+ * this). Without, at every restaurant: a crash may have left a loader on anywhere, which is
+ * what start-up and the Demo POS sync look for.
+ */
+export const sweepBooksLoader = async (adminSql: Sql, opts: { orgUuid?: string } = {}): Promise<{ paused: number; buildsRemoved: number }> => {
+  const only = opts.orgUuid ?? null;
   const apps = await adminSql<{ id: string; org_id: string }[]>`
     select a.id, a.org_id from platform.apps a
      where a.slug = 'demo-data' and a.kind = 'system'
+       and (${only}::uuid is null or a.org_id = ${only}::uuid)
        and (a.status = 'published' or exists (select 1 from platform.agent_sessions s where s.app_id = a.id and s.org_id = a.org_id))`;
   const result = { paused: 0, buildsRemoved: 0 };
   for (const app of apps) {

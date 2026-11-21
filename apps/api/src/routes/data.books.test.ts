@@ -151,9 +151,10 @@ describe("the books, end to end", () => {
   // Regression: this file used to borrow the hidden "demo data" loader and leave it switched on
   // with no load running. Any loader sweep on the same database (API start-up, every Demo POS
   // sync, another test run) then switched it off mid-test, and every call answered 401.
-  it("a loader sweep from anywhere leaves this mini-app switched on", async () => {
-    await sweepBooksLoader(adminDb());
+  it("a loader sweep leaves this mini-app switched on", async () => {
     for (const w of [ownerM, ownerS]) {
+      // Swept for this test's own restaurants only: a test never touches anyone else's rows.
+      await sweepBooksLoader(adminDb(), { orgUuid: w.org });
       ok(await call(w, "catalog", {}));
       expect(ok(await call(w, "query", { model: "sales_day", limit: 1 })).rows).toHaveLength(1);
     }
