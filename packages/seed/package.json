@@ -7,8 +7,15 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "reset-demo": "tsx --env-file=../../.env.local ../../scripts/reset-demo.ts"
   },
-  "dependencies": { "@rms/contracts": "workspace:*", "@rms/db": "workspace:*", "@rms/parent": "workspace:*", "@rms/models": "workspace:*" },
-  "devDependencies": { "@types/node": "26.6.6" }
+  "dependencies": {
+    "@rms/contracts": "workspace:*",
+    "@rms/db": "workspace:*",
+    "@rms/parent": "workspace:*",
+    "@rms/models": "workspace:*",
+    "@supabase/supabase-js": "2.119.2"
+  },
+  "devDependencies": { "@types/node": "26.6.6", "postgres": "4.1.1", "tsx": "4.23.15" }
 }
