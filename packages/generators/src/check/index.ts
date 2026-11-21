@@ -20,7 +20,7 @@ import {
 import ts from "typescript";
 import { readCatalogFile } from "../app-files.js";
 import { type AppFile, listAppFiles, sha256File } from "../lock.js";
-import { type Problem, type ScanResult, manifestProblems, scanCode } from "./scan.js";
+import { CODE_FILE, type Problem, type ScanResult, manifestProblems, scanCode } from "./scan.js";
 
 const ORDER: CheckName[] = ["locked", "deps", "imports", "safety", "manifest", "types", "build"];
 const MAX_PROBLEMS = 50;
@@ -58,6 +58,10 @@ export const lockedProblems = (appDir: string, files: AppFile[]): Problem[] => {
       else if (sha256File(join(appDir, f.path)) !== want) problems.push({ file: f.path, message: "This file is locked and was changed. Put it back as it was." });
     } else if (!isLockedPath(f.path) && !isEditablePath(f.path) && !isIgnoredPath(f.path)) {
       problems.push({ file: f.path, message: "This file should not be here. Screens go in src/screens/, your own components in src/components/." });
+    } else if (isEditablePath(f.path) && !CODE_FILE.test(f.path)) {
+      // Only .ts and .tsx, exactly (".TSX", ".js", ".json", ".css", ".md" all fail): nothing
+      // else in the agent's folders is scanned, so nothing else may be there.
+      problems.push({ file: f.path, message: "Only .ts and .tsx files may be in src/screens/ and src/components/." });
     }
   }
   for (const path of Object.keys(listed)) if (!present.has(path)) problems.push({ file: path, message: "This locked file is missing. Put it back." });
