@@ -1,0 +1,25 @@
+# secrets: never commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# local tool state
+.vercel/
+supabase/.temp/
+supabase/.branches/
+.claude/settings.local.json
+.claude/worktrees/
+
+# build output
+node_modules/
+.next/
+.turbo/
+dist/
+coverage/
+*.tsbuildinfo
+.DS_Store
+
+# old v0 plan draft, superseded by docs/plan/
+Claude outputs/
