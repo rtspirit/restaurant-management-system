@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { createClient } from "@supabase/supabase-js";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { type Sql, adminDb, closeAll } from "@rms/db";
+import { type Sql, adminDb, closeAll, newStorePrefix, newUuid } from "@rms/db";
 import { createDemoRestaurant, removeRestaurants } from "./demo.js";
 import { type DemoUserSpec, authAdminFromEnv, checkConnectionIsLocal, checkDemoPassword, checkResetAllowed, checkSameDatabase, createDemoUsers, deleteAuthUsers, listAuthUsers, resetDemo } from "./reset.js";
 import { loadTestEnv } from "@rms/db/testing";
@@ -155,20 +155,18 @@ describe("checkSameDatabase", () => {
 // The full reset deletes EVERY sign-in user and restaurant, so it is never run here: the shared
 // local database is in use by other tasks. Its pieces are tested on this task's own data only.
 describe.skipIf(!hasDb)("reset pieces, on task B's own restaurant and users", () => {
-  const ORG = { orgUuid: "0193a3c0-0000-7000-8000-0000000000b8", storePrefix: "o_b1b1b1b1b1b8" };
-  const mine = (email: string) => email.endsWith("@b.rms.test");
+  // Fresh ids, prefix and email domain on every run, so parallel runs never touch each other's rows.
+  const ORG = { orgUuid: newUuid(), storePrefix: newStorePrefix() };
+  const DOMAIN = `@b${ORG.storePrefix.slice(2)}.rms.test`;
+  const mine = (email: string) => email.endsWith(DOMAIN);
   const password = randomBytes(18).toString("base64url"); // test process only, never logged
   const USERS: DemoUserSpec[] = [
-    { email: "owner-slice@b.rms.test", name: "Test owner", kind: "owner", template: "slice_yard" },
-    { email: "staff-slice@b.rms.test", name: "Test staff", kind: "staff", template: "slice_yard", onlyLocation: "Mill Street" },
-    { email: "maintainer@b.rms.test", name: "Test maintainer", kind: "maintainer" },
+    { email: `owner-slice${DOMAIN}`, name: "Test owner", kind: "owner", template: "slice_yard" },
+    { email: `staff-slice${DOMAIN}`, name: "Test staff", kind: "staff", template: "slice_yard", onlyLocation: "Mill Street" },
+    { email: `maintainer${DOMAIN}`, name: "Test maintainer", kind: "maintainer" },
   ];
   const auth = hasDb ? authAdminFromEnv() : (undefined as never);
 
-  beforeAll(async () => {
-    await deleteAuthUsers(auth, mine);
-    await removeRestaurants(adminDb(), [ORG.orgUuid]);
-  });
   afterAll(async () => {
     await deleteAuthUsers(auth, mine);
     await removeRestaurants(adminDb(), [ORG.orgUuid]);
@@ -188,9 +186,9 @@ describe.skipIf(!hasDb)("reset pieces, on task B's own restaurant and users", ()
     const slice = await createDemoRestaurant(adminDb(), { template: "slice_yard", ...ORG });
     const summary = await createDemoUsers(adminDb(), auth, { slice_yard: slice }, password, USERS);
     expect(summary).toEqual([
-      { email: "owner-slice@b.rms.test", kind: "owner", restaurant: "Slice Yard" },
-      { email: "staff-slice@b.rms.test", kind: "staff", restaurant: "Slice Yard" },
-      { email: "maintainer@b.rms.test", kind: "maintainer", restaurant: null },
+      { email: `owner-slice${DOMAIN}`, kind: "owner", restaurant: "Slice Yard" },
+      { email: `staff-slice${DOMAIN}`, kind: "staff", restaurant: "Slice Yard" },
+      { email: `maintainer${DOMAIN}`, kind: "maintainer", restaurant: null },
     ]);
     expect(JSON.stringify(summary)).not.toContain(password);
 
@@ -205,18 +203,18 @@ describe.skipIf(!hasDb)("reset pieces, on task B's own restaurant and users", ()
       left join platform.locations l on l.id = ml.location_id
       where m.org_id = ${ORG.orgUuid} group by m.user_id, m.role order by m.role`;
     expect(members).toEqual([
-      { user_id: id("owner-slice@b.rms.test"), role: "owner", locs: [] },
-      { user_id: id("staff-slice@b.rms.test"), role: "staff", locs: ["Mill Street"] },
+      { user_id: id(`owner-slice${DOMAIN}`), role: "owner", locs: [] },
+      { user_id: id(`staff-slice${DOMAIN}`), role: "staff", locs: ["Mill Street"] },
     ]);
-    const [staffUser] = await adminDb()`select name from platform.staff_users where user_id = ${id("maintainer@b.rms.test")}`;
+    const [staffUser] = await adminDb()`select name from platform.staff_users where user_id = ${id(`maintainer${DOMAIN}`)}`;
     expect(staffUser?.name).toBe("Test maintainer");
   });
 
   it("the demo password signs in", async () => {
     const client = createClient(process.env.SUPABASE_URL as string, process.env.SUPABASE_PUBLISHABLE_KEY as string, { auth: { persistSession: false, autoRefreshToken: false } });
-    const { data, error } = await client.auth.signInWithPassword({ email: "owner-slice@b.rms.test", password });
+    const { data, error } = await client.auth.signInWithPassword({ email: `owner-slice${DOMAIN}`, password });
     expect(error).toBeNull();
-    expect(data.user?.email).toBe("owner-slice@b.rms.test");
+    expect(data.user?.email).toBe(`owner-slice${DOMAIN}`);
     await client.auth.signOut();
   });
 

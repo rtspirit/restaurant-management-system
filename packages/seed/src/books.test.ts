@@ -4,7 +4,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type TenantContext, toPublicId } from "@rms/contracts";
 import { handleData } from "@rms/data";
-import { adminDb, closeAll, withStore } from "@rms/db";
+import { adminDb, closeAll, newStorePrefix, newUuid, withStore } from "@rms/db";
 import { requireTestEnv } from "@rms/db/testing";
 import { LIBRARY } from "@rms/models";
 import { type SeedBooksResult, seedDemoBooks } from "./books.js";
@@ -13,10 +13,9 @@ import { installPlatformLibrary } from "./library.js";
 
 requireTestEnv("DATABASE_URL", "DATABASE_ADMIN_URL");
 
-// Integration test ids: uuid suffix 70 to 7f, store prefixes o_7171717171xx.
-const uuid = (suffix: string) => `0193a3c0-0000-7000-8000-0000000000${suffix}`;
-const FULL = { org: uuid("7b"), prefix: "o_71717171710b", owner: uuid("7d") };
-const BARE = { org: uuid("7c"), prefix: "o_71717171710c", owner: uuid("7e") };
+// Fresh ids and store prefixes on every run, so parallel runs on the shared local database never meet.
+const FULL = { org: newUuid(), prefix: newStorePrefix(), owner: newUuid() };
+const BARE = { org: newUuid(), prefix: newStorePrefix(), owner: newUuid() };
 
 const systemApps = (org: string) =>
   adminDb()<{ id: string; status: string; version: string }[]>`
@@ -35,7 +34,6 @@ const counts = async (r: { org: string; prefix: string }, tables: string[]): Pro
 describe("seedDemoBooks", () => {
   beforeAll(async () => {
     const sql = adminDb();
-    await removeRestaurants(sql, [FULL.org, BARE.org]);
     await installPlatformLibrary(sql);
     await createDemoRestaurant(sql, { template: "marigold", orgUuid: FULL.org, storePrefix: FULL.prefix });
     await createDemoRestaurant(sql, { template: "slice_yard", orgUuid: BARE.org, storePrefix: BARE.prefix });

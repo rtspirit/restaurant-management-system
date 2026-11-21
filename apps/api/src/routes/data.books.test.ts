@@ -7,7 +7,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { mintAppToken } from "@rms/auth";
 import { DATA_ROUTES, type TenantContext, toPublicId } from "@rms/contracts";
-import { adminDb, closeAll, withStore } from "@rms/db";
+import { adminDb, closeAll, newStorePrefix, newUuid, withStore } from "@rms/db";
 import { requireTestEnv } from "@rms/db/testing";
 import { LIBRARY, ensureModels } from "@rms/models";
 import { type BooksClient, type BooksRoute, type LoadBooksResult, createDemoRestaurant, ensureBooksApp, installPlatformLibrary, loadDemoBooks, removeRestaurants } from "@rms/seed";
@@ -15,10 +15,9 @@ import app from "../index.js";
 
 requireTestEnv("DATABASE_URL", "DATABASE_ADMIN_URL", "RMS_TOKEN_SECRET");
 
-// Integration test ids: uuid suffix 70 to 7f, store prefixes o_7171717171xx. (d0 to df belongs to the @rms/db tests.)
-const uuid = (suffix: string) => `0193a3c0-0000-7000-8000-0000000000${suffix}`;
-const M = { org: uuid("73"), prefix: "o_717171717103", owner: uuid("75"), staff: uuid("76"), template: "marigold" as const };
-const S = { org: uuid("74"), prefix: "o_717171717104", owner: uuid("77"), staff: uuid("78"), template: "slice_yard" as const };
+// Fresh ids and store prefixes on every run, so parallel runs on the shared local database never meet.
+const M = { org: newUuid(), prefix: newStorePrefix(), owner: newUuid(), staff: newUuid(), template: "marigold" as const };
+const S = { org: newUuid(), prefix: newStorePrefix(), owner: newUuid(), staff: newUuid(), template: "slice_yard" as const };
 
 const CANARY_M = "CANARY-MARIGOLD-4c1d7e90-books";
 const CANARY_S = "CANARY-SLICEYARD-9a2b6f13-books";
@@ -82,7 +81,6 @@ describe("the books, end to end", () => {
 
   beforeAll(async () => {
     const sql = adminDb();
-    await removeRestaurants(sql, [M.org, S.org]);
     await installPlatformLibrary(sql);
     const keys = LIBRARY.models.map((m) => m.key);
     const whos: Who[] = [];
