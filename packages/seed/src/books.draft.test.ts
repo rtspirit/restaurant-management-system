@@ -3,7 +3,7 @@
 // (cheap when they are there already). Plus the loader sweep. Throwaway restaurants only.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type TenantContext, toPublicId } from "@rms/contracts";
-import { adminDb, closeAll, newUuid, withStore } from "@rms/db";
+import { adminDb, closeAll, newStorePrefix, newUuid, withStore } from "@rms/db";
 import { requireTestEnv } from "@rms/db/testing";
 import { SAMPLE_SOURCE, ensureDraftSamples, seedDemoBooks, sweepBooksLoader, templateForProfile } from "./books.js";
 import { createDemoRestaurant, removeRestaurants } from "./demo.js";
@@ -13,9 +13,8 @@ import { TEMPLATES } from "./templates.js";
 
 requireTestEnv("DATABASE_URL", "DATABASE_ADMIN_URL", "SUPABASE_URL", "SUPABASE_SECRET_KEY");
 
-// Task L ids: uuid suffix 40 to 4f, store prefixes o_4141414141xx.
-const uuid = (suffix: string) => `0193a3c0-0000-7000-8000-0000000000${suffix}`;
-const R = { org: uuid("40"), prefix: "o_414141414100", owner: "" };
+// Fresh ids and a fresh store prefix on every run, so parallel runs on the shared local database never meet.
+const R = { org: newUuid(), prefix: newStorePrefix(), owner: "" };
 
 const ctx = (env: "live" | "draft"): TenantContext => ({
   orgId: toPublicId("org", R.org), storePrefix: R.prefix, actor: { type: "system", id: "books-draft-test" }, role: "owner", locations: "all", env,
@@ -39,7 +38,6 @@ describe("sample numbers in the draft store", () => {
 
   beforeAll(async () => {
     const sql = adminDb();
-    await removeRestaurants(sql, [R.org]);
     await installPlatformLibrary(sql);
     await createDemoRestaurant(sql, { template: "marigold", orgUuid: R.org, storePrefix: R.prefix });
     const hex = Array.from(crypto.getRandomValues(new Uint8Array(6)), (b) => b.toString(16).padStart(2, "0")).join("");
@@ -105,9 +103,38 @@ describe("sample numbers in the draft store", () => {
     await adminDb()`insert into platform.agent_sessions (id, org_id, user_id, app_id, mode, model, title, status)
                     values (${session}, ${R.org}, ${R.owner}, ${app?.id as string}, 'build', 'none', 'Sample numbers', 'closed')`;
     await adminDb()`insert into platform.agent_runs (id, session_id, org_id, status) values (${newUuid()}, ${session}, ${R.org}, 'running')`;
-    const swept = await sweepBooksLoader(adminDb());
-    expect(swept.paused).toBeGreaterThanOrEqual(1);
-    expect(swept.buildsRemoved).toBeGreaterThanOrEqual(1);
-    expect(await leftovers()).toEqual({ sessions: 0, runs: 0, published: 0 });
+    // This test sweeps its own restaurant only. What matters is that the loader ends up switched
+    // off with its build gone, not which sweep did it: another process on the same database (an
+    // API starting, a Demo POS sync) sweeps every restaurant and may get to this one first.
+    await expect
+      .poll(async () => {
+        await sweepBooksLoader(adminDb(), { orgUuid: R.org });
+        return leftovers();
+      }, { timeout: 10_000 })
+      .toEqual({ sessions: 0, runs: 0, published: 0 });
   });
+
+  it("the sweep leaves a load that is running alone", async () => {
+    // The loader is on for the length of a load, under the restaurant's loader lock. Sweeps
+    // from anywhere must skip it: if one switched it off, the load's next call would be refused.
+    let loading = true;
+    let sweeps = 0;
+    const sweeping = (async () => {
+      while (loading) {
+        await sweepBooksLoader(adminDb(), { orgUuid: R.org });
+        sweeps++;
+      }
+    })();
+    try {
+      for (let i = 0; i < 3; i++) {
+        const again = await seedDemoBooks(adminDb(), { orgUuid: R.org, template: "marigold", ownerUserId: R.owner, withSales: false });
+        expect(again.setUp).toEqual({ accountsAndRules: 0, calendar: 0 });
+      }
+    } finally {
+      loading = false;
+      await sweeping;
+    }
+    expect(sweeps).toBeGreaterThan(3);
+    expect(await leftovers()).toEqual({ sessions: 0, runs: 0, published: 0 });
+  }, 60_000);
 });
