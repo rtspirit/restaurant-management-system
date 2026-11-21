@@ -96,10 +96,12 @@ export function RmsShell({ data, currentHref, phoneStart, children }: RmsShellPr
     ) : null;
 
   // RMS may not know a name yet. Then the role stands in for it, and the avatar shows the restaurant's initial.
+  // A name that is only the role again ("Owner", from owner@...) is not a name: never print "Owner" under "Owner".
   const role = ROLE_WORDS[data.role];
+  const named = data.userName !== "" && data.userName.toLowerCase() !== role.toLowerCase();
   const account = (
     <Stack gap="s">
-      <Account name={data.userName || role} initials={data.userInitials || data.restaurantName.slice(0, 1)} role={data.userName ? role : data.restaurantName} />
+      <Account name={named ? data.userName : role} initials={data.userInitials || data.restaurantName.slice(0, 1)} role={named ? role : data.restaurantName} />
       <SignOut />
     </Stack>
   );
@@ -129,7 +131,7 @@ export function RmsShell({ data, currentHref, phoneStart, children }: RmsShellPr
             {DESTINATIONS.filter((place) => ON_BOTTOM_BAR.includes(place.href)).map((place) => (
               <BottomBarItem key={place.href} {...place} current={isCurrent(place.href, path)} linkAs={Link} />
             ))}
-            <BottomBarItem icon="more" label="More" onPress={() => setMoreOpen(true)} expanded={moreOpen} />
+            <BottomBarItem icon="more" label="More" onPress={() => setMoreOpen(true)} expanded={moreOpen} current={inMore.some((place) => isCurrent(place.href, path))} />
           </BottomBar>
         }
       >

@@ -17,6 +17,20 @@ const DAYS = [
 
 const STATUS_WORDS: Record<string, string> = { open: "Open", closed: "Closed", opening_soon: "Opening soon" };
 
+/**
+ * A time zone the way people say it: "Eastern Time", not "America/New_York".
+ * Falls back to the place name with spaces when the zone is not one the platform knows.
+ */
+function zoneWords(zone: string): string {
+  try {
+    const part = new Intl.DateTimeFormat("en-US", { timeZone: zone, timeZoneName: "longGeneric" }).formatToParts(new Date(0)).find((p) => p.type === "timeZoneName");
+    if (part?.value && !/^GMT/.test(part.value)) return part.value;
+  } catch {
+    // Not a zone this platform knows: say it as written.
+  }
+  return zone.replaceAll("_", " ");
+}
+
 const hourColumns = [
   { key: "day", label: "Day" },
   { key: "opens", label: "Opens", align: "end" as const },
@@ -69,7 +83,7 @@ export default async function LocationsPage() {
                     { label: "Address", value: text(place, "address") },
                     ...(seats !== null ? [{ label: "Seats", value: count(seats, "seat", "seats") }] : []),
                     ...(dayEnds ? [{ label: "Day ends at", value: dayEnds }] : []),
-                    ...(text(place, "timezone") ? [{ label: "Time zone", value: text(place, "timezone").replaceAll("_", " ") }] : []),
+                    ...(text(place, "timezone") ? [{ label: "Time zone", value: zoneWords(text(place, "timezone")) }] : []),
                   ]}
                 />
                 {dayEnds ? (

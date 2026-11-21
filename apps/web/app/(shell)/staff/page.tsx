@@ -34,12 +34,12 @@ export default async function StaffPage() {
     );
   }
 
+  // The job sits under each name, so the table fits a laptop without scrolling. On a phone the
+  // longer details move under the name too, and only the name and the pay stay as columns.
   const columns = [
     { key: "name", label: "Name" },
-    { key: "job", label: "Job" },
-    { key: "house", label: "Works in" },
-    { key: "started", label: "Started" },
-    ...(showContact ? [{ key: "email", label: "Email" }, { key: "phone", label: "Phone" }] : []),
+    { key: "started", label: "Started", onPhone: "under-name" as const },
+    ...(showContact ? [{ key: "email", label: "Email", onPhone: "under-name-bare" as const }, { key: "phone", label: "Phone", onPhone: "under-name-bare" as const }] : []),
     ...(showPay ? [{ key: "rate", label: "Hourly rate", align: "end" as const, strong: true }] : []),
   ];
 
@@ -62,12 +62,12 @@ export default async function StaffPage() {
           columns={columns}
           rows={group.people.map((person) => {
             const theirJob = job.get(text(person, "job_id"));
+            const house = theirJob ? HOUSE_WORDS[text(theirJob, "house")] : undefined;
             return {
               id: text(person, "id"),
+              subtitle: theirJob ? [text(theirJob, "name"), house].filter(Boolean).join(" · ") : undefined,
               cells: {
                 name: text(person, "full_name"),
-                job: theirJob ? text(theirJob, "name") : "",
-                house: theirJob ? (HOUSE_WORDS[text(theirJob, "house")] ?? "") : "",
                 started: day(person.started_on),
                 email: text(person, "email"),
                 phone: text(person, "phone"),
