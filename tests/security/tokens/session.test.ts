@@ -148,7 +148,7 @@ describe("forged session tokens", () => {
     expect((await call(session, pointing)).status).toBe(401);
   });
 
-  it("signed with the sign-in service's shared secret (readable from the database today: see db/findings.test.ts)", async () => {
+  it("signed with the sign-in service's shared secret (readable from the database on the local stack: see db/known-limits.test.ts)", async () => {
     // The sign-in service still has an old shared-secret way of signing. RMS must accept public-key signatures only,
     // so knowing that secret must not be enough to become another restaurant's owner here.
     const [row] = await platform().unsafe("select current_setting('app.settings.jwt_secret', true) as s");

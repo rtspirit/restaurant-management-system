@@ -62,3 +62,30 @@ export const assertLocalTarget = (): void => {
 };
 
 export const repoPath = (...parts: string[]): string => resolve(REPO_ROOT, ...parts);
+
+/**
+ * True when the loaded settings point at a database that is not on this machine.
+ * In that case the suite runs in HOSTED MODE: only the read-only checks in tests/security/hosted
+ * run, nothing is created, and no attack is made (see vitest.security.config.ts).
+ */
+export const hostedMode = (): boolean => {
+  const url = process.env.DATABASE_URL;
+  if (!url) return false;
+  try {
+    return !isLocalHost(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Hosted mode may only ever look at OUR hosted project: the one whose ref is in .rms/supabase-project,
+ * reached through its pooler as the restaurant-facing login. Throws for anything else.
+ */
+export const assertHostedIsOurProject = (): void => {
+  const ref = readFileSync(resolve(REPO_ROOT, ".rms/supabase-project"), "utf8").split("\n")[0]?.trim() ?? "";
+  if (!/^[a-z0-9]{16,}$/.test(ref)) throw new Error("Hosted checks refuse to run: .rms/supabase-project holds no project ref.");
+  const url = new URL(process.env.DATABASE_URL as string);
+  if (!url.hostname.endsWith(".pooler.supabase.com")) throw new Error("Hosted checks refuse to run: DATABASE_URL is not a Supabase pooler address.");
+  if (decodeURIComponent(url.username) !== `rms_api.${ref}`) throw new Error("Hosted checks refuse to run: DATABASE_URL is not the restaurant-facing login of the project in .rms/supabase-project.");
+};

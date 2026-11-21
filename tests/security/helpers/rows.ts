@@ -57,6 +57,7 @@ export const PARENT_ROW: Record<string, (k: OrgKey) => string> = {
   agent_sessions: (k) => ids(k).session,
   agent_runs: (k) => ids(k).run,
   secrets: (k) => ids(k).secret,
+  org_memory: (k) => ids(k).memory,
   mcp_connections: (k) => ids(k).connection,
   change_sets: (k) => ids(k).changeSet,
   org_models: (k) => ids(k).orgModelNote,

@@ -156,8 +156,8 @@ export const noOrgSql = (text: string): Promise<Row[]> => asNoOrg((tx) => tx.uns
 
 // ---------------------------------------------------------------- the Ask login
 export type AskHandle = {
-  /** The product path: one model-written SELECT through the envelope. */
-  query(text: string, maxRows?: number): Promise<AskResult>;
+  /** The product path: one model-written SELECT through the envelope. `locations` defaults to every location. */
+  query(text: string, maxRows?: number, locations?: "all" | string[]): Promise<AskResult>;
   /** Any statement inside the read-only envelope. */
   envelope(text: string): Promise<Row[]>;
   /**
@@ -186,7 +186,7 @@ export const askAs = async (k: OrgKey, watch: Watch = {}): Promise<AskHandle> =>
   const label = `Ask login of ${k}`;
   return {
     sql: conn,
-    query: (text, maxRows) => guarded(actor, label, () => askQuery(conn, text, maxRows)),
+    query: (text, maxRows, locations) => guarded(actor, label, () => askQuery(conn, text, maxRows, locations)),
     envelope: (text) => guarded(actor, `${label} (envelope)`, () => inAskEnvelope(conn, (tx) => tx.unsafe(text) as Promise<Row[]>)),
     raw: (text) => guarded(actor, `${label} (raw)`, () => conn.unsafe(text) as Promise<Row[]>),
     readWrite: (text) => guarded(actor, `${label} (read-write)`, () => rolledBack<Row[]>((keep) => conn.begin("read write", async (tx) => keep((await tx.unsafe(text)) as Row[])))),

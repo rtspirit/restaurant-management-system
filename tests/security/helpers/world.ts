@@ -392,7 +392,7 @@ export const destroyWorld = async (admin: Sql): Promise<void> => {
   // drop_store needs the restaurant's row, so stores go first. A real failure here must stop the cleanup.
   const present = await admin<{ id: string; store_prefix: string }[]>`select id, store_prefix from platform.organizations where id = any(${ALL_ORG_UUIDS})`;
   for (const { id, store_prefix } of present) {
-    // A large object owned by a store role stops the role being dropped (see db/findings.test.ts). Remove any first.
+    // A large object owned by a store role used to stop the role being dropped (closed: db/closed-findings.test.ts). Removing any first keeps cleanup independent of that fix.
     for (const role of [`${store_prefix}_rw`, `${store_prefix}_draft_rw`]) {
       const exists = await admin`select 1 from pg_catalog.pg_roles where rolname = ${role}`;
       if (exists.length === 0) continue;

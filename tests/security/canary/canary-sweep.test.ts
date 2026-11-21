@@ -57,8 +57,7 @@ const SURFACES: Record<string, (k: OrgKey, watch?: Watch) => Promise<number>> = 
   "parent data and live tables, through the Ask login": async (k, watch = {}) => {
     const ask = await askAs(k, watch);
     let rows = 0;
-    for (const t of [...PARENT, "sec_note", "sec_ledger"]) rows += (await ask.query(`select * from ${t}`)).rows.length;
-    rows += (await ask.query("select v.* from (select set_config('rms.locations', 'all', true) as x) s cross join lateral (select * from sec_visit where s.x is not null) v")).rows.length;
+    for (const t of [...PARENT, ...MODEL_KEYS]) rows += (await ask.query(`select * from ${t}`)).rows.length;
     return rows;
   },
   "everything the Ask login can read, dumped in one go": async (k, watch = {}) => {
