@@ -1,0 +1,19 @@
+{
+  "name": "rms",
+  "private": true,
+  "packageManager": "pnpm@12.21.0",
+  "engines": { "node": ">=22.12" },
+  "scripts": {
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "test:security": "vitest run --dir tests/security",
+    "preflight:vercel": "scripts/preflight-vercel.sh"
+  },
+  "devDependencies": {
+    "turbo": "2.11.13",
+    "typescript": "6.0.3",
+    "vitest": "5.1.1"
+  }
+}

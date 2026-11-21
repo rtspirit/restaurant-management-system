@@ -1,0 +1,10 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "globalEnv": ["RMS_BUILD_MODEL", "RMS_ASK_MODEL", "RMS_EMBED_MODEL", "SUPABASE_URL", "SUPABASE_PUBLISHABLE_KEY"],
+  "tasks": {
+    "build": { "dependsOn": ["^build"], "outputs": ["dist/**", ".next/**", "!.next/cache/**"] },
+    "typecheck": { "dependsOn": ["^build"] },
+    "lint": {},
+    "test": { "dependsOn": ["^build"] }
+  }
+}
