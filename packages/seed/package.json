@@ -14,6 +14,7 @@
     "@rms/contracts": "workspace:*",
     "@rms/data": "workspace:*",
     "@rms/db": "workspace:*",
+    "@rms/governance": "workspace:*",
     "@rms/parent": "workspace:*",
     "@rms/models": "workspace:*",
     "@supabase/supabase-js": "2.119.2"

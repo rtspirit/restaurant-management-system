@@ -3,6 +3,8 @@
 // unless RMS_ALLOW_RESET=1 is set.
 import { createClient } from "@supabase/supabase-js";
 import { type Sql, newUuid } from "@rms/db";
+import { drainOutbox, recordChange } from "@rms/governance";
+import { LIBRARY } from "@rms/models";
 import { seedDemoBooks } from "./books.js";
 import { type CreatedRestaurant, createDemoRestaurant, removeRestaurants } from "./demo.js";
 import { installPlatformLibrary } from "./library.js";
@@ -233,6 +235,18 @@ export const resetDemo = async (adminSql: Sql, env: Env = process.env, opts: Res
       select user_id from platform.members where org_id = ${r.orgUuid} and role = 'owner' order by created_at limit 1`;
     if (!owner) throw new Error(`${r.name} has no owner to record its numbers under`);
     const loaded = await seedDemoBooks(adminSql, { orgUuid: r.orgUuid, template, ownerUserId: owner.user_id, withSales });
+    // Giving a restaurant its tables is a change like any other, so it goes on the record:
+    // one change set per restaurant, which the maintainer console's feed then shows.
+    await adminSql.begin((tx) =>
+      recordChange(tx, {
+        orgUuid: r.orgUuid,
+        origin: "system",
+        actor: { type: "system", id: "demo-reset" },
+        signals: ["new_model"],
+        subject: { kind: "settings", name: "Standard records" },
+        diff: { models: LIBRARY.models.map((m) => m.key), numbersLoaded: loaded !== null },
+      }),
+    );
     if (!loaded) {
       books.push(`  ${r.name}: tables ready, no numbers loaded.`);
       continue;
@@ -244,6 +258,9 @@ export const resetDemo = async (adminSql: Sql, env: Env = process.env, opts: Res
         `Week of ${loaded.lastWeek.weekStart}: net sales $${net}, prime cost ${loaded.lastWeek.primeCostPct}%${loaded.lastWeek.stockCounted ? "" : " (no stock count yet)"}.`,
     );
   }
+
+  // Hand the recorded changes to the console feed.
+  await drainOutbox(adminSql, { orgUuids: [marigold.orgUuid, sliceYard.orgUuid] });
 
   return [
     `Removed ${orgs.length} restaurant(s) and ${removedUsers} sign-in user(s).`,
