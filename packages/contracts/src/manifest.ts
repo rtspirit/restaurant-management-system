@@ -51,13 +51,4 @@ export type AppManifestInput = z.input<typeof AppManifest>;
 
 export const defineApp = (manifest: AppManifestInput): AppManifestInput => manifest;
 
-/** Files in the app template that the build agent may never change. Checked at build and publish. */
-export const LOCKED_TEMPLATE_FILES = [
-  "src/rms/auth.ts",
-  "src/rms/data-client.ts",
-  "src/rms/shell.tsx",
-  "package.json",
-  "pnpm-lock.yaml",
-  "eslint.config.js",
-  "tsconfig.json",
-] as const;
+// The app template's locked files, allowed dependencies and commands are in build.ts.

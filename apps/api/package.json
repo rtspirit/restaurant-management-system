@@ -9,6 +9,27 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests"
   },
-  "dependencies": { "@rms/contracts": "workspace:*", "@rms/db": "workspace:*", "@rms/auth": "workspace:*", "@rms/data": "workspace:*", "@rms/governance": "workspace:*", "@rms/models": "workspace:*", "@rms/parent": "workspace:*", "@rms/seed": "workspace:*", "hono": "4.13.19", "jose": "6.2.18", "zod": "4.6.7" },
-  "devDependencies": { "@hono/node-server": "2.1.11", "@types/node": "26.6.6", "tsx": "4.23.15" }
+  "dependencies": {
+    "@rms/agent": "workspace:*",
+    "@rms/auth": "workspace:*",
+    "@rms/contracts": "workspace:*",
+    "@rms/data": "workspace:*",
+    "@rms/db": "workspace:*",
+    "@rms/governance": "workspace:*",
+    "@rms/mcp": "workspace:*",
+    "@rms/memory": "workspace:*",
+    "@rms/models": "workspace:*",
+    "@rms/parent": "workspace:*",
+    "@rms/runner": "workspace:*",
+    "@rms/sandbox": "workspace:*",
+    "@rms/seed": "workspace:*",
+    "hono": "4.13.19",
+    "jose": "6.2.18",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@hono/node-server": "2.1.11",
+    "@types/node": "26.6.6",
+    "tsx": "4.23.15"
+  }
 }
