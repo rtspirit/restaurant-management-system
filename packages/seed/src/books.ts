@@ -29,6 +29,12 @@ export type LoadBooksOptions = GenerateSalesOptions & {
   template: DemoTemplate;
   /** Post every day, bill, staff-cost row and stock count to the ledger. Default true. */
   post?: boolean;
+  /**
+   * Where the rows say they came from: the first part of every row's source id. Default
+   * "demo-pos" (the real numbers, which the Demo POS connection takes over). The draft store's
+   * sample numbers use `SAMPLE_SOURCE`, so a sample row can always be told from a real one.
+   */
+  source?: string;
 };
 
 export type LoadBooksResult = {
@@ -44,6 +50,8 @@ export type LoadBooksResult = {
 
 /** Where the rows say they came from. One prefix, so the Demo POS can take over the same rows. */
 const SOURCE = "demo-pos";
+/** Where the draft store's sample numbers say they came from. Every sample row's source id starts with this. */
+export const SAMPLE_SOURCE = "sample";
 
 const UNITS: Record<StockUnit, { name: string; kind: "count" | "weight" | "volume" }> = {
   kg: { name: "Kilogram", kind: "weight" },
@@ -153,7 +161,8 @@ export const setUpBooks = async (client: BooksClient, range: GenerateSalesOption
  * already in the books.
  */
 export const loadDemoBooks = async (client: BooksClient, opts: LoadBooksOptions): Promise<LoadBooksResult> => {
-  const { template, post = true, ...range } = opts;
+  const { template, post = true, source = SOURCE, ...range } = opts;
+  if (!/^[a-z][a-z0-9-]{0,31}$/.test(source)) throw new Error("Loading the demo numbers: the source must be a short plain name");
   const sales: GeneratedSales = generateSales(template, range);
   const spec = templateSpec(template);
   const rows: Record<string, number> = {};
@@ -162,7 +171,7 @@ export const loadDemoBooks = async (client: BooksClient, opts: LoadBooksOptions)
   const upsert = async (model: string, items: readonly Upsert[]): Promise<string[]> => {
     const ids: string[] = [];
     for (let i = 0; i < items.length; i += CHUNK) {
-      const ops = items.slice(i, i + CHUNK).map((r) => ({ op: "upsert_by_source", model, sourceId: `${SOURCE}/${model}/${r.sourceId}`, values: r.values }));
+      const ops = items.slice(i, i + CHUNK).map((r) => ({ op: "upsert_by_source", model, sourceId: `${source}/${model}/${r.sourceId}`, values: r.values }));
       const res = (await client("batch", { ops })) as { results: { id: string }[] };
       if (res.results.length !== ops.length) throw new Error(`Loading ${model}: the reply does not match what was sent`);
       ids.push(...res.results.map((r) => r.id));
@@ -348,22 +357,107 @@ export type SeedBooksOptions = GenerateSalesOptions & {
    * its tables, its chart of accounts and its fiscal calendar, and no numbers.
    */
   withSales: boolean;
+  /**
+   * Also fill the DRAFT store (what a mini-app's preview reads during a build) with sample
+   * numbers: the template's own eight weeks, every row marked with `SAMPLE_SOURCE`. Default true,
+   * so every restaurant whose books are set up has a preview with numbers in it. The live store
+   * is never touched by this. Safe to run again: a second run adds nothing.
+   */
+  draftSamples?: boolean;
 };
 
-/** What was loaded, and the last week as the prime cost report now shows it. */
-export type SeededBooks = LoadBooksResult & { lastWeek: { weekStart: string; netSalesMinor: number; primeCostPct: string; stockCounted: boolean } };
+export type WeekFigures = { weekStart: string; netSalesMinor: number; primeCostPct: string; stockCounted: boolean };
+
+/** What was loaded, the last week as the prime cost report now shows it, and every week the numbers cover. */
+export type SeededBooks = LoadBooksResult & { lastWeek: WeekFigures; weeks: WeekFigures[] };
+
+/** The sample numbers put in the draft store. */
+export type DraftSamples = {
+  startsOn: string;
+  endsOn: string;
+  rows: Record<string, number>;
+  /** Documents posted in THIS run. Zero on a second run. */
+  posted: number;
+  /** The last week as the prime cost report shows it IN THE DRAFT STORE: what a preview sees. */
+  lastWeek: WeekFigures | null;
+};
 
 export type SeedBooksResult = {
   /** What the two set-up actions added in this run. Zero when they had been run before. */
   setUp: BooksSetUp;
   /** Null without `withSales`. */
   books: SeededBooks | null;
+  /** Null when `draftSamples` is false. */
+  draft: DraftSamples | null;
+};
+
+/** A Data API client for one context. Throws on any refusal, with the code and message only. */
+const dataClient = (tenant: TenantContext): BooksClient => async (route, body) => {
+  const reply = await handleData(route, tenant, body, newUuid());
+  if (reply.status !== 200) {
+    const error = (reply.body as { error?: { code?: string; message?: string } }).error;
+    throw new Error(`Setting up the books failed (${route}: ${error?.code ?? "unknown"}). ${error?.message ?? ""}`.trim());
+  }
+  return reply.body;
+};
+
+/** Every week of the prime cost report, all locations together, oldest first. */
+const readWeeks = async (client: BooksClient, from: string, to: string): Promise<WeekFigures[]> => {
+  const report = (await client("named", { query: "prime_cost_by_week", params: { from_date: from, to_date: to } })) as { rows: Record<string, unknown>[] };
+  return report.rows
+    .filter((r) => r.scope === "all_locations")
+    .map((r) => ({ weekStart: String(r.week_start), netSalesMinor: Number(r.net_sales), primeCostPct: String(r.prime_cost_pct), stockCounted: r.stock_counted === true }))
+    .sort((a, b) => a.weekStart.localeCompare(b.weekStart));
 };
 
 /**
- * Gives one demo restaurant its books. Used by the reset (with numbers) and by onboarding
- * (without): make the library tables, add the chart of accounts and the fiscal calendar, and,
- * with `withSales`, load and post the demo numbers.
+ * Loads the sample numbers into the draft store, through the Data API like everything else.
+ *
+ * The Data API lets a mini-app into a draft store only while one of its builds is running. So
+ * the hidden "demo data" mini-app gets a build of its own for the length of the load: a closed
+ * session with one run, removed again straight after, whether the load worked or not. Nobody
+ * sees it: it belongs to the hidden mini-app, holds no events and lives for a few seconds.
+ */
+const loadDraftSamples = async (
+  adminSql: Sql,
+  ctx: { orgUuid: string; prefix: string; ownerUserId: string; app: BooksApp; template: DemoTemplate; range: GenerateSalesOptions },
+): Promise<DraftSamples> => {
+  const sessionUuid = newUuid();
+  const runUuid = newUuid();
+  await adminSql.begin(async (tx) => {
+    await tx`insert into platform.agent_sessions (id, org_id, user_id, app_id, mode, model, title, status)
+             values (${sessionUuid}, ${ctx.orgUuid}, ${ctx.ownerUserId}, ${ctx.app.appUuid}, 'build', 'none', 'Sample numbers', 'closed')`;
+    await tx`insert into platform.agent_runs (id, session_id, org_id, status) values (${runUuid}, ${sessionUuid}, ${ctx.orgUuid}, 'running')`;
+  });
+  try {
+    const client = dataClient({
+      orgId: toPublicId("org", ctx.orgUuid),
+      storePrefix: ctx.prefix,
+      actor: { type: "user", id: toPublicId("usr", ctx.ownerUserId) },
+      role: "owner",
+      locations: "all",
+      env: "draft",
+      appId: toPublicId("app", ctx.app.appUuid),
+      runId: toPublicId("run", runUuid),
+    });
+    const loaded = await loadDemoBooks(client, { template: ctx.template, ...ctx.range, source: SAMPLE_SOURCE });
+    const posted = loaded.posted.salesDays + loaded.posted.vendorBills + loaded.posted.labourDays + loaded.posted.stockCounts;
+    // Read back the way a preview reads it: the prime cost report, in the draft store.
+    const weeks = await readWeeks(client, loaded.startsOn, loaded.endsOn);
+    return { startsOn: loaded.startsOn, endsOn: loaded.endsOn, rows: loaded.rows, posted, lastWeek: weeks.at(-1) ?? null };
+  } finally {
+    await adminSql.begin(async (tx) => {
+      await tx`delete from platform.agent_runs where id = ${runUuid} and org_id = ${ctx.orgUuid}`;
+      await tx`delete from platform.agent_sessions where id = ${sessionUuid} and org_id = ${ctx.orgUuid}`;
+    });
+  }
+};
+
+/**
+ * Gives one demo restaurant its books. Used by the reset, by onboarding, and by the Demo POS
+ * sync: make the library tables, add the chart of accounts and the fiscal calendar, and, with
+ * `withSales`, load and post the demo numbers into the live store. With `draftSamples` (the
+ * default) the draft store gets the same template's numbers as clearly marked sample numbers.
  *
  * Everything after the tables goes through the Data API as the hidden "demo data" mini-app,
  * which is switched on for the load and ALWAYS switched off again, whether the load worked or
@@ -371,7 +465,7 @@ export type SeedBooksResult = {
  * and only for seeded demo restaurants.
  */
 export const seedDemoBooks = async (adminSql: Sql, opts: SeedBooksOptions): Promise<SeedBooksResult> => {
-  const { orgUuid, template, ownerUserId, withSales, ...range } = opts;
+  const { orgUuid, template, ownerUserId, withSales, draftSamples = true, ...range } = opts;
   await ensureModels(adminSql, orgUuid, LIBRARY.models.map((m) => m.key));
 
   const [org] = await adminSql<{ prefix: string }[]>`select store_prefix as prefix from platform.organizations where id = ${orgUuid}`;
@@ -379,7 +473,7 @@ export const seedDemoBooks = async (adminSql: Sql, opts: SeedBooksOptions): Prom
   const app = await ensureBooksApp(adminSql, orgUuid);
   try {
     // The same context a signed app token would give: this restaurant, its owner, live data.
-    const tenant: TenantContext = {
+    const client = dataClient({
       orgId: toPublicId("org", orgUuid),
       storePrefix: org.prefix,
       actor: { type: "user", id: toPublicId("usr", ownerUserId) },
@@ -388,28 +482,26 @@ export const seedDemoBooks = async (adminSql: Sql, opts: SeedBooksOptions): Prom
       env: "live",
       appId: toPublicId("app", app.appUuid),
       appVersionId: toPublicId("ver", app.versionUuid),
-    };
-    const client: BooksClient = async (route, body) => {
-      const reply = await handleData(route, tenant, body, newUuid());
-      if (reply.status !== 200) {
-        const error = (reply.body as { error?: { code?: string; message?: string } }).error;
-        throw new Error(`Setting up the books failed (${route}: ${error?.code ?? "unknown"}). ${error?.message ?? ""}`.trim());
-      }
-      return reply.body;
-    };
-    if (!withSales) return { setUp: await setUpBooks(client, range), books: null };
+    });
 
-    const loaded = await loadDemoBooks(client, { template, ...range });
-    // Read the last week back through the prime cost report, so the reset can show that the
-    // reports work on what it just loaded.
-    const weekStart = addDays(loaded.endsOn, -6);
-    const report = (await client("named", { query: "prime_cost_by_week", params: { from_date: weekStart, to_date: loaded.endsOn } })) as { rows: Record<string, unknown>[] };
-    const all = report.rows.find((r) => r.scope === "all_locations" && r.week_start === weekStart);
-    if (!all) throw new Error("Loading the demo numbers: the prime cost report has no row for the last week");
-    return {
-      setUp: loaded.setUp,
-      books: { ...loaded, lastWeek: { weekStart, netSalesMinor: Number(all.net_sales), primeCostPct: String(all.prime_cost_pct), stockCounted: all.stock_counted === true } },
-    };
+    let setUp: BooksSetUp;
+    let books: SeededBooks | null = null;
+    if (!withSales) {
+      setUp = await setUpBooks(client, range);
+    } else {
+      const loaded = await loadDemoBooks(client, { template, ...range });
+      // Read the weeks back through the prime cost report, so callers can show (and the Demo
+      // POS sync can check) that the reports work on what was just loaded.
+      const weeks = await readWeeks(client, loaded.startsOn, loaded.endsOn);
+      const weekStart = addDays(loaded.endsOn, -6);
+      const lastWeek = weeks.find((w) => w.weekStart === weekStart);
+      if (!lastWeek) throw new Error("Loading the demo numbers: the prime cost report has no row for the last week");
+      setUp = loaded.setUp;
+      books = { ...loaded, lastWeek, weeks };
+    }
+
+    const draft = draftSamples ? await loadDraftSamples(adminSql, { orgUuid, prefix: org.prefix, ownerUserId, app, template, range }) : null;
+    return { setUp, books, draft };
   } finally {
     await pauseBooksApp(adminSql, orgUuid);
   }
