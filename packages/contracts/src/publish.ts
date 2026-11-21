@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { StepState } from "./agent.js";
 import { CheckName } from "./build.js";
-import { AnyOrigin, type OriginMode, originAllowed } from "./frame.js";
+import { AnyOrigin, type OriginRules, STRICT_ORIGINS, originAllowed } from "./frame.js";
 import { OwnerChangeNotice } from "./governance.js";
 import { AppId, AppVersionId } from "./ids.js";
 import { BUNDLE_ENTRY, BundleIndex, BundlePath } from "./objects.js";
@@ -205,6 +205,11 @@ export type NavAppsResponse = z.infer<typeof NavAppsResponse>;
  *
  * An address is `<apps host>/a/<app id>/<version id>/<path>`. The apps host serves a file only
  * when that version is the mini-app's published version right now.
+ *
+ * The apps host answers ONLY under its own configured name (`appsHostNames`). It listens on
+ * every address of the machine, so without this it would also answer under the web app's name,
+ * where a mini-app's script could read the owner's sign-in cookie. A request whose `Host` is
+ * anything else gets `421` and no file.
  */
 export const APPS_HOST = {
   urlEnv: "APPS_URL",
@@ -219,11 +224,12 @@ export const APPS_HOST = {
 
 /**
  * Turns one settings value into exact origins. The value is one address or a comma-separated
- * list. Anything that is not well-formed for the mode is dropped, never guessed at: in `strict`
- * mode a plain-http network address is not an origin at all (`originAllowed` in frame.ts).
- * At most `APPS_HOST.maxOrigins`, no repeats, no wildcards.
+ * list. Anything that may not be used under the rules is dropped, never guessed at: a plain-http
+ * network address counts only in local demo mode, and only when it is on the local demo list
+ * letter for letter (`originAllowed` in frame.ts). At most `APPS_HOST.maxOrigins`, no repeats,
+ * no wildcards.
  */
-export const exactOrigins = (value: string | undefined | null, mode: OriginMode = "strict"): string[] => {
+export const exactOrigins = (value: string | undefined | null, rules: OriginRules = STRICT_ORIGINS): string[] => {
   const out: string[] = [];
   for (const part of (value ?? "").split(",")) {
     const text = part.trim();
@@ -234,12 +240,22 @@ export const exactOrigins = (value: string | undefined | null, mode: OriginMode 
     } catch {
       continue;
     }
-    if (originAllowed(origin, mode) && !out.includes(origin)) out.push(origin);
+    if (originAllowed(origin, rules) && !out.includes(origin)) out.push(origin);
   }
   return out.slice(0, APPS_HOST.maxOrigins);
 };
 
-/** The frame address of a published version. `appsOrigin` is one entry of `exactOrigins(APPS_URL, mode)`. */
+/** The exact `Host` values the apps host answers to: host and port of each configured origin, as a browser sends them. */
+export const appsHostNames = (appsOrigins: readonly string[]): string[] =>
+  appsOrigins.flatMap((origin) => {
+    try {
+      return AnyOrigin.safeParse(origin).success ? [new URL(origin).host] : [];
+    } catch {
+      return [];
+    }
+  });
+
+/** The frame address of a published version. `appsOrigin` is one entry of `exactOrigins(APPS_URL, rules)`. */
 export const appFrameUrl = (appsOrigin: string, appId: AppId, versionId: AppVersionId): string =>
   `${AnyOrigin.parse(appsOrigin)}${APPS_HOST.prefix}/${AppId.parse(appId)}/${AppVersionId.parse(versionId)}/`;
 
@@ -265,7 +281,7 @@ export const parseAppsHostPath = (pathname: string): { appId: AppId; versionId: 
  * Inline styles are allowed because the design system sets some from code. Inline scripts are not.
  */
 export const appsHostPolicy = (shellOrigins: readonly string[]): string => {
-  // The list was already made by `exactOrigins` for the server's mode. This only keeps a
+  // The list was already made by `exactOrigins` under the server's rules. This only keeps a
   // malformed entry from ever being written into a header.
   const framers = shellOrigins.filter((o) => AnyOrigin.safeParse(o).success);
   return [

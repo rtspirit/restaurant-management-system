@@ -28,12 +28,16 @@ Either way round is as safe. What counts is that the hosts differ.
 
 The rule, in `packages/contracts/src/frame.ts`:
 
-1. **`LocalOrigin`**: plain `http` on this machine or this network only. The host must be `localhost`, `127.0.0.1`, a private IPv4 address (`10.x`, `172.16` to `172.31`, `192.168.x`) or a one-label `.local` name, written exactly as a browser reports it. It can never be a public host, whatever a settings file says.
-2. **Local demo mode** (`originMode`): on only when `RMS_LOCAL_DEMO` is exactly `1` and the server is not a deployed one (the hosting platform's own marker settings switch it off). The web app is built with `NEXT_PUBLIC_RMS_LOCAL_DEMO=1` for the demo and without it otherwise. Outside this mode a network address is not an origin at all.
-3. **`canFrameApp`**, the one rule for PUBLISHED mini-apps, checked by the server before it makes a grant and by the shell before it loads the frame. All of: both origins are well-formed for the mode; the frame origin is exactly one of the configured apps-host origins (`APPS_URL`, an exact-match list); the hosts differ and neither is a parent domain of the other; a shell on `https` never frames plain `http`.
-4. **`AppGrant`** accepts any well-formed frame origin. Whether it may be loaded is `canFrameApp`.
+1. **The laptop pair needs nothing new.** `127.0.0.1` and `localhost` are both loopback origins, which the strict rule already accepts.
+2. **Local demo mode** (`originRules`): on only when `RMS_LOCAL_DEMO` is exactly `1` and the server is not a deployed one (the hosting platform's own marker settings switch it off). The web app is built with the `NEXT_PUBLIC_` copies for the demo and without them otherwise.
+3. **An exact list, no pattern.** In that mode, plain `http` is allowed only for the origins written in `RMS_LOCAL_DEMO_ORIGINS`, letter for letter, each exactly as a browser reports it. Not "any private address". Not "any `.local` name". Another machine on the same Wi‑Fi, or another port on the laptop, is not an origin unless it is on the list. (Decided by the lead after the security review of phone mode. My first draft allowed the pattern. It is gone.)
+4. **`canFrameApp`**, the one rule for PUBLISHED mini-apps, checked by the server before it makes a grant and by the shell before it loads the frame. All of: both origins may be used at all (`originAllowed`); the frame origin is exactly one of the configured apps-host origins (`APPS_URL`); the hosts differ and neither is a parent domain of the other; a shell on `https` never frames plain `http`.
+5. **`AppGrant`** accepts any well-formed frame origin. Whether it may be loaded is `canFrameApp`.
+6. **The apps host answers only under its own name.** It listens on every address of the laptop, so the same server could be reached under the web app's name too, and there a mini-app's script could read the owner's sign-in cookie. Every request whose `Host` is not exactly the host of `APPS_URL` gets `421` and no file (`appsHostNames`, `apps/apps-host/src/app.ts`, with a test that asks under the web app's name).
 
-`scripts/demo-phone.sh` (another agent's) sets the switch and the two address lists.
+`scripts/demo-phone.sh` (another agent's) sets the switch, the list and the two addresses.
+
+Proven by the phone-address agent, not by me: a shell on the `.local` name framing a page on the network address exchanges messages with exact origin checks in Chromium and WebKit, neither page a secure context, and the sign-in cookie is host-only: neither readable nor sent on the other host.
 
 ## Why "a frame is never on `localhost`" existed, and what happens to it
 
@@ -46,7 +50,7 @@ It was a shortcut. A grant's shape is checked without knowing the shell's addres
 
 - **`127.0.0.1` (shell) and `localhost` (frame).** The web app's sign-in cookies are set with no domain, so they belong to the exact host `127.0.0.1`, on any port. A page on `localhost` is a different host: the browser does not send them to it and `document.cookie` there does not show them. A cookie for an IP address cannot be widened to cover a name. The apps host sets no cookie and reads none.
 - **`<laptop-name>.local` (shell) and the network address (frame).** The shell's cookies belong to the name. The frame is on an IP address, which never matches a name's cookies, and a name can never be a parent domain of an IP address. Same in reverse.
-- **What would break it:** the same name or the same address for both servers. `canFrameApp` refuses that in every mode, and a test tries each pair.
+- **What would break it:** the same name or the same address for both servers. `canFrameApp` refuses that in every mode, even with both on the list, and a test tries each pair. And the apps host reached under the web app's name: it refuses every request that is not addressed to its own name.
 - Browser storage (local storage and the like) is kept per origin, port included, so it was never shared.
 
 ## What does not need a "secure context" on the phone
@@ -64,8 +68,8 @@ Not checked here, and not this ADR's: whether sign-in itself works on the phone 
 
 - **The laptop pair needs nothing.** Both are loopback origins, which the strict rule already accepts. Task J's `canLoadGrant` (`isSeparateSite` plus the grant's shape) passes for `http://localhost:3002` framed by `http://127.0.0.1:3000`. Settings: `APPS_URL=http://localhost:3002`, `NEXT_PUBLIC_APPS_URL` the same.
 - **The phone pair needs two small changes, after tasks H and J merge:**
-  1. Task J's `canLoadGrant` (`apps/web/lib/agent/frame-host.ts`): for a grant of kind `app`, decide with `canFrameApp({ frameOrigin, shellOrigin: window.location.origin, appsOrigins: exactOrigins(NEXT_PUBLIC_APPS_URL, mode), mode })` instead of `isSeparateSite`. Previews keep `isSeparateSite`.
-  2. Task H's SDK `connect` (`packages/sdk`) checks the shell origin it was built with against `Origin`. For a mini-app published in local demo mode that origin is a network address, so it must check `AnyOrigin` (well-formed) instead. The origin is baked in by the publish step, which already applied the mode's rule.
+  1. Task J's `canLoadGrant` (`apps/web/lib/agent/frame-host.ts`): for a grant of kind `app`, decide with `canFrameApp({ frameOrigin, shellOrigin: window.location.origin, appsOrigins: exactOrigins(NEXT_PUBLIC_APPS_URL, rules), rules })` instead of `isSeparateSite`, where `rules = originRulesFrom(NEXT_PUBLIC_RMS_LOCAL_DEMO, NEXT_PUBLIC_RMS_LOCAL_DEMO_ORIGINS)`. Previews keep `isSeparateSite`.
+  2. Task H's SDK `connect` (`packages/sdk`) checks the shell origin it was built with against `Origin`. For a mini-app published in local demo mode that origin is a network address, so it must check `AnyOrigin` (well-formed) instead. The origin is baked in by the publish step, which already applied the list.
 - The API's own cross-origin rule (`webCors`) and the sign-in service's address are the phone-address agent's.
 
 ## Limits, said plainly
@@ -73,8 +77,9 @@ Not checked here, and not this ADR's: whether sign-in itself works on the phone 
 - **A published mini-app is built for ONE RMS address** (the first entry of `WEB_URL` when it was published). Opened under another address it shows "Open this from RMS", and the open route refuses to make a grant. So run the whole demo in one mode: start phone mode before publishing, and use the phone-mode address on the laptop too. Publishing again fixes a mini-app published under the other address.
 - **Build previews do not work on the phone.** Their rule did not loosen.
 - **`.local` names need the phone to resolve them** (iPhones do; recent Android does). If a phone cannot, show the phone layout in the browser's phone-sized view.
-- Local demo mode trusts everyone on the same Wi‑Fi no more than before: the only new thing they can reach is static files of published mini-apps, by an address that holds two long ids.
+- Anyone on the same Wi‑Fi can reach the apps host. All it hands out is static files of published mini-apps, by an address that holds two long ids. It holds no data and no cookie.
 
 ## Checked
 
-`packages/contracts/src/wave3.test.ts`, "local and phone demo origins": the laptop pair and the phone pair are allowed, either way round; the same host on another port is refused in every mode; the phone pair is refused in strict mode; a public `http` host is never an origin; a deployed server never enters the mode; previews did not loosen.
+- `packages/contracts/src/wave3.test.ts`, "local and phone demo origins": the laptop pair and the phone pair are allowed, either way round; the same host on another port is refused, even with both on the list; the phone pair is refused in strict mode, and when either origin is missing from the list; nothing that looks like a pattern survives in the list; a near miss (the next address, another port, another `.local` name) is not an origin; a deployed server never enters the mode; previews did not loosen.
+- `apps/apps-host/src/app.test.ts`: under the web app's name, or any name but its own, the apps host answers `421` to every path and never asks the store.

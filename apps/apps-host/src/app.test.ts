@@ -6,7 +6,8 @@ import { type ServedFile, createAppsHost } from "./app.js";
 const hex = "a".repeat(32);
 const app = `app_${hex}`;
 const ver = `ver_${hex}`;
-const SHELL = "http://localhost:3000";
+const SHELL = "http://127.0.0.1:3000";
+const OWN = "localhost:3002";
 const text = (s: string) => new TextEncoder().encode(s);
 
 const make = (shellOrigins: string[] = [SHELL]) => {
@@ -21,8 +22,11 @@ const make = (shellOrigins: string[] = [SHELL]) => {
       return appId === app && versionId === ver ? (files[path] ?? null) : null;
     },
     shellOrigins: () => shellOrigins,
+    ownHosts: () => [OWN],
   });
-  return { host, asked };
+  // Every request in these tests is addressed to the apps host's own name unless it says otherwise.
+  const request = (path: string, init: RequestInit = {}) => host.request(path, { ...init, headers: { host: OWN, ...(init.headers as Record<string, string> | undefined) } });
+  return { host: { request }, raw: host, asked };
 };
 
 const expectFixedHeaders = (res: Response, framers = SHELL) => {
@@ -105,9 +109,28 @@ describe("the apps host", () => {
     }
   });
 
+  it("answers only under its own name: under the web app's name, or any other, it serves nothing", async () => {
+    const { raw, asked } = make();
+    for (const other of ["127.0.0.1:3002", "127.0.0.1:3000", "localhost:3000", "localhost", "LOCALHOST:3002", "localhost:3002.evil.test", "evil.test", "192.168.1.20:3002", "rahuls-mac.local:3002", ""]) {
+      for (const path of [`/a/${app}/${ver}/index.html`, "/health", "/"]) {
+        const res = await raw.request(path, { headers: { host: other } });
+        expect(res.status, `${other} ${path}`).toBe(421);
+        expect(await res.text()).toBe("Not here.");
+        expectFixedHeaders(res);
+      }
+    }
+    expect(asked).toEqual([]);
+  });
+
+  it("with no name configured it answers nothing at all", async () => {
+    const host = createAppsHost({ read: async () => null, shellOrigins: () => [SHELL], ownHosts: () => [] });
+    expect((await host.request(`/a/${app}/${ver}/index.html`, { headers: { host: OWN } })).status).toBe(421);
+    expect((await host.request("/health", { headers: { host: OWN } })).status).toBe(421);
+  });
+
   it("a store failure is a plain refusal with the policy, and no detail", async () => {
-    const host = createAppsHost({ read: async () => Promise.reject(new Error("password authentication failed for user rms_admin")), shellOrigins: () => [SHELL] });
-    const res = await host.request(`/a/${app}/${ver}/index.html`);
+    const host = createAppsHost({ read: async () => Promise.reject(new Error("password authentication failed for user rms_admin")), shellOrigins: () => [SHELL], ownHosts: () => [OWN] });
+    const res = await host.request(`/a/${app}/${ver}/index.html`, { headers: { host: OWN } });
     expect(res.status).toBe(503);
     expect(await res.text()).toBe("This is not available just now.");
     expectFixedHeaders(res);

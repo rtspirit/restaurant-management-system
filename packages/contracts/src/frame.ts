@@ -138,62 +138,94 @@ export const isSeparateSite = (frameOrigin: string, shellOrigin: string): boolea
  *
  * (either way round is as safe: what counts is that the two hosts differ.)
  *
- * `LocalOrigin`: plain http on this machine or this network ONLY. The host is `localhost`,
- * `127.0.0.1`, a private IPv4 address (10.x, 172.16 to 172.31, 192.168.x), or a one-label
- * `.local` name. It can never be a public host, whatever a settings file says.
+ * The laptop pair needs nothing new: both are loopback origins, which `Origin` already accepts.
  *
- * A `LocalOrigin` that is not also an `Origin` is only ever accepted in LOCAL DEMO MODE
- * (`originMode`), and then only when it is an exact entry of a settings list (`WEB_URL`,
- * `APPS_URL`). Build previews are not part of this: `PreviewGrant` and `isSeparateSite` keep
- * the strict rule, in every mode.
+ * The phone pair is plain http on a network address. That is allowed ONLY in local demo mode,
+ * and ONLY for the exact origins written in the local demo list. There is no pattern: not "any
+ * private address", not "any `.local` name". An origin that is not on the list, letter for
+ * letter, is not an origin.
+ *
+ * Build previews are not part of this: `PreviewGrant` and `isSeparateSite` keep the strict
+ * rule, in every mode.
  */
-const IPV4_OCTET = "(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])";
-const PRIVATE_IPV4 = new RegExp(`^(10\\.${IPV4_OCTET}|172\\.(1[6-9]|2[0-9]|3[01])|192\\.168)\\.${IPV4_OCTET}\\.${IPV4_OCTET}$`);
-const LOCAL_NAME = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.local$/;
 
-const isLocalHost = (host: string | null): boolean =>
-  host !== null && (host === "localhost" || host === "127.0.0.1" || PRIVATE_IPV4.test(host) || LOCAL_NAME.test(host));
-
-export const LocalOrigin = z
+/**
+ * A plain-http origin, written exactly as a browser reports it. This is only a SHAPE. On its
+ * own it allows nothing: see `originAllowed`.
+ */
+export const HttpOrigin = z
   .string()
   .max(200)
   .regex(/^http:\/\/[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:\d{1,5})?$/)
-  // Exactly as a browser would report it: an address a browser would rewrite (a short or
-  // zero-padded number, a default port) is not an origin anyone will ever send.
+  // An address a browser would rewrite (a short or zero-padded number, a default port) is not
+  // an origin anyone will ever send.
   .refine((o) => {
     try {
       return new URL(o).origin === o;
     } catch {
       return false;
     }
-  }, "Not written the way a browser reports an origin")
-  .refine((o) => isLocalHost(hostOf(o)), "Plain http is only for this machine and this network");
-export type LocalOrigin = z.infer<typeof LocalOrigin>;
+  }, "Not written the way a browser reports an origin");
+export type HttpOrigin = z.infer<typeof HttpOrigin>;
 
 /**
- * Well-formed: an `Origin`, or a `LocalOrigin`. This says an address is SHAPED like one RMS could
- * use. It never says the address may be used: that is `originAllowed` and `canFrameApp`.
+ * Well-formed: an `Origin`, or a plain-http origin. This says an address is SHAPED like one RMS
+ * could use. It never says the address may be used: that is `originAllowed` and `canFrameApp`.
+ * Used where an origin was already decided on by the server: an app grant's frame origin, the
+ * shell origin a mini-app was built with, the origin a message is compared with.
  */
-export const AnyOrigin = z.union([Origin, LocalOrigin]);
+export const AnyOrigin = z.union([Origin, HttpOrigin]);
 export type AnyOrigin = z.infer<typeof AnyOrigin>;
 
-/** `strict`: the rule everywhere by default. `local_demo`: the laptop-and-phone demo, switched on by a setting. */
-export type OriginMode = "strict" | "local_demo";
+/**
+ * The switch and the list.
+ *   RMS_LOCAL_DEMO=1            switches local demo mode on. Server-side. Never set for a deployed
+ *                               server, and a deployed server ignores it anyway (`hostedMarkers`
+ *                               are settings the hosting platforms set themselves).
+ *   RMS_LOCAL_DEMO_ORIGINS      the exact plain-http origins allowed in that mode, comma-separated.
+ * The web app is BUILT with the two `NEXT_PUBLIC_` copies for the demo, and without them otherwise.
+ */
+export const LOCAL_DEMO = {
+  flagEnv: "RMS_LOCAL_DEMO",
+  originsEnv: "RMS_LOCAL_DEMO_ORIGINS",
+  publicFlagEnv: "NEXT_PUBLIC_RMS_LOCAL_DEMO",
+  publicOriginsEnv: "NEXT_PUBLIC_RMS_LOCAL_DEMO_ORIGINS",
+  on: "1",
+  hostedMarkers: ["VERCEL", "RAILWAY_ENVIRONMENT"],
+  maxOrigins: 8,
+} as const;
 
 /**
- * The switch. `RMS_LOCAL_DEMO=1` on the servers, and `NEXT_PUBLIC_RMS_LOCAL_DEMO=1` when the web
- * app is built for the demo. A deployed server never honours it: `hostedMarkers` are settings
- * the hosting platforms set themselves.
+ * Which origins count. `localOrigins` is empty unless local demo mode is on, and then it holds
+ * exactly the listed plain-http origins. Make one with `originRules` or `originRulesFrom`,
+ * never by hand in product code.
  */
-export const LOCAL_DEMO = { flagEnv: "RMS_LOCAL_DEMO", publicFlagEnv: "NEXT_PUBLIC_RMS_LOCAL_DEMO", on: "1", hostedMarkers: ["VERCEL", "RAILWAY_ENVIRONMENT"] } as const;
+export type OriginRules = { readonly localDemo: boolean; readonly localOrigins: readonly string[] };
 
-/** The mode for a server, from its own environment. `strict` unless the flag is exactly "1" and the server is not a deployed one. */
-export const originMode = (env: Record<string, string | undefined>): OriginMode =>
-  env[LOCAL_DEMO.flagEnv] === LOCAL_DEMO.on && LOCAL_DEMO.hostedMarkers.every((m) => !env[m]) ? "local_demo" : "strict";
+export const STRICT_ORIGINS: OriginRules = { localDemo: false, localOrigins: [] };
 
-/** True when `origin` is well-formed for the mode: an `Origin` always, a `LocalOrigin` only in local demo mode. */
-export const originAllowed = (origin: string, mode: OriginMode): boolean =>
-  Origin.safeParse(origin).success || (mode === "local_demo" && LocalOrigin.safeParse(origin).success);
+/**
+ * The rules from a flag and a list, as text. Local demo mode is on only when the flag is exactly
+ * "1" and `hosted` is false. Each list entry must be a plain-http origin exactly as a browser
+ * reports it: anything else (a wildcard, a path, https, a typo) is dropped, never guessed at.
+ */
+export const originRulesFrom = (flag: string | undefined, list: string | undefined, hosted = false): OriginRules => {
+  if (flag !== LOCAL_DEMO.on || hosted) return STRICT_ORIGINS;
+  const localOrigins: string[] = [];
+  for (const part of (list ?? "").split(",")) {
+    const text = part.trim();
+    if (HttpOrigin.safeParse(text).success && !localOrigins.includes(text)) localOrigins.push(text);
+  }
+  return { localDemo: true, localOrigins: localOrigins.slice(0, LOCAL_DEMO.maxOrigins) };
+};
+
+/** The rules for a server, from its own environment. */
+export const originRules = (env: Record<string, string | undefined>): OriginRules =>
+  originRulesFrom(env[LOCAL_DEMO.flagEnv], env[LOCAL_DEMO.originsEnv], LOCAL_DEMO.hostedMarkers.some((m) => Boolean(env[m])));
+
+/** True when `origin` may be used at all: an `Origin` always, anything else only when it is on the local demo list, exactly. */
+export const originAllowed = (origin: string, rules: OriginRules): boolean =>
+  Origin.safeParse(origin).success || (rules.localDemo && HttpOrigin.safeParse(origin).success && rules.localOrigins.includes(origin));
 
 /** Different hosts, and neither a parent domain of the other: no cookie set for one is sent to, or readable from, the other. */
 const hostsAreSeparate = (a: string, b: string): boolean => {
@@ -207,15 +239,15 @@ const hostsAreSeparate = (a: string, b: string): boolean => {
  * May a shell at `shellOrigin` show a PUBLISHED mini-app from `frameOrigin`? The one rule for
  * published mini-apps, used by the server when it makes an `AppGrant` and by the shell before
  * it loads the frame. All of:
- *   - both origins are well-formed for the mode (`originAllowed`)
+ *   - both origins may be used at all (`originAllowed`)
  *   - the frame origin is EXACTLY one of the configured apps-host origins (`appsOrigins`, from settings)
  *   - the hosts differ, and neither is a parent domain of the other (a different port is not enough)
  *   - no step down: a shell on https only ever frames https
  * Build previews do not use this. They keep `isSeparateSite`.
  */
-export const canFrameApp = (input: { frameOrigin: string; shellOrigin: string; appsOrigins: readonly string[]; mode: OriginMode }): boolean => {
-  const { frameOrigin, shellOrigin, appsOrigins, mode } = input;
-  if (!originAllowed(frameOrigin, mode) || !originAllowed(shellOrigin, mode)) return false;
+export const canFrameApp = (input: { frameOrigin: string; shellOrigin: string; appsOrigins: readonly string[]; rules: OriginRules }): boolean => {
+  const { frameOrigin, shellOrigin, appsOrigins, rules } = input;
+  if (!originAllowed(frameOrigin, rules) || !originAllowed(shellOrigin, rules)) return false;
   if (!appsOrigins.includes(frameOrigin)) return false;
   if (shellOrigin.startsWith("https://") && !frameOrigin.startsWith("https://")) return false;
   return hostsAreSeparate(frameOrigin, shellOrigin);
