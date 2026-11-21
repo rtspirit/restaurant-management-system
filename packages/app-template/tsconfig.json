@@ -22,7 +22,6 @@
   },
   "include": [
     "src",
-    "rms.config.ts",
-    "vite.config.ts"
+    "rms.config.ts"
   ]
 }

@@ -1,9 +1,5 @@
 // @rms/generators: the `rms` command the build agent uses inside the sandbox, and the same
-// functions as a library. Task H owns this package. Brief: docs/briefs/wave2.md, task H.
-//
-// The signatures below are the interface the runner (task I) and the command line use. They
-// are fixed by the brief. Until task H lands, the tools answer "not built yet" in their typed
-// output shape, so the runner can be written and tested against them today.
+// functions as a library for the runner (task I). Signatures are fixed by docs/briefs/wave2.md.
 import {
   AppManifest,
   type AppManifestInput,
@@ -11,11 +7,16 @@ import {
   type CatalogLookupOutput,
   type CheckInput,
   type CheckOutput,
+  type GeneratorCatalogEntry,
+  type LockedHashes,
   type RunGeneratorInput,
   type RunGeneratorOutput,
+  type UiCatalogEntry,
 } from "@rms/contracts";
-
-const NOT_BUILT = "This tool is not built yet.";
+import { runChecks } from "./check/index.js";
+import { generate } from "./generate.js";
+import { writeLockedHashes as writeHashes } from "./lock.js";
+import { lookup, uiCatalog as catalogOfUi } from "./lookup.js";
 
 /**
  * The contents of `rms.config.ts` for a manifest. The platform writes this file from the
@@ -35,14 +36,18 @@ export const renderManifestFile = (manifest: AppManifestInput): string => {
 };
 
 /** `catalog_lookup` for components, patterns and generators (from the template) and for the models in the app's catalog file. */
-export const lookupCatalog = async (_appDir: string, input: CatalogLookupInput): Promise<CatalogLookupOutput> => ({ ok: true, kind: input.kind, entries: [], more: false });
+export const lookupCatalog = (appDir: string, input: CatalogLookupInput): Promise<CatalogLookupOutput> => lookup(appDir, input);
 
 /** `run_generator`: writes one working screen from a pattern. Only ever writes inside the screen's own folder and the screen list. */
-export const runGenerator = async (_appDir: string, _input: RunGeneratorInput): Promise<RunGeneratorOutput> => ({ ok: false, files: [], notes: [NOT_BUILT] });
+export const runGenerator = (appDir: string, input: RunGeneratorInput): Promise<RunGeneratorOutput> => generate(appDir, input);
 
-/** `check`: the checks listed under CheckName, run inside the app folder. */
-export const runCheck = async (_appDir: string, _input: CheckInput = {}): Promise<CheckOutput> => ({
-  ok: false,
-  results: [{ check: "locked", ok: false, problems: [{ message: NOT_BUILT }] }],
-  durationMs: 0,
-});
+/** `check`: the checks listed under CheckName, run inside the app folder, in that order. */
+export const runCheck = (appDir: string, input: CheckInput = {}): Promise<CheckOutput> => runChecks(appDir, input);
+
+/** Writes `.rms/locked.json` for the files as they are now. Local use and tests only: in a build the runner writes it. */
+export const writeLockedHashes = (appDir: string): Promise<LockedHashes> => writeHashes(appDir);
+
+/** The components, patterns and generators the build agent can use, described by hand. */
+export const uiCatalog = (): { components: UiCatalogEntry[]; patterns: UiCatalogEntry[]; generators: GeneratorCatalogEntry[] } => catalogOfUi();
+
+export { hashLockedFiles, listAppFiles } from "./lock.js";

@@ -1,0 +1,53 @@
+// Made by `rms gen list_detail` for vendor_bill. Editable: change anything in this file.
+import { showValue, useQuery, useRms } from "@rms/sdk";
+import { Card, DetailList, EmptyState, ListDetail, Page, Skeleton, Stack } from "@rms/ui";
+import { useState } from "react";
+import { NoNumbers, Problem } from "../../rms/notices";
+
+const MODEL = "vendor_bill";
+const FIELDS = [{ key: "vendor", label: "Vendor", type: "ref" }, { key: "bill_number", label: "Bill number", type: "text" }, { key: "business_date", label: "Business date", type: "business_date" }, { key: "due_date", label: "Due", type: "date" }, { key: "total_amount", label: "Total", type: "money" }, { key: "status", label: "Status", type: "enum" }, { key: "note", label: "Note", type: "text" }] as const;
+
+export function BillsScreen() {
+  const rms = useRms();
+  const list = useQuery({ model: MODEL, sort: [{ field: "bill_number", dir: "asc" }], limit: 500 });
+  const [selectedId, setSelectedId] = useState("");
+  const selected = list.rows.find((row) => String(row.id) === selectedId);
+
+  return (
+    <Page title="Bills">
+      <Stack gap="m">
+        <Problem error={list.error} />
+        {list.loading && list.data === null ? (
+          <Skeleton shape="block" label="Loading bills" />
+        ) : (
+          <ListDetail
+            label="Bills"
+            items={list.rows.map((row) => ({ id: String(row.id), title: showValue(row, "bill_number", "text", rms) || "Untitled", subtitle: showValue(row, "vendor", "ref", rms), meta: showValue(row, "total_amount", "money", rms) }))}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            onBack={() => setSelectedId("")}
+            detail={
+              selected ? (
+                <Detail row={selected} masked={list.data?.masked ?? []} />
+              ) : (
+                <EmptyState title="Pick a vendor bill">Choose one from the list to see everything about it.</EmptyState>
+              )
+            }
+            empty={<NoNumbers what="bills" />}
+          />
+        )}
+      </Stack>
+    </Page>
+  );
+}
+
+function Detail({ row, masked }: { row: Record<string, unknown>; masked: readonly string[] }) {
+  const rms = useRms();
+  return (
+    <Card title={showValue(row, "bill_number", "text", rms) || "Untitled"}>
+      <Stack gap="m">
+        <DetailList rows={FIELDS.filter((f) => f.key !== "bill_number" && !masked.includes(f.key)).map((f) => ({ label: f.label, value: showValue(row, f.key, f.type, rms) || "Not set" }))} />
+      </Stack>
+    </Card>
+  );
+}
