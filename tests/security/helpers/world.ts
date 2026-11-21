@@ -357,6 +357,10 @@ export const createWorld = async (admin: Sql, users: WorldUsers): Promise<void> 
     await admin`insert into platform.app_slots (id, app_id, org_id, slot_type, config) values (${i.appSlot}, ${i.app}, ${o.uuid}, 'nav', ${admin.json({ label: c })})`;
     await admin`insert into platform.deployments (id, app_id, org_id, version_id, env, screens_key) values (${i.deployment}, ${i.app}, ${o.uuid}, ${i.appVersion}, 'live', ${`screens/${c}`})`;
     await admin`insert into platform.sandboxes (id, app_id, org_id, preview_url) values (${i.sandbox}, ${i.app}, ${o.uuid}, ${`https://preview.test/${c}`})`;
+    // Stored code (Wave 3): the published version's source, with the canary inside it.
+    await admin`insert into platform.objects (key, org_id, bytes, content_type, sha256, size)
+      select platform.source_key(${o.uuid}, ${i.app}, 1), ${o.uuid}, b, 'application/vnd.rms.source+json', encode(sha256(b), 'hex'), octet_length(b)
+      from (select convert_to(${JSON.stringify({ format: 1, files: [{ path: "src/screens/index.ts", text: `// ${c}` }] })}, 'UTF8') as b) s`;
 
     // Agent rows and memory.
     await admin`insert into platform.agent_sessions (id, org_id, user_id, app_id, mode, model, title) values

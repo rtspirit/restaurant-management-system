@@ -151,3 +151,4 @@ export const asParentSync = <T>(adminSql: Sql, fn: (tx: Tx) => Promise<T>): Prom
 
 export * from "./ask.js";
 export * from "./events.js";
+export * from "./objects.js";

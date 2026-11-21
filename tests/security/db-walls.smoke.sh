@@ -24,7 +24,7 @@ expect() { local label="$1" want="$2" url="$3" sql="$4" out
   out="$(last "$url" "$sql")"
   [ "$out" = "$want" ] && s=PASS || { s=FAIL; fails=$((fails+1)); }
   printf '%s  %-52s got "%s" want "%s"\n' "$s" "$label" "$out" "$want"; }
-psql -X -q -t -A "$DATABASE_ADMIN_URL" -c "select platform.drop_store(id) from platform.organizations where id in ('$A','$B'); delete from platform.parent_jobs where org_id in ('$A','$B'); delete from platform.change_sets where org_id in ('$A','$B'); delete from platform.apps where org_id in ('$A','$B'); delete from platform.secrets where org_id in ('$A','$B'); delete from platform.organizations where id in ('$A','$B')" >/dev/null 2>&1
+psql -X -q -t -A "$DATABASE_ADMIN_URL" -c "select platform.drop_store(id) from platform.organizations where id in ('$A','$B'); delete from platform.parent_jobs where org_id in ('$A','$B'); delete from platform.change_sets where org_id in ('$A','$B'); delete from platform.objects where org_id in ('$A','$B'); delete from platform.app_versions where org_id in ('$A','$B'); delete from platform.apps where org_id in ('$A','$B'); delete from platform.secrets where org_id in ('$A','$B'); delete from platform.organizations where id in ('$A','$B')" >/dev/null 2>&1
 echo "setup: $(q "$DATABASE_ADMIN_URL" "insert into platform.organizations (id, slug, name, store_prefix) values ('$A','smoke-a','Smoke A','${PA}'), ('$B','smoke-b','Smoke B','${PB}') on conflict do nothing; select platform.provision_store('$A'); select platform.provision_store('$B'); select platform.set_ask_login('$A', '$ASKVER'); insert into platform.parent_jobs (id, org_id, name, house) values (gen_random_uuid(), '$A', 'Server', 'front'); begin; set local role rms_tenant_migrator; create table ${PA}.notes (id int); grant select on ${PA}.notes to ${PA}_ask; grant select, insert on ${PA}.notes to ${PA}_rw; set local role rms_parent_sync; insert into ${PA}_parent.jobs (id, name, house) values (gen_random_uuid(), 'Server', 'front'); insert into ${PB}_parent.jobs (id, name, house) values (gen_random_uuid(), 'Cook', 'back'); commit;")"
 ASK="postgresql://${PA}_ask${ASK_SUFFIX}:$ASKPW@${ASK_HOST}/postgres${SSL}"
 RW="begin; set local role ${PA}_rw;"
@@ -67,6 +67,30 @@ run "can read back its changes in owner words" allowed "$DATABASE_URL" "$ORGA se
 run "cannot read the outbox" blocked "$DATABASE_URL" "$ORGA select count(*) from platform.outbox; commit"
 run "cannot insert a maintainer notification" blocked "$DATABASE_URL" "$ORGA insert into platform.notifications (id, audience, org_id, kind, title) values (gen_random_uuid(), 'maintainer', '$A', 'k', 't'); commit"
 run "cannot create an app that is already published" blocked "$DATABASE_URL" "$ORGA insert into platform.apps (id, org_id, slug, number, name, status) values (gen_random_uuid(), '$A', 'x', 9, 'x', 'published'); commit"
+echo "--- rms_api: where mini-app code is kept, and held actions (Wave 3)"
+APPA=0193a3c0-0000-7000-8000-0000000000a6; APPB=0193a3c0-0000-7000-8000-0000000000b6
+# One object row: key expression, restaurant, then the bytes "x" with its real hash and size.
+obj() { printf "insert into platform.objects (key, org_id, bytes, content_type, sha256, size) select %s, %s, b, 'text/plain', encode(sha256(b), 'hex'), octet_length(b) from (select 'x'::bytea as b) s" "$1" "$2"; }
+q "$DATABASE_ADMIN_URL" "insert into platform.apps (id, org_id, slug, number, name, status, published_version_id) values ('$APPA', '$A', 'smoke-code', 2, 'Smoke code', 'published', '0193a3c0-0000-7000-8000-0000000000a8'); insert into platform.app_versions (id, app_id, org_id, number, manifest, status) values ('0193a3c0-0000-7000-8000-0000000000a8', '$APPA', '$A', 1, '{}', 'published'), ('0193a3c0-0000-7000-8000-0000000000a7', '$APPA', '$A', 2, '{}', 'draft'), ('0193a3c0-0000-7000-8000-0000000000b7', '$APPB', '$B', 1, '{}', 'draft'); $(obj "platform.source_key('$B','$APPB',1)" "'$B'"); $(obj "platform.screens_prefix('$A','$APPA',1) || 'index.html'" "'$A'")" >/dev/null
+run "can save the source of its own draft version" allowed "$DATABASE_URL" "$ORGA $(obj "platform.source_key('$A','$APPA',2)" "'$A'"); rollback"
+run "cannot write the source of a published version" blocked "$DATABASE_URL" "$ORGA $(obj "platform.source_key('$A','$APPA',1)" "'$A'"); commit"
+run "cannot write built files" blocked "$DATABASE_URL" "$ORGA $(obj "platform.screens_prefix('$A','$APPA',2) || 'index.html'" "'$A'"); commit"
+run "cannot write B's source as B" blocked "$DATABASE_URL" "$ORGA $(obj "platform.source_key('$B','$APPB',1) || 'x'" "'$B'"); commit"
+run "cannot file B's key under its own restaurant" blocked "$DATABASE_URL" "$ORGA $(obj "platform.source_key('$B','$APPB',1)" "'$A'"); commit"
+run "cannot write a listing's object" blocked "$DATABASE_URL" "$ORGA $(obj "platform.listing_key('$APPA',1)" "null"); commit"
+run "cannot change an object in place" blocked "$DATABASE_URL" "$ORGA update platform.objects set content_type = 'text/html'; commit"
+run "platform login cannot change an object in place either" blocked "$DATABASE_ADMIN_URL" "update platform.objects set content_type = 'text/html' where org_id = '$A'"
+expect "org A set: sees none of B's objects" "0" "$DATABASE_URL" "$ORGA
+select count(*) from platform.objects where org_id = '$B' or key like '%' || replace('$B','-','') || '%'; commit"
+expect "org A set: deleting its published files touches 0 rows" "0" "$DATABASE_URL" "$ORGA
+with d as (delete from platform.objects where org_id = '$A' returning 1) select count(*) from d; commit"
+expect "no org set: sees 0 objects" "0" "$DATABASE_URL" "select count(*) from platform.objects"
+run "cannot use the apps host's door" blocked "$DATABASE_URL" "select * from platform.published_screen('$APPA', '0193a3c0-0000-7000-8000-0000000000a8', 'index.html')"
+expect "apps host door: a published file is found" "1" "$DATABASE_ADMIN_URL" "select count(*) from platform.published_screen('$APPA', '0193a3c0-0000-7000-8000-0000000000a8', 'index.html')"
+expect "apps host door: nothing for a draft version" "0" "$DATABASE_ADMIN_URL" "select count(*) from platform.published_screen('$APPA', '0193a3c0-0000-7000-8000-0000000000a7', 'index.html')"
+expect "apps host door: nothing for another path" "0" "$DATABASE_ADMIN_URL" "select count(*) from platform.published_screen('$APPA', '0193a3c0-0000-7000-8000-0000000000a8', '../../versions/2.bundle')"
+run "cannot say what an approval will do" blocked "$DATABASE_URL" "$ORGA insert into platform.change_sets (id, org_id, origin, actor, signals, tier, summary, decision, held_action, held_state) values (gen_random_uuid(), '$A', 'share', 'user:x', '{public_share}', 'T3', 's', 'pending_maintainer', '{\"kind\":\"list_listing\"}', 'waiting'); commit"
+run "cannot read what a change is holding" blocked "$DATABASE_URL" "$ORGA select held_action, held_state from platform.change_sets; commit"
 expect "public listings view has no publisher or embedding" "0" "$DATABASE_ADMIN_URL" "select count(*) from information_schema.columns where table_schema='platform' and table_name='public_listings' and column_name in ('publisher_org_id','embedding')"
 expect "nothing of ours in public" "0" "$DATABASE_ADMIN_URL" "select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind in ('r','v','m','S','f')"
 echo "--- as restaurant A's Data API role"
@@ -101,5 +125,5 @@ run "cannot call provisioning" blocked "$ASK" "select platform.drop_store('$B')"
 run "cannot create a temp table, even read-write" blocked "$ASK" "begin read write; create temp table x (id int)"
 expect "reads its own live table" "0" "$ASK" "select count(*) from notes"
 run "B's ask role cannot log in" blocked "postgresql://${PB}_ask${ASK_SUFFIX}:$ASKPW@${ASK_HOST}/postgres${SSL}" "select 1"
-echo "--- cleanup: $(q "$DATABASE_ADMIN_URL" "select platform.drop_store('$A'); select platform.drop_store('$B'); delete from platform.parent_jobs where org_id in ('$A','$B'); delete from platform.change_sets where org_id in ('$A','$B'); delete from platform.apps where org_id in ('$A','$B'); delete from platform.secrets where org_id in ('$A','$B'); delete from platform.organizations where id in ('$A','$B'); select 'roles left: ' || count(*) from pg_roles where rolname like 'o\_%'")"
+echo "--- cleanup: $(q "$DATABASE_ADMIN_URL" "select platform.drop_store('$A'); select platform.drop_store('$B'); delete from platform.parent_jobs where org_id in ('$A','$B'); delete from platform.change_sets where org_id in ('$A','$B'); delete from platform.objects where org_id in ('$A','$B'); delete from platform.app_versions where org_id in ('$A','$B'); delete from platform.apps where org_id in ('$A','$B'); delete from platform.secrets where org_id in ('$A','$B'); delete from platform.organizations where id in ('$A','$B'); select 'roles left: ' || count(*) from pg_roles where rolname like 'o\_%'")"
 echo "FAILS=$fails"
