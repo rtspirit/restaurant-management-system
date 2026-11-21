@@ -69,7 +69,7 @@ function Detail({ row, onEdit, onRemoved }: DetailProps) {
   return (
     <Card title={showValue(row, "name", "text", rms) || "Untitled"} action={<Button variant="secondary" onClick={onEdit}>Change</Button>}>
       <Stack gap="m">
-        <DetailList rows={FIELDS.map((f) => ({ label: f.label, value: showValue(row, f.key, f.type, rms) || "Not set" }))} />
+        <DetailList rows={FIELDS.filter((f) => f.key !== "name").map((f) => ({ label: f.label, value: showValue(row, f.key, f.type, rms) || "Not set" }))} />
         <Problem error={save.error} />
         <Row>
           <Button variant="quiet" onClick={() => setConfirming(true)}>

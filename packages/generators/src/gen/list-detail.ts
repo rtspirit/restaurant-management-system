@@ -131,7 +131,7 @@ export const listDetail = (input: Input, catalog: SandboxCatalog, component: str
     "  return (",
     `    <Card title={showValue(row, ${lit(title.key)}, ${lit(title.type)}, rms) || "Untitled"}${withForm ? ' action={<Button variant="secondary" onClick={onEdit}>Change</Button>}' : ""}>`,
     '      <Stack gap="m">',
-    '        <DetailList rows={FIELDS.map((f) => ({ label: f.label, value: showValue(row, f.key, f.type, rms) || "Not set" }))} />',
+    `        <DetailList rows={FIELDS.filter((f) => f.key !== ${lit(title.key)}).map((f) => ({ label: f.label, value: showValue(row, f.key, f.type, rms) || "Not set" }))} />`,
     ...(withForm
       ? [
           "        <Problem error={save.error} />",

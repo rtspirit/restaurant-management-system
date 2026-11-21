@@ -46,7 +46,7 @@ function Detail({ row }: { row: Record<string, unknown> }) {
   return (
     <Card title={showValue(row, "bill_number", "text", rms) || "Untitled"}>
       <Stack gap="m">
-        <DetailList rows={FIELDS.map((f) => ({ label: f.label, value: showValue(row, f.key, f.type, rms) || "Not set" }))} />
+        <DetailList rows={FIELDS.filter((f) => f.key !== "bill_number").map((f) => ({ label: f.label, value: showValue(row, f.key, f.type, rms) || "Not set" }))} />
       </Stack>
     </Card>
   );

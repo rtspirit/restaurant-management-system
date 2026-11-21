@@ -5,7 +5,7 @@ import { FRAME_LIMITS, type FrameContext } from "@rms/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RmsDataError } from "./client";
 import { type Connection, type FrameWindow, connect } from "./frame";
-import { formatMoney, formatPercent, moneyToMinor } from "./format";
+import { addDays, formatMoney, formatPercent, fromInput, moneyToMinor, showValue, toInput } from "./format";
 
 const SHELL = "http://localhost:3000";
 const ID = /^[A-Za-z0-9_-]{8,64}$/;
@@ -254,5 +254,32 @@ describe("formatting", () => {
     expect(moneyToMinor("$1,284.50")).toBe(128450);
     expect(moneyToMinor("twelve")).toBeNull();
     expect(formatPercent("61.3", "en-US")).toBe("61.3%");
+  });
+
+  const place = { currency: "USD", locale: "en-US" };
+
+  it("shows fields by type, refs by their label and never a raw id", () => {
+    const row = { name: "Hill Farm", account: "0193a3c0-0000-7000-8000-000000000070", account_label: "Food cost", loc: { id: "x", label: "Main Street" }, status: "all_locations", active: false, total: 1250, due: "2026-11-09" };
+    expect(showValue(row, "name", "text", place)).toBe("Hill Farm");
+    expect(showValue(row, "account", "ref", place)).toBe("Food cost");
+    expect(showValue({ account: "0193a3c0-0000-7000-8000-000000000070" }, "account", "ref", place)).toBe("");
+    expect(showValue(row, "loc", "parent_ref", place)).toBe("Main Street");
+    expect(showValue(row, "status", "enum", place)).toBe("All locations");
+    expect(showValue(row, "active", "boolean", place)).toBe("No");
+    expect(showValue(row, "total", "money", place)).toBe("$12.50");
+    expect(showValue(row, "due", "date", place)).toBe("Mon, Nov 9, 2026");
+  });
+
+  it("reads form text into Data API values, with plain words when it cannot", () => {
+    expect(fromInput("12.50", "money", place)).toEqual({ ok: true, value: 1250 });
+    expect(fromInput("", "money", place)).toEqual({ ok: true, value: null });
+    expect(fromInput("ten", "integer", place)).toEqual({ ok: false, message: "Type a whole number." });
+    expect(fromInput("1,000", "integer", place)).toEqual({ ok: true, value: 1000 });
+    expect(fromInput("2.5", "decimal", place)).toEqual({ ok: true, value: "2.5" });
+    expect(fromInput("true", "boolean", place)).toEqual({ ok: true, value: true });
+    expect(fromInput("9 Nov", "date", place)).toMatchObject({ ok: false });
+    expect(toInput(1250, "money", place)).toBe("12.50");
+    expect(toInput({ id: "abc", label: "x" }, "parent_ref", place)).toBe("abc");
+    expect(addDays("2026-11-09", 7)).toBe("2026-11-16");
   });
 });

@@ -8,6 +8,10 @@ import { cpSync, mkdirSync, rmSync } from "node:fs";
 import { createServer as createNetServer } from "node:net";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { writeFileSync } from "node:fs";
+import type { RunGeneratorInput } from "@rms/contracts";
+import { renderManifestFile } from "@rms/generators";
+import { demoCatalog, writeCatalog } from "../../generators/src/testing/fixtures.js";
 
 export const TEMPLATE_DIR = fileURLToPath(new URL("..", import.meta.url));
 const TEST_APPS = join(TEMPLATE_DIR, ".test-apps");
@@ -33,3 +37,28 @@ export const freePort = (): Promise<number> =>
       server.close(() => resolve(port));
     });
   });
+
+export const VENDOR_SCREENS: RunGeneratorInput[] = [
+  { generator: "list_detail", screen: "vendors", title: "Vendors", model: "vendor", fields: ["name", "contact_name", "phone", "email", "terms_days", "active", "note"], form: true },
+  { generator: "report_table", screen: "sales", title: "Sales", query: "sales_by_day", columns: ["business_date", "net_sales", "discounts", "guests", "checks"] },
+  {
+    generator: "dashboard",
+    screen: "money",
+    title: "Money",
+    query: "prime_cost_by_week",
+    stats: [
+      { label: "Prime cost", column: "prime_cost_pct", format: "percent" },
+      { label: "Net sales", column: "net_sales", format: "money" },
+    ],
+    chart: { label: "Net sales by week", category: "week_start", value: "net_sales", format: "money" },
+  },
+  { generator: "form", screen: "add-vendor", title: "Add a vendor", model: "vendor", fields: ["name", "phone"] },
+];
+
+/** What the runner writes before anything runs: the manifest, the catalog and the settings file. */
+export const prepareApp = (dir: string, shellOrigin = "http://localhost:3000"): void => {
+  writeFileSync(join(dir, "rms.config.ts"), renderManifestFile({ name: "Vendors", models: [{ use: "vendor", access: "write" }, { use: "vendor_bill", access: "read" }], namedQueries: ["weekly_pnl", "prime_cost_by_week", "sales_by_day"] }));
+  writeCatalog(dir, demoCatalog());
+  writeFileSync(join(dir, ".env.local"), `VITE_RMS_SHELL_ORIGIN=${shellOrigin}\n`);
+};
+
