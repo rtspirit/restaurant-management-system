@@ -65,6 +65,24 @@
         ],
         "createdAt": "2026-11-21T17:03:31.907Z",
         "reason": "lead: C0 sketch, week picker pill holds two 44px arrow buttons flush to its ends; the date label has its own 8px"
+      },
+      {
+        "rule": "cream-palette",
+        "value": "*",
+        "files": [
+          ".impeccable/mocks/decision/challenger-warm.html"
+        ],
+        "createdAt": "2026-11-21T18:02:28.814Z",
+        "reason": "user decided 2026-11-21: the build moves to a more distinct tint (ADR 0006); this C0 sketch is kept unchanged as the record of what was picked from"
+      },
+      {
+        "rule": "cream-palette",
+        "value": "*",
+        "files": [
+          ".impeccable/mocks/decision/challenger-warm-phone.html"
+        ],
+        "createdAt": "2026-11-21T18:02:28.828Z",
+        "reason": "user decided 2026-11-21: the build moves to a more distinct tint (ADR 0006); this C0 sketch is kept unchanged as the record of what was picked from"
       }
     ]
   }
