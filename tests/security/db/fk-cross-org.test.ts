@@ -16,8 +16,13 @@ const linksFromMigrations = (): Link[] => {
   for (const file of readdirSync(dir).filter((f) => f.endsWith(".sql")).sort()) {
     const sql = readFileSync(`${dir}/${file}`, "utf8");
     if (!sql.includes("_same_org_fkey")) continue;
+    // Form 1: a ('child', 'col', 'parent', 'org_col') tuple in a generated list.
     for (const m of sql.matchAll(/\(\s*'([a-z_]+)'\s*,\s*'([a-z_]+)'\s*,\s*'([a-z_]+)'\s*,\s*'((?:publisher_)?org_id)'\s*\)/g)) {
       out.push({ child: m[1] as string, col: m[2] as string, parent: m[3] as string, orgCol: m[4] as string });
+    }
+    // Form 2: a link written out as its own statement.
+    for (const m of sql.matchAll(/alter table platform\.([a-z_]+)\s+add constraint [a-z_]+_same_org_fkey\s+foreign key \(((?:publisher_)?org_id), ([a-z_]+)\) references platform\.([a-z_]+) \(org_id, id\)/g)) {
+      out.push({ child: m[1] as string, col: m[3] as string, parent: m[4] as string, orgCol: m[2] as string });
     }
   }
   return out;
@@ -33,12 +38,15 @@ const crossRow = (l: Link) => {
   const template = TEMPLATES[l.child];
   const target = PARENT_ROW[l.parent];
   if (!template || !target) throw new Error(`tests/security/helpers/rows.ts needs a template for platform.${l.child} and a parent row for platform.${l.parent}`);
-  return { own: template("a"), cross: { ...template("a"), [l.col]: target("b") } };
+  const row = template("a");
+  // Where the template leaves the link empty, the control row points at A's own row.
+  return { own: l.col in row ? row : { ...row, [l.col]: target("a") }, cross: { ...row, [l.col]: target("b") } };
 };
 
 describe("the list of links", () => {
-  it("is the list from the hardening migration: about 30 links", () => {
-    expect(LINKS.length).toBeGreaterThanOrEqual(30);
+  it("is the list from the hardening migrations: 32 links or more", () => {
+    expect(LINKS.length).toBeGreaterThanOrEqual(32);
+    expect(new Set(LINKS.map(name)).size).toBe(LINKS.length);
   });
 
   it("matches the constraints that exist in the database, one for one", async () => {
@@ -116,22 +124,23 @@ describe("links the list does not cover", () => {
   // Links that cross restaurants ON PURPOSE: an install or a recommendation names another restaurant's public listing.
   const BY_DESIGN = ["platform.installs.listing_id", "platform.org_recommendations.listing_id"];
 
-  it("HOLE (reported 2026-11-21, fix before real users): two links between restaurant-owned rows are still checked on id alone", async () => {
-    // Today's behaviour. The day both get a (restaurant, id) link this list becomes empty and this test fails:
-    // delete it then, and add the two links to the generated tests above by adding them to the migration list.
-    expect((await uncovered()).filter((k) => !BY_DESIGN.includes(k))).toEqual(["platform.app_versions.parent_version_id", "platform.org_memory.superseded_by"]);
+  it("there is none: every link between two restaurant-owned tables is also checked on (restaurant, id)", async () => {
+    // Was a hole until migration 20261121120400 (app_versions.parent_version_id and org_memory.superseded_by).
+    // A new single-column link between restaurant-owned tables fails here until it gets its own same-restaurant link.
+    expect((await uncovered()).filter((k) => !BY_DESIGN.includes(k))).toEqual([]);
   });
 
-  it("HOLE (same report): fenced to A, the server login can make A's version descend from B's version, and A's memory supersede into B's", async () => {
+  it("a real id from another restaurant and a made-up id are both refused for the two links closed last", async () => {
     const a = ids("a");
     const b = ids("b");
-    const version = asOrg("a", (tx) => tx.unsafe(`insert into platform.app_versions (id, app_id, org_id, number, manifest, parent_version_id) values (gen_random_uuid(), '${a.app}', '${ORG.a.uuid}', 80, '{}'::jsonb, '${b.appVersion}')`));
-    const memory = asOrg("a", (tx) => tx.unsafe(`insert into platform.org_memory (id, org_id, kind, text, superseded_by) values (gen_random_uuid(), '${ORG.a.uuid}', 'fact', 'x', '${b.memory}')`));
-    // Wanted: 23503 for both. Today: accepted. It also tells A whether an id exists in another restaurant
-    // (a made-up id is refused, a real one is not).
-    expect(await outcome(version)).toBe("allowed");
-    expect(await outcome(memory)).toBe("allowed");
-    const madeUp = asOrg("a", (tx) => tx.unsafe(`insert into platform.app_versions (id, app_id, org_id, number, manifest, parent_version_id) values (gen_random_uuid(), '${a.app}', '${ORG.a.uuid}', 81, '{}'::jsonb, '0193a3c0-9191-7fff-8fff-ffffffffffff')`));
-    expect(await outcome(madeUp)).toBe(FK);
+    const version = (parent: string) => asOrg("a", (tx) => tx.unsafe(`insert into platform.app_versions (id, app_id, org_id, number, manifest, parent_version_id) values (gen_random_uuid(), '${a.app}', '${ORG.a.uuid}', 80, '{}'::jsonb, '${parent}')`));
+    const memory = (next: string) => asOrg("a", (tx) => tx.unsafe(`insert into platform.org_memory (id, org_id, kind, text, superseded_by) values (gen_random_uuid(), '${ORG.a.uuid}', 'fact', 'x', '${next}')`));
+    expect(await outcome(version(b.appVersion))).toBe(FK);
+    expect(await outcome(version("0193a3c0-9191-7fff-8fff-ffffffffffff"))).toBe(FK);
+    expect(await outcome(memory(b.memory))).toBe(FK);
+    expect(await outcome(memory("0193a3c0-9191-7fff-8fff-ffffffffffff"))).toBe(FK);
+    // Control: A's own rows are accepted.
+    expect(await outcome(version(a.readOnlyAppVersion))).toBe("allowed");
+    expect(await outcome(memory(a.memory))).toBe("allowed");
   });
 });

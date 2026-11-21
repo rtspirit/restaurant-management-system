@@ -1,6 +1,7 @@
 // Things that can be checked by reading the repository: no secrets in tracked files, nothing
 // secret reachable from browser code, and no database access in the packages a browser loads.
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { REPO_ROOT, repoPath } from "../helpers/env.js";
@@ -62,11 +63,19 @@ describe("no secrets in the repository", () => {
     ];
     // The local Docker database's built-in login, the same on every machine and documented by Supabase.
     const ALLOWED = [/postgres(?:ql)?:\/\/postgres:postgres@(127\.0\.0\.1|localhost)/];
+    // Exact strings that look like a credential and are not one, by SHA-256 so the string is not repeated here.
+    // Checked by hand before being added: say what each is.
+    const ALLOWED_EXACT: Record<string, string> = {
+      // apps/api/src/routes/auth.test.ts: a made-up token used to prove garbage is refused. Its header has no key id,
+      // its claims are {sub: "x", role: "authenticated"} with no issuer or expiry, and its "signature" is the word "signature".
+      "3425da024cd8eae04916a0eccce485336c3413de0d95aecc6384e59603c739a6": "apps/api/src/routes/auth.test.ts",
+    };
     const hits: string[] = [];
     for (const f of files) {
       for (const [what, re] of PATTERNS) {
         for (const m of f.text.matchAll(re)) {
           if (ALLOWED.some((a) => a.test(m[0]))) continue;
+          if (ALLOWED_EXACT[createHash("sha256").update(m[0]).digest("hex")] === f.path) continue;
           hits.push(`${what} in ${f.path}`);
         }
       }
@@ -116,9 +125,11 @@ describe("nothing secret can reach a browser", () => {
     }
   });
 
-  it("only @rms/db opens database connections: no other package imports the driver", () => {
+  it("only @rms/db opens database connections: no other product source imports the driver", () => {
+    // Test files may import it (the seed's reset tests build connection objects from crafted addresses, without
+    // connecting, to attack the wipe guard). Anything that ships must go through @rms/db.
     const hits = files
-      .filter((f) => /\.(tsx?|mjs|js)$/.test(f.path) && !f.path.startsWith("packages/db/") && !f.path.startsWith("tests/security/"))
+      .filter((f) => /\.(tsx?|mjs|js)$/.test(f.path) && !f.path.startsWith("packages/db/") && !f.path.startsWith("tests/security/") && !/\.test\.tsx?$/.test(f.path))
       .filter((f) => /from\s+["']postgres["']|require\(["']postgres["']\)|from\s+["']pg["']/.test(f.text))
       .map((f) => f.path);
     expect(hits).toEqual([]);

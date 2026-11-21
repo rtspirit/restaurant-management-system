@@ -11,7 +11,7 @@ import { ASK_QUERY_LIMITS } from "@rms/contracts";
 import { type Sql, adminDb, mintAskLogin, openAsk } from "@rms/db";
 import { type AskHandle, DENIED, READ_ONLY, type Row, askAs, forgetAsk, holds, outcome, platform, refusal } from "../helpers/actors.js";
 import { PARENT_ATTACKS } from "../helpers/attacks.js";
-import { CANARY, MODEL_KEYS, ORG, PARENT_TABLES, roles, schemas } from "../helpers/world.js";
+import { CANARY, MODEL_KEYS, ORG, PARENT_TABLES, ids, roles, schemas } from "../helpers/world.js";
 
 const A = schemas("a");
 const B = schemas("b");
@@ -51,8 +51,7 @@ describe("the Ask login cannot read anything else", () => {
   it("control: B's own Ask login reads those tables and finds B's canary", async () => {
     expect(holds(await askB.query(`select * from ${B.parent}.jobs`), CANARY.b)).toBe(true);
     for (const table of MODEL_KEYS) {
-      const sql = table === "sec_visit" ? `select v.* from (select set_config('rms.locations', 'all', true) as x) s cross join lateral (select * from ${B.live}.sec_visit where s.x is not null) v` : `select * from ${B.live}.${table}`;
-      expect(holds(await askB.query(sql), CANARY.b), table).toBe(true);
+      expect(holds(await askB.query(`select * from ${B.live}.${table}`), CANARY.b), table).toBe(true);
     }
   });
 
@@ -365,13 +364,17 @@ describe("ask_pool_state_reset: a poisoned connection is clean again for the nex
               (select count(*)::int from pg_locks where locktype = 'advisory' and pid = pg_backend_pid()) as locks,
               (select count(*)::int from jobs) as jobs`,
     );
-    expect(r.rows[0]).toEqual({ timeout: "5s", lock_timeout: "1s", search_path: `${A.live}, ${A.parent}`, read_only: "on", work_mem: "16MB", locations: "", org: "", locks: 0, jobs: 1 });
+    // `locations` is "all": the envelope sets it for every question (the Ask agent is owner-only). It is the envelope's
+    // value, not the "all" the poison left: the next test checks a narrower scope survives a poisoned session too.
+    expect(r.rows[0]).toEqual({ timeout: "5s", lock_timeout: "1s", search_path: `${A.live}, ${A.parent}`, read_only: "on", work_mem: "16MB", locations: "all", org: "", locks: 0, jobs: 1 });
+    const narrow = await ask.query("select current_setting('rms.locations', true) as locations, (select count(*)::int from sec_visit) as visits", 10, [ids("a").loc1]);
+    expect(narrow.rows[0]).toEqual({ locations: ids("a").loc1, visits: 1 });
   });
 
   it("a query that lifts its own limits and takes a lock leaves nothing for the next one", async () => {
     await ask.query("select set_config('statement_timeout', '0', false), set_config('search_path', 'pg_catalog', false), set_config('rms.locations', 'all', false), pg_advisory_lock(99)").catch(() => {});
     const r = await ask.query("select current_setting('statement_timeout') as timeout, current_setting('rms.locations', true) as locations, (select count(*)::int from pg_locks where locktype = 'advisory' and pid = pg_backend_pid()) as locks, (select count(*)::int from sec_note) as notes");
-    expect(r.rows[0]).toEqual({ timeout: "5s", locations: "", locks: 0, notes: 1 });
+    expect(r.rows[0]).toEqual({ timeout: "5s", locations: "all", locks: 0, notes: 1 });
     await forgetAsk("a");
     ask = await askAs("a");
   });
@@ -391,6 +394,37 @@ describe("ask_pool_state_reset: a poisoned connection is clean again for the nex
     const [cfg] = await platform().unsafe(`select rolconfig from pg_roles where rolname = '${roles("a").ask}'`);
     expect((cfg as Row).rolconfig).toEqual(["default_transaction_read_only=on", "statement_timeout=5s", "idle_in_transaction_session_timeout=10s", `search_path=${A.live}, ${A.parent}`]);
     expect(await outcome(ask.envelope(`delete from ${A.live}.sec_note`))).toBe(READ_ONLY);
+  });
+});
+
+describe("the Ask envelope sets the caller's locations", () => {
+  const a = ids("a");
+
+  it("by default the owner's question sees every location's rows", async () => {
+    expect((await ask.query("select body from sec_visit order by body")).rows).toHaveLength(2);
+  });
+
+  it("a caller given one location sees only that location's rows", async () => {
+    expect((await ask.query("select body from sec_visit", 10, [a.loc1])).rows).toEqual([{ body: `visit loc1 ${CANARY.a} live` }]);
+    expect((await ask.query("select body from sec_visit", 10, [a.loc1, a.loc2])).rows).toHaveLength(2);
+  });
+
+  it("no locations, or another restaurant's location, means no rows", async () => {
+    expect((await ask.query("select body from sec_visit", 10, [])).rows).toHaveLength(0);
+    expect((await ask.query("select body from sec_visit", 10, [ids("b").loc1])).rows).toHaveLength(0);
+  });
+
+  it.each([
+    ["the word all inside a list", ["all"]],
+    ["a wildcard", ["*"]],
+    ["a list hidden in one value", [`${a.loc1},${a.loc2}`]],
+    ["SQL", ["' or '1'='1"]],
+    ["an empty value", [""]],
+    ["a public id instead of a uuid", [`loc_${a.loc1.replaceAll("-", "")}`]],
+  ])("refuses %s as a location before anything reaches the database", async (_what, locations) => {
+    await expect(ask.query("select body from sec_visit", 10, locations)).rejects.toThrow();
+    // And the refusal left the connection usable and unscoped by the bad value.
+    expect((await ask.query("select current_setting('rms.locations', true) as l")).rows[0]?.l).toBe("all");
   });
 });
 

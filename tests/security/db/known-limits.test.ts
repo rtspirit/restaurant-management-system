@@ -1,4 +1,4 @@
-// KNOWN LIMITS: things that are open today, on purpose, and written down in the ADRs.
+// KNOWN LIMITS: things that are open today, on purpose, and written down in the ADRs or accepted by the lead.
 //
 // Each test here DOCUMENTS today's behaviour: it asserts that the weak spot is still there.
 // The day one is fixed, its test fails. That is the signal to delete the test, add the opposite
@@ -7,8 +7,9 @@
 // Nothing in this file may leave a change behind: every attack runs in a transaction that is rolled back.
 import { beforeAll, describe, expect, it } from "vitest";
 import { apiDb } from "@rms/db";
-import { type AskHandle, type Row, askAs, holds, orgSql, outcome, rolledBack, storeSql } from "../helpers/actors.js";
-import { CANARY, ORG, roles, schemas } from "../helpers/world.js";
+import { createHmac } from "node:crypto";
+import { type AskHandle, type Row, askAs, holds, noOrgSql, orgSql, outcome, rolledBack, storeSql } from "../helpers/actors.js";
+import { CANARY, ORG, ids, roles, schemas } from "../helpers/world.js";
 
 const A = schemas("a");
 const B = schemas("b");
@@ -60,6 +61,7 @@ describe("KNOWN LIMIT (ADR 0003, ADR 0004): the shared server login", () => {
 });
 
 describe("KNOWN LIMIT (ADR 0004): extensions and large objects outside the Ask envelope", () => {
+
   it("KNOWN LIMIT: the server login can install an extension that makes web requests from inside the database", async () => {
     expect(await outcome(orgSql("a", "create extension if not exists http with schema extensions"))).toBe("allowed");
   });
@@ -75,6 +77,61 @@ describe("KNOWN LIMIT (ADR 0004): extensions and large objects outside the Ask e
   it("the wall that does hold: inside the envelope the same statement is refused", async () => {
     expect(await outcome(ask.envelope("create extension if not exists http with schema extensions"))).toBe("25006");
   });
+
+  it("KNOWN LIMIT: a restaurant's Data API role can create a large object in a transaction that may write", async () => {
+    // Outside any table and outside row security. Not fixable on hosted Supabase (the functions belong to the server).
+    // It needs hostile SQL to reach the role, and dropping the store now removes whatever a role left (closed-findings.test.ts).
+    expect(await outcome(storeSql("a", "select lo_from_bytea(0, 'x')"))).toBe("allowed");
+    expect(await outcome(storeSql("a", "select lo_from_bytea(0, 'x')", { env: "draft" }))).toBe("allowed");
+  });
+
+  it("KNOWN LIMIT: so can the Ask login when it is not inside the envelope", async () => {
+    expect(await outcome(ask.readWrite("select lo_from_bytea(0, 'x')"))).toBe("allowed");
+  });
+
+  it("the wall that does hold: inside the envelope a large object cannot be created, by either function", async () => {
+    expect(await outcome(ask.envelope("select lo_from_bytea(0, 'x')"))).toBe("25006");
+    expect(await outcome(ask.envelope("select lo_create(0)"))).toBe("25006");
+    expect(await outcome(ask.query("select lo_from_bytea(0, 'x')"))).toBe("25006");
+  });
+
+  it("no large object is left behind by the three tests above", async () => {
+    const rows = await ask.query(`select count(*)::int as n from pg_largeobject_metadata m join pg_roles r on r.oid = m.lomowner where r.rolname like '${A.live}%'`);
+    expect(rows.rows[0]?.n).toBe(0);
+  });
+});
+
+describe("KNOWN LIMIT (local stack only): the sign-in service's signing secret is readable from database settings", () => {
+  // On the LOCAL stack a database-wide setting holds the secret the sign-in service signs with, and any role can read
+  // settings. The value there is the public development default, the same on every machine.
+  // The lead checked the HOSTED project on 2026-11-21: the setting is absent there. tests/security/hosted checks that
+  // again whenever the suite is pointed at the hosted settings file. If the local stack ever stops setting it, these fail: delete them.
+  const READ = "select current_setting('app.settings.jwt_secret', true) as s";
+
+  it("KNOWN LIMIT (local stack only): one SELECT through the Ask envelope returns it", async () => {
+    expect(String((await ask.query(READ)).rows[0]?.s ?? "").length).toBeGreaterThanOrEqual(32);
+  });
+
+  it("KNOWN LIMIT (local stack only): the Data API role and the server login can read it too", async () => {
+    expect(String((await storeSql("a", READ))[0]?.s ?? "").length).toBeGreaterThanOrEqual(32);
+    expect(String((await noOrgSql(READ))[0]?.s ?? "").length).toBeGreaterThanOrEqual(32);
+  });
+
+  it("KNOWN LIMIT (local stack only): with it, a forged service token is accepted by the local sign-in service's admin API", async () => {
+    // Why the hosted check matters: that API can list every user and reset any owner's password.
+    // One read-only request, to the local stack only (the suite refuses to run this file anywhere else).
+    const secret = String((await ask.query(READ)).rows[0]?.s ?? "");
+    const part = (o: object) => Buffer.from(JSON.stringify(o)).toString("base64url");
+    const now = Math.floor(Date.now() / 1000);
+    const body = `${part({ alg: "HS256", typ: "JWT" })}.${part({ role: "service_role", iss: "supabase-demo", iat: now, exp: now + 30 })}`;
+    const forged = `${body}.${createHmac("sha256", secret).update(body).digest("base64url")}`;
+    const res = await fetch(`${(process.env.SUPABASE_URL as string).replace(/\/$/, "")}/auth/v1/admin/users?page=1&per_page=1`, { headers: { apikey: forged, authorization: `Bearer ${forged}` } });
+    await res.arrayBuffer();
+    expect(res.status).toBe(200);
+  });
+
+  // The wall that holds everywhere: RMS itself refuses a session token signed with that secret
+  // (tests/security/tokens/session.test.ts, "signed with the sign-in service's shared secret").
 });
 
 describe("KNOWN LIMIT (ADR 0004): the Ask login outside the envelope can change itself", () => {
@@ -137,13 +194,14 @@ describe("KNOWN LIMIT (ADR 0002): the Ask login is all-or-nothing inside its own
     expect(staff.rows[0]?.hourly_rate_minor).toBe("1875");
   });
 
-  it("KNOWN LIMIT: a location-scoped table shows the Ask login nothing by default, and everything once the query sets the location setting itself", async () => {
-    // By default: zero rows. (Worth knowing for the Ask tool: questions about location-scoped data come back empty.)
-    expect((await ask.query("select body, wage from sec_visit")).rows).toHaveLength(0);
-    // One SELECT that sets the request setting first: every location's rows, payroll field included.
-    const all = await ask.query("select v.body, v.wage from (select set_config('rms.locations', 'all', true) as x) s cross join lateral (select body, wage from sec_visit where s.x is not null) v");
-    expect(all.rows).toHaveLength(2);
-    // So location scope is not a wall for model-written SQL. It holds only where the server builds the SQL.
+  it("KNOWN LIMIT: a model-written SELECT can widen a narrower location scope by setting the request setting itself", async () => {
+    const loc1 = [ids("a").loc1];
+    // The envelope gave this question one location, and an honest query sees one row.
+    expect((await ask.query("select body from sec_visit", 10, loc1)).rows).toHaveLength(1);
+    // One SELECT that sets the setting first sees every location's rows, payroll field included.
+    const widened = await ask.query("select v.body, v.wage from (select set_config('rms.locations', 'all', true) as x) s cross join lateral (select body, wage from sec_visit where s.x is not null) v", 10, loc1);
+    expect(widened.rows).toHaveLength(2);
+    // So location scope is not a wall for model-written SQL: Ask stays owner-only, and the Ask parser (task K) must refuse set_config.
   });
 });
 
