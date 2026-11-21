@@ -17,5 +17,5 @@
     "@rms/models": "workspace:*",
     "@supabase/supabase-js": "2.119.2"
   },
-  "devDependencies": { "@types/node": "26.6.6", "tsx": "4.23.15" }
+  "devDependencies": { "@types/node": "26.6.6", "postgres": "4.1.1", "tsx": "4.23.15" }
 }

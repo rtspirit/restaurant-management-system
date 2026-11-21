@@ -138,11 +138,15 @@ const deleteOrgRows = async (tx: Tx, orgUuids: readonly string[]): Promise<void>
 
 /**
  * Drops the stores of the given restaurants and deletes all their platform rows.
+ * All in ONE transaction: if anything fails, the restaurants stay exactly as they were.
  * Admin connection only. Used by the reset command and by tests to clean up their own restaurants.
  */
 export const removeRestaurants = async (adminSql: Sql, orgUuids: readonly string[]): Promise<void> => {
   if (orgUuids.length === 0) return;
-  const existing = await adminSql<{ id: string }[]>`select id from platform.organizations where id = any(${orgUuids as string[]}::uuid[])`;
-  for (const { id } of existing) await adminSql`select platform.drop_store(${id})`;
-  await adminSql.begin((tx) => deleteOrgRows(tx, orgUuids));
+  await adminSql.begin(async (tx) => {
+    const existing = await tx<{ id: string }[]>`
+      select id from platform.organizations where id = any(${orgUuids as string[]}::uuid[]) order by id for update`;
+    for (const { id } of existing) await tx`select platform.drop_store(${id})`;
+    await deleteOrgRows(tx, orgUuids);
+  });
 };

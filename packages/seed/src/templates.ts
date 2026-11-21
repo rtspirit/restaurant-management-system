@@ -1,9 +1,9 @@
 // The two fictional demo restaurants. Every name, address, number and email here is made up.
 // Phone numbers use the 555-01xx range reserved for fiction. Emails end in .test.
-import type { ServiceStyle } from "@rms/contracts";
+import { DemoTemplate, type ServiceStyle } from "@rms/contracts";
 
-export type DemoTemplate = "marigold" | "slice_yard";
-export const DEMO_TEMPLATES = ["marigold", "slice_yard"] as const satisfies readonly DemoTemplate[];
+export { DemoTemplate };
+export const DEMO_TEMPLATES: readonly DemoTemplate[] = DemoTemplate.options;
 
 export type SalesGroup = "food" | "beverage" | "alcohol" | "merchandise" | "other";
 export type House = "front" | "back" | "management";
@@ -79,8 +79,8 @@ export const MARIGOLD: TemplateSpec = {
     systemsUsed: ["Demo POS", "Payroll export", "Spreadsheets"],
   },
   locations: [
-    { key: "downtown", name: "Downtown", address: "118 Larkspur Street, Fairhaven", seats: 110, hours: dinner({ open: "11:00", close: "21:00" }) },
-    { key: "riverside", name: "Riverside", address: "42 Wharf Road, Fairhaven", seats: 72, hours: dinner({ open: "16:00", close: "21:00" }) },
+    { key: "downtown", name: "Downtown", address: "118 Larkspur Street, Lanterbury", seats: 110, hours: dinner({ open: "11:00", close: "21:00" }) },
+    { key: "riverside", name: "Riverside", address: "42 Wharf Road, Lanterbury", seats: 72, hours: dinner({ open: "16:00", close: "21:00" }) },
   ],
   jobs: [
     { name: "General Manager", house: "management", tipped: false },
@@ -214,27 +214,27 @@ export const MARIGOLD: TemplateSpec = {
   ],
   salesTaxBps: 875,
   licences: [
-    { name: "Food service establishment permit", issuer: "Fairhaven Health Department", number: "FSP-2026-0418", location: "downtown", expiresInDays: 214 },
-    { name: "Liquor licence", issuer: "State Liquor Authority", number: "SLA-1187420", location: "downtown", expiresInDays: 301 },
-    { name: "Food service establishment permit", issuer: "Fairhaven Health Department", number: "FSP-2026-0731", location: "riverside", expiresInDays: 167 },
-    { name: "Liquor licence", issuer: "State Liquor Authority", number: "SLA-1190356", location: "riverside", expiresInDays: 21 },
-    { name: "Fire safety certificate", issuer: "Fairhaven Fire Marshal", number: "FS-55120", location: "downtown", expiresInDays: 96 },
-    { name: "Music performance licence", issuer: "Performing Rights Office", number: "MPL-88213", location: null, expiresInDays: 248 },
+    { name: "Food service establishment permit", issuer: "Lanterbury Health Department", number: "FSP-2026-0418", location: "downtown", expiresInDays: 214 },
+    { name: "Liquor licence", issuer: "Lanterbury Liquor Board", number: "SLA-1187420", location: "downtown", expiresInDays: 301 },
+    { name: "Food service establishment permit", issuer: "Lanterbury Health Department", number: "FSP-2026-0731", location: "riverside", expiresInDays: 167 },
+    { name: "Liquor licence", issuer: "Lanterbury Liquor Board", number: "SLA-1190356", location: "riverside", expiresInDays: 21 },
+    { name: "Fire safety certificate", issuer: "Lanterbury Fire Marshal", number: "FS-55120", location: "downtown", expiresInDays: 96 },
+    { name: "Music performance licence", issuer: "Lanterbury Music Licensing Board", number: "MPL-88213", location: null, expiresInDays: 248 },
   ],
   equipment: [
-    { name: "Walk-in cooler", kind: "refrigeration", make: "Coldline", location: "downtown", installedOn: "2021-01-18" },
-    { name: "Six-burner range", kind: "cooking", make: "Ardent", location: "downtown", installedOn: "2021-01-25" },
-    { name: "Combi oven", kind: "cooking", make: "Northfield", location: "downtown", installedOn: "2022-09-12" },
-    { name: "Char grill", kind: "cooking", make: "Ardent", location: "downtown", installedOn: "2021-01-25" },
-    { name: "Double fryer", kind: "cooking", make: "Brightwell", location: "downtown", installedOn: "2023-03-06" },
-    { name: "Dish machine", kind: "warewashing", make: "Kettering", location: "downtown", installedOn: "2021-02-01" },
-    { name: "Ice machine", kind: "refrigeration", make: "Coldline", location: "downtown", installedOn: "2021-02-01" },
-    { name: "Espresso machine", kind: "beverage", make: "Brightwell", location: "downtown", installedOn: "2024-05-20" },
-    { name: "Reach-in cooler", kind: "refrigeration", make: "Coldline", location: "riverside", installedOn: "2023-03-20" },
-    { name: "Six-burner range", kind: "cooking", make: "Ardent", location: "riverside", installedOn: "2023-03-20" },
-    { name: "Convection oven", kind: "cooking", make: "Northfield", location: "riverside", installedOn: "2023-03-20" },
-    { name: "Flat-top griddle", kind: "cooking", make: "Ardent", location: "riverside", installedOn: "2023-03-27" },
-    { name: "Dish machine", kind: "warewashing", make: "Kettering", location: "riverside", installedOn: "2023-03-27" },
+    { name: "Walk-in cooler", kind: "refrigeration", make: "Frostvale", location: "downtown", installedOn: "2021-01-18" },
+    { name: "Six-burner range", kind: "cooking", make: "Emberline", location: "downtown", installedOn: "2021-01-25" },
+    { name: "Combi oven", kind: "cooking", make: "Ovenwright", location: "downtown", installedOn: "2022-09-12" },
+    { name: "Char grill", kind: "cooking", make: "Emberline", location: "downtown", installedOn: "2021-01-25" },
+    { name: "Double fryer", kind: "cooking", make: "Brewmark", location: "downtown", installedOn: "2023-03-06" },
+    { name: "Dish machine", kind: "warewashing", make: "Steamcrest", location: "downtown", installedOn: "2021-02-01" },
+    { name: "Ice machine", kind: "refrigeration", make: "Frostvale", location: "downtown", installedOn: "2021-02-01" },
+    { name: "Espresso machine", kind: "beverage", make: "Brewmark", location: "downtown", installedOn: "2024-05-20" },
+    { name: "Reach-in cooler", kind: "refrigeration", make: "Frostvale", location: "riverside", installedOn: "2023-03-20" },
+    { name: "Six-burner range", kind: "cooking", make: "Emberline", location: "riverside", installedOn: "2023-03-20" },
+    { name: "Convection oven", kind: "cooking", make: "Ovenwright", location: "riverside", installedOn: "2023-03-20" },
+    { name: "Flat-top griddle", kind: "cooking", make: "Emberline", location: "riverside", installedOn: "2023-03-27" },
+    { name: "Dish machine", kind: "warewashing", make: "Steamcrest", location: "riverside", installedOn: "2023-03-27" },
   ],
 };
 
@@ -255,7 +255,7 @@ export const SLICE_YARD: TemplateSpec = {
     {
       key: "mill_street",
       name: "Mill Street",
-      address: "305 Mill Street, Fairhaven",
+      address: "305 Mill Street, Lanterbury",
       seats: 28,
       hours: {
         mon: { open: "11:00", close: "22:00" },
@@ -345,18 +345,18 @@ export const SLICE_YARD: TemplateSpec = {
   ],
   salesTaxBps: 825,
   licences: [
-    { name: "Food service establishment permit", issuer: "Fairhaven Health Department", number: "FSP-2026-1102", location: "mill_street", expiresInDays: 24 },
-    { name: "Business licence", issuer: "City of Fairhaven", number: "BL-302877", location: "mill_street", expiresInDays: 252 },
-    { name: "Fire safety certificate", issuer: "Fairhaven Fire Marshal", number: "FS-56004", location: "mill_street", expiresInDays: 138 },
+    { name: "Food service establishment permit", issuer: "Lanterbury Health Department", number: "FSP-2026-1102", location: "mill_street", expiresInDays: 24 },
+    { name: "Business licence", issuer: "City of Lanterbury", number: "BL-302877", location: "mill_street", expiresInDays: 252 },
+    { name: "Fire safety certificate", issuer: "Lanterbury Fire Marshal", number: "FS-56004", location: "mill_street", expiresInDays: 138 },
   ],
   equipment: [
-    { name: "Deck oven, two decks", kind: "cooking", make: "Northfield", location: "mill_street", installedOn: "2022-07-11" },
-    { name: "Deck oven, three decks", kind: "cooking", make: "Northfield", location: "mill_street", installedOn: "2023-10-02" },
-    { name: "Spiral dough mixer", kind: "preparation", make: "Kettering", location: "mill_street", installedOn: "2022-07-11" },
-    { name: "Walk-in cooler", kind: "refrigeration", make: "Coldline", location: "mill_street", installedOn: "2022-07-18" },
-    { name: "Pizza prep table", kind: "refrigeration", make: "Coldline", location: "mill_street", installedOn: "2022-07-18" },
-    { name: "Dish machine", kind: "warewashing", make: "Kettering", location: "mill_street", installedOn: "2022-07-25" },
-    { name: "Soda fountain", kind: "beverage", make: "Brightwell", location: "mill_street", installedOn: "2022-07-25" },
+    { name: "Deck oven, two decks", kind: "cooking", make: "Ovenwright", location: "mill_street", installedOn: "2022-07-11" },
+    { name: "Deck oven, three decks", kind: "cooking", make: "Ovenwright", location: "mill_street", installedOn: "2023-10-02" },
+    { name: "Spiral dough mixer", kind: "preparation", make: "Steamcrest", location: "mill_street", installedOn: "2022-07-11" },
+    { name: "Walk-in cooler", kind: "refrigeration", make: "Frostvale", location: "mill_street", installedOn: "2022-07-18" },
+    { name: "Pizza prep table", kind: "refrigeration", make: "Frostvale", location: "mill_street", installedOn: "2022-07-18" },
+    { name: "Dish machine", kind: "warewashing", make: "Steamcrest", location: "mill_street", installedOn: "2022-07-25" },
+    { name: "Soda fountain", kind: "beverage", make: "Brewmark", location: "mill_street", installedOn: "2022-07-25" },
   ],
 };
 

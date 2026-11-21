@@ -41,10 +41,17 @@ const columnsOf = async (sql: Sql | Tx, schema: string, table: string): Promise<
   return rows.map((r) => r.name);
 };
 
+const LOCK_WAIT_MS = 30_000;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 /**
  * Replaces the contents of all ten tables in the org's parent schema with the org's rows from
  * the platform source tables, in one transaction, then records `platform.parent_sync_state`.
  * A table whose copy already matches the source is left untouched, so a second run changes nothing.
+ *
+ * Two syncs of the same restaurant never overlap: each holds a per-restaurant advisory lock while
+ * it reads, writes and records, so a slower, older read can never overwrite a newer copy.
+ * Waiting syncs hold no connection (they retry), so the pool cannot jam.
  * Admin connection only. `orgUuid` comes from the platform, never from a request.
  */
 export const syncParent = async (adminSql: Sql, orgUuid: string): Promise<SyncResult> => {
@@ -54,64 +61,70 @@ export const syncParent = async (adminSql: Sql, orgUuid: string): Promise<SyncRe
   if (!org.ready) throw new Error("The restaurant's store is not set up yet");
   const parentSchema = storeSchemas(StorePrefix.parse(org.prefix)).parent;
 
-  // 1. Read, as the admin login, in one snapshot.
-  const sources = await adminSql.begin("isolation level repeatable read read only", async (tx) => {
-    const out: { key: ParentModelKey; columns: string[]; json: string }[] = [];
-    for (const t of PARENT_TABLES) {
-      const dest = await columnsOf(tx, parentSchema, t.key);
-      const src = await columnsOf(tx, "platform", t.source);
-      if (dest.length === 0) throw new Error(`Parent table ${t.key} is missing`);
-      const missing = dest.filter((c) => !src.includes(c));
-      if (missing.length > 0) throw new Error(`Parent table ${t.key} has columns its source does not have`);
-      const cols = dest.map(ident).join(", ");
-      // Only the destination's columns, in a stable order, as JSON text (no number rounding in JS).
-      const [row] = await tx.unsafe<{ json: string }[]>(
-        `select coalesce(jsonb_agg(to_jsonb(r) order by r.id), '[]'::jsonb)::text as json
-         from (select ${cols} from platform.${ident(t.source)} where org_id = $1) r`,
-        [orgUuid],
-      );
-      out.push({ key: t.key, columns: dest, json: row?.json ?? "[]" });
-    }
-    return out;
-  });
+  const deadline = Date.now() + LOCK_WAIT_MS;
+  for (;;) {
+    const result = await adminSql.begin(async (lockTx) => {
+      const [lock] = await lockTx<{ got: boolean }[]>`
+        select pg_try_advisory_xact_lock(hashtext('rms.parent_sync'), hashtext(${orgUuid})) as got`;
+      if (!lock?.got) return null;
 
-  // 2. Write, as the parent sync role, in one transaction.
-  const tables = await asParentSync(adminSql, async (tx) => {
-    const results: ParentTableResult[] = [];
-    for (const s of sources) {
-      const target = `${ident(parentSchema)}.${ident(s.key)}`;
-      const cols = s.columns.map(ident).join(", ");
-      const [cmp] = await tx.unsafe<{ same: boolean; n: number }[]>(
-        `select (select coalesce(jsonb_agg(to_jsonb(r) order by r.id), '[]'::jsonb)
-                 from (select ${cols} from ${target}) r) = $1::text::jsonb as same,
-                jsonb_array_length($1::text::jsonb) as n`,
-        [s.json],
-      );
-      const n = cmp?.n ?? 0;
-      if (cmp?.same) {
-        results.push({ key: s.key, rows: n, changed: false });
-        continue;
+      // 1. Read, as the admin login, AFTER taking the lock, all ten tables in ONE statement
+      //    (one snapshot), as JSON text (no number rounding in JS).
+      const plan: { key: ParentModelKey; columns: string[]; select: string }[] = [];
+      for (const t of PARENT_TABLES) {
+        const dest = await columnsOf(lockTx, parentSchema, t.key);
+        const src = await columnsOf(lockTx, "platform", t.source);
+        if (dest.length === 0) throw new Error(`Parent table ${t.key} is missing`);
+        if (dest.some((c) => !src.includes(c))) throw new Error(`Parent table ${t.key} has columns its source does not have`);
+        const cols = dest.map(ident).join(", ");
+        plan.push({
+          key: t.key,
+          columns: dest,
+          select: `(select coalesce(jsonb_agg(to_jsonb(r) order by r.id), '[]'::jsonb)::text
+                    from (select ${cols} from platform.${ident(t.source)} where org_id = $1) r) as ${ident(t.key)}`,
+        });
       }
-      await tx.unsafe(`delete from ${target}`);
-      await tx.unsafe(
-        `insert into ${target} (${cols}) select ${cols} from jsonb_populate_recordset(null::${target}, $1::text::jsonb)`,
-        [s.json],
-      );
-      results.push({ key: s.key, rows: n, changed: true });
-    }
-    return results;
-  });
+      const [row] = await lockTx.unsafe<Record<string, string>[]>(`select ${plan.map((x) => x.select).join(",\n")}`, [orgUuid]);
+      const sources = plan.map((x) => ({ key: x.key, columns: x.columns, json: row?.[x.key] ?? "[]" }));
 
-  // 3. Record what was copied. The sync role cannot write platform, so this is the admin login,
-  //    after the copy has committed.
-  await adminSql.begin(async (tx) => {
-    for (const t of tables) {
-      await tx`
-        insert into platform.parent_sync_state (org_id, model_key, row_count, synced_at)
-        values (${orgUuid}, ${t.key}, ${t.rows}, now())
-        on conflict (org_id, model_key) do update set row_count = excluded.row_count, synced_at = excluded.synced_at`;
-    }
-  });
+      // 2. Write, as the parent sync role, in one transaction.
+      const tables = await asParentSync(adminSql, async (tx) => {
+        const results: ParentTableResult[] = [];
+        for (const s of sources) {
+          const target = `${ident(parentSchema)}.${ident(s.key)}`;
+          const cols = s.columns.map(ident).join(", ");
+          const [cmp] = await tx.unsafe<{ same: boolean; n: number }[]>(
+            `select (select coalesce(jsonb_agg(to_jsonb(r) order by r.id), '[]'::jsonb)
+                     from (select ${cols} from ${target}) r) = $1::text::jsonb as same,
+                    jsonb_array_length($1::text::jsonb) as n`,
+            [s.json],
+          );
+          const n = cmp?.n ?? 0;
+          if (cmp?.same) {
+            results.push({ key: s.key, rows: n, changed: false });
+            continue;
+          }
+          await tx.unsafe(`delete from ${target}`);
+          await tx.unsafe(
+            `insert into ${target} (${cols}) select ${cols} from jsonb_populate_recordset(null::${target}, $1::text::jsonb)`,
+            [s.json],
+          );
+          results.push({ key: s.key, rows: n, changed: true });
+        }
+        return results;
+      });
 
-  return { orgUuid, tables };
+      // 3. Record what was copied, still under the lock. The sync role cannot write platform.
+      for (const t of tables) {
+        await lockTx`
+          insert into platform.parent_sync_state (org_id, model_key, row_count, synced_at)
+          values (${orgUuid}, ${t.key}, ${t.rows}, now())
+          on conflict (org_id, model_key) do update set row_count = excluded.row_count, synced_at = excluded.synced_at`;
+      }
+      return tables;
+    });
+    if (result) return { orgUuid, tables: result };
+    if (Date.now() > deadline) throw new Error("Another copy of this restaurant's parent data is taking too long");
+    await sleep(25 + Math.floor(Math.random() * 50));
+  }
 };

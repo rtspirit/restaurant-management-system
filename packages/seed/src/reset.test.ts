@@ -2,10 +2,11 @@ import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { createClient } from "@supabase/supabase-js";
+import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type Sql, adminDb, closeAll } from "@rms/db";
 import { createDemoRestaurant, removeRestaurants } from "./demo.js";
-import { type DemoUserSpec, authAdminFromEnv, checkDemoPassword, checkResetAllowed, createDemoUsers, deleteAuthUsers, listAuthUsers, resetDemo } from "./reset.js";
+import { type DemoUserSpec, authAdminFromEnv, checkConnectionIsLocal, checkDemoPassword, checkResetAllowed, createDemoUsers, deleteAuthUsers, listAuthUsers, resetDemo } from "./reset.js";
 
 for (const f of [resolve(import.meta.dirname, "../../../.env.local"), "/Users/rahultiwari/github/restaurant-management-system/.env.local"]) {
   if (existsSync(f)) {
@@ -35,6 +36,9 @@ describe("checkResetAllowed", () => {
     ["no database URL", { SUPABASE_URL: LOCAL.SUPABASE_URL }],
     ["no sign-in URL", { DATABASE_ADMIN_URL: LOCAL.DATABASE_ADMIN_URL }],
     ["a garbage URL", { ...LOCAL, DATABASE_ADMIN_URL: "not a url" }],
+    ["a '#' that hides the real host", { ...LOCAL, DATABASE_ADMIN_URL: "postgresql://u:p@127.0.0.1#@remote.example/db" }],
+    ["a '#' in the sign-in URL", { ...LOCAL, SUPABASE_URL: "http://127.0.0.1#@remote.example" }],
+    ["a multi-host list", { ...LOCAL, DATABASE_ADMIN_URL: "postgresql://u:p@127.0.0.1:5432,remote.example:5432/db" }],
   ])("refuses %s", (_label, env) => {
     const res = checkResetAllowed(env as Record<string, string>);
     expect(res.ok).toBe(false);
@@ -45,6 +49,29 @@ describe("checkResetAllowed", () => {
     const remote = { DATABASE_ADMIN_URL: "postgresql://u:p@db.example.com:5432/db", SUPABASE_URL: "https://x.supabase.co" };
     expect(checkResetAllowed({ ...remote, RMS_ALLOW_RESET: "1" }).ok).toBe(true);
     expect(checkResetAllowed({ ...remote, RMS_ALLOW_RESET: "true" }).ok).toBe(false);
+  });
+});
+
+// Built without connecting: postgres.js parses the URL the same way it would to connect.
+const parsed = (url: string) => postgres(url, { max: 1 });
+
+describe("checkConnectionIsLocal looks at the connection itself", () => {
+  it("allows 127.0.0.1 and localhost", () => {
+    expect(checkConnectionIsLocal(parsed("postgresql://u:p@127.0.0.1:54322/db")).ok).toBe(true);
+    expect(checkConnectionIsLocal(parsed("postgresql://u:p@localhost:54322/db")).ok).toBe(true);
+  });
+  it("refuses the '#' trick that fools a plain URL check", () => {
+    const sql = parsed("postgresql://u:p@127.0.0.1#@remote.example/db");
+    expect(sql.options.host).not.toEqual(["127.0.0.1"]);
+    expect(checkConnectionIsLocal(sql).ok).toBe(false);
+  });
+  it("refuses a multi-host list with any remote entry", () => {
+    const sql = parsed("postgresql://u:p@127.0.0.1:5432,remote.example:5432/db");
+    expect(sql.options.host).toEqual(["127.0.0.1", "remote.example"]);
+    expect(checkConnectionIsLocal(sql).ok).toBe(false);
+  });
+  it("refuses a remote host", () => {
+    expect(checkConnectionIsLocal(parsed("postgresql://u:p@db.example.com:5432/db")).ok).toBe(false);
   });
 });
 
@@ -72,6 +99,17 @@ describe("resetDemo refuses before touching anything", () => {
 
   it("on a remote host", async () => {
     await expect(resetDemo(untouchable, { ...GOOD_PW, DATABASE_ADMIN_URL: "postgresql://u:p@db.example.com/x", SUPABASE_URL: LOCAL.SUPABASE_URL })).rejects.toThrow(/Refusing to reset/);
+  });
+  it("when the settings say local but the connection is remote", async () => {
+    const remote = parsed("postgresql://u:p@remote.example:5432/db");
+    await expect(resetDemo(remote, { ...GOOD_PW, ...LOCAL, SUPABASE_SECRET_KEY: "x" })).rejects.toThrow(/database connection is not to this computer/);
+    await remote.end({ timeout: 0 });
+  });
+  it("when the connection uses the '#' trick", async () => {
+    const tricky = parsed("postgresql://u:p@127.0.0.1#@remote.example/db");
+    await expect(resetDemo(tricky, { ...GOOD_PW, ...LOCAL, SUPABASE_SECRET_KEY: "x" })).rejects.toThrow(/Refusing to reset/);
+    await expect(resetDemo(tricky, { ...GOOD_PW, SUPABASE_URL: LOCAL.SUPABASE_URL, DATABASE_ADMIN_URL: "postgresql://u:p@127.0.0.1#@remote.example/db" })).rejects.toThrow(/Refusing to reset/);
+    await tricky.end({ timeout: 0 });
   });
   it("without a demo password", async () => {
     await expect(resetDemo(untouchable, LOCAL)).rejects.toThrow(/DEMO_PASSWORD is not set/);
@@ -101,8 +139,13 @@ describe.skipIf(!hasDb)("reset pieces, on task B's own restaurant and users", ()
     await closeAll();
   });
 
-  it("the configured local stack passes the safety check", () => {
+  it("the configured local stack passes the safety checks", () => {
     expect(checkResetAllowed(process.env).ok).toBe(true);
+    expect(checkConnectionIsLocal(adminDb()).ok).toBe(true);
+  });
+
+  it("deleteAuthUsers cannot be called without a filter", async () => {
+    await expect((deleteAuthUsers as unknown as (a: unknown) => Promise<number>)(auth)).rejects.toThrow(/needs a filter/);
   });
 
   it("creates owners, staff and the maintainer, linked to the right places", async () => {

@@ -1,14 +1,31 @@
 // Eight weeks of believable daily sales for a demo restaurant. PURE: no database, no clock,
 // no Math.random. Same template and options, same numbers, to the cent.
 //
-// The weekly net sales are pinned (Marigold's match the approved design sketches exactly).
+// The weekly net sales are pinned to calendar weeks (Marigold's match the approved design
+// sketches exactly: the week starting Mon 2026-11-09 is always $84,310, whatever range is asked
+// for). Weeks outside the pinned range are typical weeks, generated with the same rules.
 // Everything else is generated as proportions and then split with exact integer allocation,
 // so each day, each location and each week lands on its target with no rounding drift.
 //
 // Shapes follow docs/plan/02-restaurant-domain.md sections 1.4 (one day of sales) and 1.5
 // (delivery platforms). Money is whole cents (`...Minor`), currency USD.
 import { type Rng, addDays, allocate, parseDate, rngFor, sum, weekdayIndex } from "./rng.js";
+import {
+  type CostGroup,
+  type StockCount,
+  type StockItem,
+  type StockMovement,
+  type VendorBill,
+  FOOD_AND_DRINK,
+  closingCount,
+  costGroupsFor,
+  stockItems,
+  weekBills,
+  weekUsage,
+} from "./stock.js";
 import { type DemoTemplate, type SalesGroup, templateSpec } from "./templates.js";
+
+export type { CostGroup, StockCount, StockCountLine, StockItem, StockMovement, StockUnit, VendorBill, VendorBillLine } from "./stock.js";
 
 export type PaymentType = "cash" | "visa" | "mastercard" | "amex" | "discover" | "delivery_platform";
 export type LabourGroup = "front" | "back" | "management";
@@ -81,32 +98,28 @@ export type DeliveryPayout = {
   payoutMinor: number;
 };
 
-export type VendorBillLine = {
-  description: string;
-  costCategory: "food" | "beverage" | "alcohol" | "supplies";
-  quantity: number;
-  unit: string;
-  unitPriceMinor: number;
-  amountMinor: number;
-};
-export type VendorBill = {
-  vendor: string;
-  billNumber: string;
-  locationKey: string;
-  billDate: string;
-  dueDate: string;
-  currency: "USD";
-  lines: VendorBillLine[];
-  totalMinor: number;
+/**
+ * Stock money for a week. The totals include supplies; `byCostGroup` shows each group,
+ * and for every group usage = opening + purchases - closing.
+ */
+export type StockWeek = {
+  openingStockMinor: number;
+  purchasesMinor: number;
+  closingStockMinor: number;
+  /** All groups, supplies included. */
+  usageMinor: number;
+  byCostGroup: StockMovement[];
 };
 
 export type WeekSummary = {
   weekStart: string;
   weekEnd: string;
   netSalesMinor: number;
+  /** Food and drink cost = usage of food, beverage and alcohol (opening + purchases - closing). Supplies excluded. */
   costOfGoodsMinor: number;
   labourCostMinor: number;
-  byLocation: { locationKey: string; netSalesMinor: number; costOfGoodsMinor: number; labourCostMinor: number }[];
+  stock: StockWeek;
+  byLocation: { locationKey: string; netSalesMinor: number; costOfGoodsMinor: number; labourCostMinor: number; stock: StockWeek }[];
 };
 
 export type GeneratedSales = {
@@ -119,7 +132,12 @@ export type GeneratedSales = {
   weeks: WeekSummary[];
   days: SalesDay[];
   deliveryPayouts: DeliveryPayout[];
+  /** Purchases: every delivery in the range, per location. */
   vendorBills: VendorBill[];
+  /** Stock items. The same list for every location. */
+  items: StockItem[];
+  /** Counts at close per location: the opening count the Sunday before the first week, then every week-ending Sunday. */
+  stockCounts: StockCount[];
 };
 
 export type GenerateSalesOptions = {
@@ -134,18 +152,16 @@ export const DEFAULT_SALES_END = "2026-11-15";
 // ------------------------------------------------------------------ per-template sales profile
 
 type Platform = { key: string; label: string; share: number; commissionBps: number; marketingBps: number };
-type Vendor = {
-  name: string;
-  code: string;
-  catalog: readonly { description: string; costCategory: VendorBillLine["costCategory"]; unit: string; unitPriceMinor: number; qty: readonly [number, number] }[];
-};
 type PinnedWeek = { days: readonly number[]; byLocation: Record<string, number>; costOfGoods: number; labour: number };
 
 type SalesProfile = {
-  /** Weekly net sales in cents, oldest first. The last entry is the week ending on `endingOn`. */
+  /** Monday of the first pinned week. */
+  firstWeek: string;
+  /** Weekly net sales in cents for consecutive weeks from `firstWeek`, oldest first. */
   weeklyNet: readonly number[];
+  /** Index into weeklyNet of the one slow week. */
   dipWeek: number;
-  /** Week index (into weeklyNet) whose days, locations and costs are pinned exactly. */
+  /** Index into weeklyNet of the week whose days, locations and costs are pinned exactly. */
   pinned?: { index: number } & PinnedWeek;
   /** Relative size of Monday..Sunday. */
   weekdayShape: readonly number[];
@@ -168,13 +184,13 @@ type SalesProfile = {
   dipLabourRate: number;
   labourGroups: Record<LabourGroup, { share: number; rateMinor: number }>;
   giftCardDenominations: readonly number[];
-  vendors: readonly Vendor[];
 };
 
 const usd = (dollars: number) => Math.round(dollars * 100);
 
 const PROFILES: Record<DemoTemplate, SalesProfile> = {
   marigold: {
+    firstWeek: "2026-09-21",
     weeklyNet: [81_940, 83_120, 82_560, 84_870, 61_480, 80_230, 83_790, 84_310].map(usd),
     dipWeek: 4,
     pinned: {
@@ -194,8 +210,8 @@ const PROFILES: Record<DemoTemplate, SalesProfile> = {
     voidReasons: ["Wrong item entered", "Guest changed order", "Rung in twice"],
     deliveryShare: 0.06,
     platforms: [
-      { key: "courier_eats", label: "Courier Eats", share: 0.6, commissionBps: 2500, marketingBps: 300 },
-      { key: "dashbite", label: "DashBite", share: 0.4, commissionBps: 2200, marketingBps: 0 },
+      { key: "ferrymeal", label: "Ferrymeal", share: 0.6, commissionBps: 2500, marketingBps: 300 },
+      { key: "trolleybite", label: "Trolleybite", share: 0.4, commissionBps: 2200, marketingBps: 0 },
     ],
     cardTipRate: 0.19,
     deliveryTipRate: 0.1,
@@ -210,43 +226,9 @@ const PROFILES: Record<DemoTemplate, SalesProfile> = {
       management: { share: 0.15, rateMinor: 3_100 },
     },
     giftCardDenominations: [2_500, 5_000, 10_000],
-    vendors: [
-      {
-        name: "Harbour Produce Co.",
-        code: "HPC",
-        catalog: [
-          { description: "Mixed baby greens", costCategory: "food", unit: "case", unitPriceMinor: 3_450, qty: [3, 6] },
-          { description: "Heirloom carrots", costCategory: "food", unit: "case", unitPriceMinor: 2_890, qty: [2, 4] },
-          { description: "Yellow onions, 50 lb", costCategory: "food", unit: "sack", unitPriceMinor: 3_200, qty: [1, 3] },
-          { description: "Lemons", costCategory: "food", unit: "case", unitPriceMinor: 4_100, qty: [1, 2] },
-          { description: "Wild mushrooms", costCategory: "food", unit: "lb", unitPriceMinor: 1_450, qty: [8, 16] },
-        ],
-      },
-      {
-        name: "Northgate Meat and Seafood",
-        code: "NMS",
-        catalog: [
-          { description: "Hanger steak", costCategory: "food", unit: "lb", unitPriceMinor: 1_390, qty: [30, 50] },
-          { description: "Whole chickens", costCategory: "food", unit: "case", unitPriceMinor: 6_800, qty: [2, 4] },
-          { description: "Salmon fillet", costCategory: "food", unit: "lb", unitPriceMinor: 1_550, qty: [20, 35] },
-          { description: "Beef short rib", costCategory: "food", unit: "lb", unitPriceMinor: 1_180, qty: [25, 40] },
-          { description: "Gulf shrimp 16/20", costCategory: "food", unit: "lb", unitPriceMinor: 1_290, qty: [10, 20] },
-        ],
-      },
-      {
-        name: "Valley Beverage Supply",
-        code: "VBS",
-        catalog: [
-          { description: "House red wine", costCategory: "alcohol", unit: "case", unitPriceMinor: 14_400, qty: [1, 3] },
-          { description: "House white wine", costCategory: "alcohol", unit: "case", unitPriceMinor: 13_200, qty: [1, 3] },
-          { description: "Bourbon, 1 L", costCategory: "alcohol", unit: "bottle", unitPriceMinor: 3_150, qty: [4, 8] },
-          { description: "IPA keg, half barrel", costCategory: "alcohol", unit: "keg", unitPriceMinor: 21_500, qty: [1, 2] },
-          { description: "Sparkling water", costCategory: "beverage", unit: "case", unitPriceMinor: 2_600, qty: [2, 4] },
-        ],
-      },
-    ],
   },
   slice_yard: {
+    firstWeek: "2026-09-21",
     weeklyNet: [27_640, 28_110, 20_410, 28_480, 27_930, 27_520, 28_260, 28_750].map(usd),
     dipWeek: 2,
     weekdayShape: [2_900, 3_000, 3_300, 3_700, 5_600, 5_900, 4_400],
@@ -259,8 +241,8 @@ const PROFILES: Record<DemoTemplate, SalesProfile> = {
     voidReasons: ["Wrong item entered", "Guest changed order"],
     deliveryShare: 0.32,
     platforms: [
-      { key: "courier_eats", label: "Courier Eats", share: 0.55, commissionBps: 2500, marketingBps: 400 },
-      { key: "dashbite", label: "DashBite", share: 0.45, commissionBps: 2000, marketingBps: 200 },
+      { key: "ferrymeal", label: "Ferrymeal", share: 0.55, commissionBps: 2500, marketingBps: 400 },
+      { key: "trolleybite", label: "Trolleybite", share: 0.45, commissionBps: 2000, marketingBps: 200 },
     ],
     cardTipRate: 0.08,
     deliveryTipRate: 0.12,
@@ -275,34 +257,16 @@ const PROFILES: Record<DemoTemplate, SalesProfile> = {
       management: { share: 0.2, rateMinor: 2_500 },
     },
     giftCardDenominations: [2_500, 5_000],
-    vendors: [
-      {
-        name: "Stone Mill Flour and Dairy",
-        code: "SMF",
-        catalog: [
-          { description: "Tipo 00 flour, 50 lb", costCategory: "food", unit: "bag", unitPriceMinor: 3_850, qty: [6, 10] },
-          { description: "Low-moisture mozzarella", costCategory: "food", unit: "lb", unitPriceMinor: 420, qty: [60, 90] },
-          { description: "Ricotta", costCategory: "food", unit: "tub", unitPriceMinor: 1_150, qty: [3, 6] },
-          { description: "Pepperoni", costCategory: "food", unit: "lb", unitPriceMinor: 690, qty: [15, 25] },
-        ],
-      },
-      {
-        name: "Harbour Produce Co.",
-        code: "HPC",
-        catalog: [
-          { description: "San Marzano tomatoes", costCategory: "food", unit: "case", unitPriceMinor: 4_800, qty: [2, 4] },
-          { description: "Arugula", costCategory: "food", unit: "case", unitPriceMinor: 2_950, qty: [1, 2] },
-          { description: "Basil", costCategory: "food", unit: "lb", unitPriceMinor: 1_200, qty: [2, 4] },
-          { description: "Pizza boxes, 16 inch", costCategory: "supplies", unit: "bundle", unitPriceMinor: 3_600, qty: [2, 4] },
-        ],
-      },
-    ],
   },
 };
 
 // ------------------------------------------------------------------ generation
 
-const weekRng = (template: DemoTemplate, weeksFromEnd: number, part: string): Rng => rngFor(`${template}|w${weeksFromEnd}|${part}`);
+/** Keyed by calendar week, so a week's numbers never depend on the range asked for. */
+const weekRng = (template: DemoTemplate, weekStart: string, part: string): Rng => rngFor(`${template}|${weekStart}|${part}`);
+
+const DAY_MS = 86_400_000;
+const weeksBetween = (from: string, to: string): number => Math.round((parseDate(to).getTime() - parseDate(from).getTime()) / (7 * DAY_MS));
 
 const values = <K extends string>(rec: Record<K, number>, keys: readonly K[]): number[] => keys.map((k) => rec[k]);
 
@@ -440,9 +404,90 @@ const buildDay = (
   };
 };
 
+type BuiltWeek = {
+  weekStart: string;
+  weekEnd: string;
+  weekNet: number;
+  weekCogs: number;
+  weekLabour: number;
+  days: SalesDay[];
+};
+
+/** One calendar week of daily sales for every location. Depends only on the template and the date. */
+const buildWeek = (template: DemoTemplate, weekStart: string): BuiltWeek => {
+  const spec = templateSpec(template);
+  const p = PROFILES[template];
+  const locKeys = spec.locations.map((l) => l.key);
+  const categories = spec.categories.map((c) => ({ name: c.name, salesGroup: c.salesGroup }));
+  const typicalWeek = Math.round(sum(p.weeklyNet.filter((_, i) => i !== p.dipWeek)) / (p.weeklyNet.length - 1));
+  const weekEnd = addDays(weekStart, 6);
+  const idx = weeksBetween(p.firstWeek, weekStart);
+  const profileIndex = idx >= 0 && idx < p.weeklyNet.length ? idx : -1;
+  const r = weekRng(template, weekStart, "week");
+  const pinned = p.pinned && p.pinned.index === profileIndex ? p.pinned : undefined;
+  const isDip = profileIndex === p.dipWeek;
+
+  // Weekly net: pinned for the profile's calendar weeks; any other week is a typical week, in tens of dollars.
+  const weekNet = profileIndex >= 0 ? (p.weeklyNet[profileIndex] as number) : 1_000 * Math.round((typicalWeek * r.jitter(0.025)) / 1_000);
+
+  const dayTotals = pinned ? [...pinned.days] : allocate(weekNet, p.weekdayShape.map((x) => x * r.jitter(0.04)));
+  const locTotals = pinned
+    ? locKeys.map((k) => pinned.byLocation[k] as number)
+    : allocate(weekNet, values(p.locationShare, locKeys).map((s) => s * r.jitter(0.015)));
+  if (sum(dayTotals) !== weekNet || sum(locTotals) !== weekNet) throw new Error("Pinned week does not add up");
+  const grid = splitGrid(dayTotals, locTotals, values(p.locationShare, locKeys), r);
+
+  // Food and drink cost (usage) follows sales closely. Labour is partly fixed, so it follows less closely.
+  const weekCogs = pinned ? pinned.costOfGoods : 100 * Math.round((weekNet * p.cogsRate * r.jitter(0.025)) / 100);
+  const weekLabour = pinned ? pinned.labour : 100 * Math.round((weekNet * (isDip ? p.dipLabourRate : p.labourRate) * r.jitter(0.02)) / 100);
+  const cells = grid.flatMap((row, l) => row.map((net, d) => ({ l, d, net })));
+  const cellCogs = allocate(weekCogs, cells.map((c) => c.net * r.jitter(0.03)));
+  const locAvg = grid.map((row) => sum(row) / row.length);
+  const cellLabour = allocate(weekLabour, cells.map((c) => (0.6 * c.net + 0.4 * (locAvg[c.l] as number)) * r.jitter(0.03)));
+
+  const days: SalesDay[] = cells.map((c, i) => {
+    const loc = spec.locations[c.l] as (typeof spec.locations)[number];
+    return buildDay(
+      p,
+      weekRng(template, weekStart, `${loc.key}|${c.d}`),
+      { businessDate: addDays(weekStart, c.d), weekStart, locationKey: loc.key, locationName: loc.name },
+      categories,
+      c.net,
+      cellCogs[i] as number,
+      cellLabour[i] as number,
+      spec.salesTaxBps,
+    );
+  });
+  days.sort((a, b) => a.businessDate.localeCompare(b.businessDate) || locKeys.indexOf(a.locationKey) - locKeys.indexOf(b.locationKey));
+  return { weekStart, weekEnd, weekNet, weekCogs, weekLabour, days };
+};
+
+/** A location's usage by cost group for one built week. */
+const usageFor = (template: DemoTemplate, week: BuiltWeek, locationKey: string): Record<CostGroup, number> => {
+  const mine = week.days.filter((d) => d.locationKey === locationKey);
+  const netBySalesGroup: Partial<Record<string, number>> = {};
+  for (const d of mine) for (const c of d.categories) netBySalesGroup[c.salesGroup] = (netBySalesGroup[c.salesGroup] ?? 0) + c.netMinor;
+  return weekUsage(template, {
+    weekStart: week.weekStart,
+    locationKey,
+    netSalesMinor: sum(mine.map((d) => d.netSalesMinor)),
+    netBySalesGroup,
+    foodAndDrinkMinor: sum(mine.map((d) => d.costOfGoodsMinor)),
+  });
+};
+
+const stockWeek = (rows: StockMovement[]): StockWeek => ({
+  openingStockMinor: sum(rows.map((r) => r.openingStockMinor)),
+  purchasesMinor: sum(rows.map((r) => r.purchasesMinor)),
+  closingStockMinor: sum(rows.map((r) => r.closingStockMinor)),
+  usageMinor: sum(rows.map((r) => r.usageMinor)),
+  byCostGroup: rows,
+});
+
 /**
- * Daily sales per location for `weeks` Monday-to-Sunday weeks ending on `endingOn` (a Sunday).
- * Used by the Demo POS server (Wave 2). Pure and deterministic.
+ * Daily sales per location for `weeks` Monday-to-Sunday weeks ending on `endingOn` (a Sunday),
+ * plus Sunday stock counts and the purchases (vendor bills) between them.
+ * Used by the Demo POS server (Wave 2). Pure and deterministic, keyed by calendar date.
  */
 export const generateSales = (template: DemoTemplate, opts: GenerateSalesOptions = {}): GeneratedSales => {
   const spec = templateSpec(template);
@@ -453,80 +498,79 @@ export const generateSales = (template: DemoTemplate, opts: GenerateSalesOptions
   parseDate(endsOn);
   if (weekdayIndex(endsOn) !== 6) throw new Error("endingOn must be a Sunday");
   const startsOn = addDays(endsOn, -(7 * weeks - 1));
-
   const locKeys = spec.locations.map((l) => l.key);
-  const categories = spec.categories.map((c) => ({ name: c.name, salesGroup: c.salesGroup }));
-  const typicalWeek = Math.round(sum(p.weeklyNet.filter((_, i) => i !== p.dipWeek)) / (p.weeklyNet.length - 1));
+  const groups = costGroupsFor(template);
 
   const days: SalesDay[] = [];
   const weekSummaries: WeekSummary[] = [];
   const deliveryPayouts: DeliveryPayout[] = [];
+  const vendorBills: VendorBill[] = [];
+  const stockCounts: StockCount[] = [];
+
+  // The opening count is the previous week's closing count, built the same way from that week alone.
+  const before = buildWeek(template, addDays(startsOn, -7));
+  const lastCount = new Map<string, StockCount>();
+  for (const k of locKeys) {
+    const opening = closingCount(template, before.weekStart, k, usageFor(template, before, k), "opening");
+    stockCounts.push(opening);
+    lastCount.set(k, opening);
+  }
 
   for (let w = 0; w < weeks; w++) {
-    const weeksFromEnd = weeks - 1 - w;
-    const weekStart = addDays(startsOn, 7 * w);
-    const weekEnd = addDays(weekStart, 6);
-    const profileIndex = p.weeklyNet.length - 1 - weeksFromEnd;
-    const r = weekRng(template, weeksFromEnd, "week");
-    const pinned = p.pinned && p.pinned.index === profileIndex ? p.pinned : undefined;
-    const isDip = profileIndex === p.dipWeek;
-
-    // Weekly net: pinned for the profile's weeks; earlier weeks (if asked for) are typical weeks, in tens of dollars.
-    const weekNet = profileIndex >= 0 ? (p.weeklyNet[profileIndex] as number) : 1_000 * Math.round((typicalWeek * r.jitter(0.025)) / 1_000);
-
-    const dayTotals = pinned ? [...pinned.days] : allocate(weekNet, p.weekdayShape.map((x) => x * r.jitter(0.04)));
-    const locTotals = pinned
-      ? locKeys.map((k) => pinned.byLocation[k] as number)
-      : allocate(weekNet, values(p.locationShare, locKeys).map((s) => s * r.jitter(0.015)));
-    if (sum(dayTotals) !== weekNet || sum(locTotals) !== weekNet) throw new Error("Pinned week does not add up");
-    const grid = splitGrid(dayTotals, locTotals, values(p.locationShare, locKeys), r);
-
-    // Cost of goods follows sales closely. Labour is partly fixed, so it follows less closely.
-    const weekCogs = pinned ? pinned.costOfGoods : 100 * Math.round((weekNet * p.cogsRate * r.jitter(0.025)) / 100);
-    const weekLabour = pinned ? pinned.labour : 100 * Math.round((weekNet * (isDip ? p.dipLabourRate : p.labourRate) * r.jitter(0.02)) / 100);
-    const cells = grid.flatMap((row, l) => row.map((net, d) => ({ l, d, net })));
-    const cellCogs = allocate(weekCogs, cells.map((c) => c.net * r.jitter(0.03)));
-    const locAvg = grid.map((row) => sum(row) / row.length);
-    const cellLabour = allocate(weekLabour, cells.map((c) => (0.6 * c.net + 0.4 * (locAvg[c.l] as number)) * r.jitter(0.03)));
-
-    const weekDays: SalesDay[] = cells.map((c, i) => {
-      const loc = spec.locations[c.l] as (typeof spec.locations)[number];
-      const businessDate = addDays(weekStart, c.d);
-      return buildDay(
-        p,
-        weekRng(template, weeksFromEnd, `${loc.key}|${c.d}`),
-        { businessDate, weekStart, locationKey: loc.key, locationName: loc.name },
-        categories,
-        c.net,
-        cellCogs[i] as number,
-        cellLabour[i] as number,
-        spec.salesTaxBps,
-      );
-    });
-    weekDays.sort((a, b) => a.businessDate.localeCompare(b.businessDate) || locKeys.indexOf(a.locationKey) - locKeys.indexOf(b.locationKey));
+    const week = buildWeek(template, addDays(startsOn, 7 * w));
+    const { weekStart, weekEnd, days: weekDays } = week;
     days.push(...weekDays);
 
+    const byLocation: WeekSummary["byLocation"] = locKeys.map((k, li) => {
+      const mine = weekDays.filter((d) => d.locationKey === k);
+      const usage = usageFor(template, week, k);
+      const opening = lastCount.get(k) as StockCount;
+      const closing = closingCount(template, weekStart, k, usage);
+      stockCounts.push(closing);
+      lastCount.set(k, closing);
+      const value = (c: StockCount, g: CostGroup) => c.byCostGroup.find((x) => x.costGroup === g)?.valueMinor ?? 0;
+      const purchases = { food: 0, beverage: 0, alcohol: 0, supplies: 0 } as Record<CostGroup, number>;
+      const rows: StockMovement[] = groups.map((g) => {
+        purchases[g] = usage[g] + value(closing, g) - value(opening, g);
+        if (purchases[g] < 0) throw new Error("Generated purchases went negative");
+        return { costGroup: g, openingStockMinor: value(opening, g), purchasesMinor: purchases[g], closingStockMinor: value(closing, g), usageMinor: usage[g] };
+      });
+      vendorBills.push(...weekBills(template, weekStart, k, li, purchases));
+      const costOfGoodsMinor = sum(rows.filter((r) => FOOD_AND_DRINK.includes(r.costGroup)).map((r) => r.usageMinor));
+      if (costOfGoodsMinor !== sum(mine.map((d) => d.costOfGoodsMinor))) throw new Error("Usage does not match cost of goods");
+      return {
+        locationKey: k,
+        netSalesMinor: sum(mine.map((d) => d.netSalesMinor)),
+        costOfGoodsMinor,
+        labourCostMinor: sum(mine.map((d) => d.labourCostMinor)),
+        stock: stockWeek(rows),
+      };
+    });
+
+    const allRows: StockMovement[] = groups.map((g) => {
+      const rows = byLocation.map((l) => l.stock.byCostGroup.find((r) => r.costGroup === g) as StockMovement);
+      return {
+        costGroup: g,
+        openingStockMinor: sum(rows.map((r) => r.openingStockMinor)),
+        purchasesMinor: sum(rows.map((r) => r.purchasesMinor)),
+        closingStockMinor: sum(rows.map((r) => r.closingStockMinor)),
+        usageMinor: sum(rows.map((r) => r.usageMinor)),
+      };
+    });
     weekSummaries.push({
       weekStart,
       weekEnd,
-      netSalesMinor: weekNet,
-      costOfGoodsMinor: weekCogs,
-      labourCostMinor: weekLabour,
-      byLocation: locKeys.map((k) => {
-        const mine = weekDays.filter((d) => d.locationKey === k);
-        return {
-          locationKey: k,
-          netSalesMinor: sum(mine.map((d) => d.netSalesMinor)),
-          costOfGoodsMinor: sum(mine.map((d) => d.costOfGoodsMinor)),
-          labourCostMinor: sum(mine.map((d) => d.labourCostMinor)),
-        };
-      }),
+      netSalesMinor: week.weekNet,
+      costOfGoodsMinor: week.weekCogs,
+      labourCostMinor: week.weekLabour,
+      stock: stockWeek(allRows),
+      byLocation,
     });
 
     // One payout per platform per location per week, paid the following Wednesday.
     for (const k of locKeys) {
       for (const plat of p.platforms) {
-        const pr = weekRng(template, weeksFromEnd, `payout|${k}|${plat.key}`);
+        const pr = weekRng(template, weekStart, `payout|${k}|${plat.key}`);
         const mine = weekDays.filter((d) => d.locationKey === k).flatMap((d) => d.deliverySales.filter((s) => s.platform === plat.key));
         const sales = sum(mine.map((s) => s.netMinor));
         const tips = sum(mine.map((s) => s.tipsMinor));
@@ -558,41 +602,6 @@ export const generateSales = (template: DemoTemplate, opts: GenerateSalesOptions
     }
   }
 
-  // A few vendor bills: each vendor, each location, in each of the last two weeks.
-  const vendorBills: VendorBill[] = [];
-  let billNo = 0;
-  for (let w = Math.max(0, weeks - 2); w < weeks; w++) {
-    const weeksFromEnd = weeks - 1 - w;
-    const weekStart = addDays(startsOn, 7 * w);
-    for (const k of locKeys) {
-      p.vendors.forEach((v, vi) => {
-        const vr = weekRng(template, weeksFromEnd, `bill|${k}|${v.code}`);
-        const lines: VendorBillLine[] = v.catalog
-          .filter(() => vr.next() < 0.8)
-          .map((item) => {
-            const quantity = vr.int(item.qty[0], item.qty[1]);
-            return { description: item.description, costCategory: item.costCategory, quantity, unit: item.unit, unitPriceMinor: item.unitPriceMinor, amountMinor: quantity * item.unitPriceMinor };
-          });
-        if (lines.length === 0) {
-          const item = v.catalog[0] as Vendor["catalog"][number];
-          lines.push({ description: item.description, costCategory: item.costCategory, quantity: item.qty[0], unit: item.unit, unitPriceMinor: item.unitPriceMinor, amountMinor: item.qty[0] * item.unitPriceMinor });
-        }
-        const billDate = addDays(weekStart, 1 + vi);
-        billNo += 1;
-        vendorBills.push({
-          vendor: v.name,
-          billNumber: `${v.code}-${String(40_000 + (template === "marigold" ? 0 : 5_000) + billNo * 7)}`,
-          locationKey: k,
-          billDate,
-          dueDate: addDays(billDate, 14),
-          currency: "USD",
-          lines,
-          totalMinor: sum(lines.map((l) => l.amountMinor)),
-        });
-      });
-    }
-  }
-
   return {
     template,
     restaurantName: spec.name,
@@ -604,5 +613,7 @@ export const generateSales = (template: DemoTemplate, opts: GenerateSalesOptions
     days,
     deliveryPayouts,
     vendorBills,
+    items: stockItems(template),
+    stockCounts,
   };
 };

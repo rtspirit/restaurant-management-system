@@ -13,6 +13,9 @@ const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost"]);
 
 const hostOf = (url: string | undefined): string | null => {
   if (!url) return null;
+  // The standard URL parser stops at "#", but postgres.js does not: "u:p@127.0.0.1#@remote/db"
+  // would pass a URL check and connect elsewhere. Anything with "#" is refused outright.
+  if (url.includes("#")) return null;
   try {
     const u = new URL(url);
     // A libpq-style ?host= or ?hostaddr= would override the address in the URL.
@@ -40,6 +43,19 @@ export const checkResetAllowed = (env: Env): Check => {
   return { ok: true };
 };
 
+/**
+ * Checks the connection the reset is actually about to use, not the settings it came from:
+ * every host postgres.js will try must be exactly 127.0.0.1 or localhost, with no socket path.
+ */
+export const checkConnectionIsLocal = (adminSql: Pick<Sql, "options">): Check => {
+  const hosts = adminSql.options.host;
+  const local = Array.isArray(hosts) && hosts.length > 0 && hosts.every((h) => LOCAL_HOSTS.has(String(h).toLowerCase()));
+  if (!local || adminSql.options.path) {
+    return { ok: false, reason: "Refusing to reset: the database connection is not to this computer (127.0.0.1 or localhost). Set RMS_ALLOW_RESET=1 if you really mean it." };
+  }
+  return { ok: true };
+};
+
 /** Pure. Demo passwords come from DEMO_PASSWORD and must be at least 10 characters. */
 export const checkDemoPassword = (env: Env): Check => {
   const pw = env.DEMO_PASSWORD;
@@ -51,11 +67,18 @@ export const checkDemoPassword = (env: Env): Check => {
 /** The few calls we need from Supabase Auth's admin API. */
 export type AuthAdmin = ReturnType<typeof createClient>["auth"]["admin"];
 
-export const authAdminFromEnv = (env: Env = process.env): AuthAdmin => {
+export const authAdminFromEnv = (env: Env = process.env): AuthAdmin => buildAuthAdmin(env).auth;
+
+/** Builds the admin client and returns the exact host it was built with. */
+const buildAuthAdmin = (env: Env): { auth: AuthAdmin; host: string } => {
   const url = env.SUPABASE_URL;
   const key = env.SUPABASE_SECRET_KEY;
   if (!url || !key) throw new Error("SUPABASE_URL and SUPABASE_SECRET_KEY must be set");
-  return createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } }).auth.admin;
+  if (url.includes("#")) throw new Error("SUPABASE_URL is not a plain address");
+  const u = new URL(url);
+  // The client is built from the parsed origin, so the host checked below is the host it calls.
+  const auth = createClient(u.origin, key, { auth: { autoRefreshToken: false, persistSession: false } }).auth.admin;
+  return { auth, host: u.hostname.toLowerCase() };
 };
 
 /** Lists sign-in users, all pages. `filter` narrows by email. */
@@ -69,8 +92,14 @@ export const listAuthUsers = async (auth: AuthAdmin, filter: (email: string) => 
   }
 };
 
-/** Deletes sign-in users (all of them, or those whose email passes `filter`). Returns how many. */
-export const deleteAuthUsers = async (auth: AuthAdmin, filter?: (email: string) => boolean): Promise<number> => {
+/** Deletes the sign-in users whose email passes `filter`. The filter is required. Returns how many. */
+export const deleteAuthUsers = async (auth: AuthAdmin, filter: (email: string) => boolean): Promise<number> => {
+  if (typeof filter !== "function") throw new Error("deleteAuthUsers needs a filter");
+  return deleteUsers(auth, filter);
+};
+
+/** Not exported. Called with "everyone" only from resetDemo, after its guards. */
+const deleteUsers = async (auth: AuthAdmin, filter: (email: string) => boolean): Promise<number> => {
   const users = await listAuthUsers(auth, filter);
   for (const u of users) {
     const { error } = await auth.deleteUser(u.id);
@@ -133,13 +162,25 @@ export const createDemoUsers = async (
  * delete every sign-in user, create both demo restaurants and their users.
  */
 export const resetDemo = async (adminSql: Sql, env: Env = process.env): Promise<string[]> => {
-  for (const check of [checkResetAllowed(env), checkDemoPassword(env)]) if (!check.ok) throw new Error(check.reason);
+  const allowAnywhere = env.RMS_ALLOW_RESET === "1";
+  const checks: (() => Check)[] = [
+    () => checkResetAllowed(env),
+    () => checkDemoPassword(env),
+    () => (allowAnywhere ? { ok: true } : checkConnectionIsLocal(adminSql)),
+  ];
+  for (const run of checks) {
+    const check = run();
+    if (!check.ok) throw new Error(check.reason);
+  }
   const password = env.DEMO_PASSWORD as string;
-  const auth = authAdminFromEnv(env);
+  const { auth, host: authHost } = buildAuthAdmin(env);
+  if (!allowAnywhere && !LOCAL_HOSTS.has(authHost)) {
+    throw new Error("Refusing to reset: the sign-in service is not on this computer. Set RMS_ALLOW_RESET=1 if you really mean it.");
+  }
 
   const orgs = await adminSql<{ id: string }[]>`select id from platform.organizations`;
   await removeRestaurants(adminSql, orgs.map((o) => o.id));
-  const removedUsers = await deleteAuthUsers(auth);
+  const removedUsers = await deleteUsers(auth, () => true);
 
   const marigold = await createDemoRestaurant(adminSql, { template: "marigold" });
   const sliceYard = await createDemoRestaurant(adminSql, { template: "slice_yard" });

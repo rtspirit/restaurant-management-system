@@ -128,6 +128,26 @@ describe.skipIf(!hasDb)("syncParent", () => {
     expect(await parentSnapshot(A, PA)).toEqual(await sourceSnapshot(A));
   });
 
+  it("two syncs at once take turns: exactly one copies the change, and the copy ends up current", async () => {
+    const sql = adminDb();
+    await sql`update platform.parent_menu_items set price_minor = 2900, updated_at = now() where org_id = ${A}`;
+    const [one, two] = await Promise.all([syncParent(sql, A), syncParent(sql, A)]);
+    const changedItems = [one, two].map((r) => r.tables.find((t) => t.key === "menu_items")!.changed);
+    expect(changedItems.filter(Boolean)).toHaveLength(1);
+    expect(await parentSnapshot(A, PA)).toEqual(await sourceSnapshot(A));
+    // Five at once, with source changes in between, still finish and leave the newest copy.
+    await Promise.all([
+      syncParent(sql, A),
+      sql`update platform.parent_menu_items set price_minor = 3100, updated_at = now() where org_id = ${A}`.then(() => syncParent(sql, A)),
+      syncParent(sql, A),
+      syncParent(sql, A),
+      syncParent(sql, A),
+    ]);
+    const copy = await parentSnapshot(A, PA);
+    expect((copy.menu_items as { price_minor: number }[])[0]?.price_minor).toBe(3100);
+    expect(copy).toEqual(await sourceSnapshot(A));
+  });
+
   it("records what it copied in parent_sync_state", async () => {
     const rows = await adminDb()<{ model_key: string; row_count: number }[]>`
       select model_key, row_count from platform.parent_sync_state where org_id = ${A} order by model_key`;
