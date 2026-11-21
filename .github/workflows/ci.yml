@@ -29,6 +29,8 @@ jobs:
           bash tests/security/db-walls.smoke.sh | tee walls.log
           grep -q '^FAILS=0$' walls.log
       - run: pnpm test
+      - name: Isolation and attack suite
+        run: pnpm test:security
       - name: Stop the local stack
         if: always()
         run: pnpm exec supabase stop --no-backup || true
