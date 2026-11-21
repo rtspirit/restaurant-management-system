@@ -4,13 +4,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type TenantContext, toPublicId } from "@rms/contracts";
 import { adminDb, apiDb, closeAll, ident, newUuid, provisionStore, withStore } from "@rms/db";
 import { PARENT_TABLES, syncParent } from "./index.js";
+import { loadTestEnv } from "@rms/db/testing";
 
-for (const f of [resolve(import.meta.dirname, "../../../.env.local"), "/Users/rahultiwari/github/restaurant-management-system/.env.local"]) {
-  if (existsSync(f)) {
-    process.loadEnvFile(f);
-    break;
-  }
-}
+loadTestEnv();
 const hasDb = Boolean(process.env.DATABASE_URL && process.env.DATABASE_ADMIN_URL);
 
 // Task B test range.

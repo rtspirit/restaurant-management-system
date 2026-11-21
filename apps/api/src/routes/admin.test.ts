@@ -4,9 +4,9 @@ import { type Actor, toPublicId } from "@rms/contracts";
 import { type Sql, adminDb, apiDb, closeAll, withOrg } from "@rms/db";
 import { recordChange } from "@rms/governance";
 import app from "../index.js";
+import { loadTestEnv } from "@rms/db/testing";
 
-const mainEnv = "/Users/rahultiwari/github/restaurant-management-system/.env.local";
-if (existsSync(mainEnv)) process.loadEnvFile(mainEnv);
+loadTestEnv();
 const hasDb = Boolean(process.env.DATABASE_URL && process.env.DATABASE_ADMIN_URL && process.env.SUPABASE_URL);
 
 // Task F id range (f0..ff). The governance package tests use f1..f3, these use f4..f8.

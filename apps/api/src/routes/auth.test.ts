@@ -6,9 +6,9 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { type DemoTemplate, MeResponse, toPublicId } from "@rms/contracts";
 import { type Sql, adminDb, closeAll, provisionStore } from "@rms/db";
 import { type CreateDemoRestaurant, createAuthRoutes } from "./auth.js";
+import { loadTestEnv } from "@rms/db/testing";
 
-const envFile = "/Users/rahultiwari/github/restaurant-management-system/.env.local";
-if (existsSync(envFile)) process.loadEnvFile(envFile);
+loadTestEnv();
 const env = process.env;
 const NEEDED = ["DATABASE_URL", "DATABASE_ADMIN_URL", "SUPABASE_URL", "SUPABASE_PUBLISHABLE_KEY", "SUPABASE_SECRET_KEY", "WEB_URL"];
 // These tests are the proof for task A. Missing settings are a failure, not a skip.

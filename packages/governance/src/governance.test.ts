@@ -22,11 +22,9 @@ import {
   toChangeSet,
   writeAudit,
 } from "./index.js";
+import { loadTestEnv } from "@rms/db/testing";
 
-const envFile = resolve(import.meta.dirname, "../../../.env.local");
-const mainEnv = "/Users/rahultiwari/github/restaurant-management-system/.env.local";
-if (existsSync(envFile)) process.loadEnvFile(envFile);
-else if (existsSync(mainEnv)) process.loadEnvFile(mainEnv);
+loadTestEnv();
 const hasDb = Boolean(process.env.DATABASE_URL && process.env.DATABASE_ADMIN_URL && process.env.SUPABASE_URL);
 
 // Task F id range: 0193a3c0-0000-7000-8000-0000000000f0 .. ff. Store prefixes o_f1f1f1f1f1xx.

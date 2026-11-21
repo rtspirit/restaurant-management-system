@@ -7,13 +7,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type Sql, adminDb, closeAll } from "@rms/db";
 import { createDemoRestaurant, removeRestaurants } from "./demo.js";
 import { type DemoUserSpec, authAdminFromEnv, checkConnectionIsLocal, checkDemoPassword, checkResetAllowed, createDemoUsers, deleteAuthUsers, listAuthUsers, resetDemo } from "./reset.js";
+import { loadTestEnv } from "@rms/db/testing";
 
-for (const f of [resolve(import.meta.dirname, "../../../.env.local"), "/Users/rahultiwari/github/restaurant-management-system/.env.local"]) {
-  if (existsSync(f)) {
-    process.loadEnvFile(f);
-    break;
-  }
-}
+loadTestEnv();
 const hasDb = Boolean(process.env.DATABASE_ADMIN_URL && process.env.SUPABASE_URL && process.env.SUPABASE_SECRET_KEY && process.env.SUPABASE_PUBLISHABLE_KEY);
 
 const LOCAL = { DATABASE_ADMIN_URL: "postgresql://rms_admin:x@127.0.0.1:54322/postgres", SUPABASE_URL: "http://127.0.0.1:54321" };

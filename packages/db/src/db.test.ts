@@ -3,9 +3,9 @@ import { resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type TenantContext, toPublicId } from "@rms/contracts";
 import { adminDb, apiDb, asParentSync, closeAll, ident, newStorePrefix, provisionStore, withOrg, withStore } from "./index.js";
+import { loadTestEnv } from "./testing.js";
 
-const envFile = resolve(import.meta.dirname, "../../../.env.local");
-if (existsSync(envFile)) process.loadEnvFile(envFile);
+loadTestEnv();
 const hasDb = Boolean(process.env.DATABASE_URL && process.env.DATABASE_ADMIN_URL);
 
 const A = "0193a3c0-0000-7000-8000-0000000000d1";

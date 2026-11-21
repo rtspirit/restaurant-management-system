@@ -41,6 +41,10 @@ case "$API_URL" in http://127.0.0.1:*|http://localhost:*)
   set_kv ADMIN_URL "http://127.0.0.1:3001"
   ;;
 esac
+# A signing key for RMS tokens, if there is none yet.
+if [ -z "$(sed -n 's/^RMS_TOKEN_SECRET=//p' "$ENV_FILE")" ]; then
+  set_kv RMS_TOKEN_SECRET "$(openssl rand -base64 48 | tr -d '\n')"
+fi
 # Next.js only reads .env files from the app's own folder, so point each app at the root file.
 for app in web admin apps-host; do
   [ -d "$ROOT/apps/$app" ] && ln -sf ../../.env.local "$ROOT/apps/$app/.env.local"

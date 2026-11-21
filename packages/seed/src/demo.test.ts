@@ -7,13 +7,9 @@ import { PARENT_TABLES, syncParent } from "@rms/parent";
 import { createDemoRestaurant, removeRestaurants } from "./demo.js";
 import { PARENT_SOURCE_TABLES, buildParentRows } from "./parent-data.js";
 import { TEMPLATES } from "./templates.js";
+import { loadTestEnv } from "@rms/db/testing";
 
-for (const f of [resolve(import.meta.dirname, "../../../.env.local"), "/Users/rahultiwari/github/restaurant-management-system/.env.local"]) {
-  if (existsSync(f)) {
-    process.loadEnvFile(f);
-    break;
-  }
-}
+loadTestEnv();
 const hasDb = Boolean(process.env.DATABASE_URL && process.env.DATABASE_ADMIN_URL);
 
 // Task B test range.

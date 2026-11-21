@@ -2,9 +2,9 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type Sql, adminDb, asMigrator, asParentSync, askQuery, closeAll, ident, inAskEnvelope, mintAskLogin, openAsk, provisionStore, scramVerifier } from "./index.js";
+import { loadTestEnv } from "./testing.js";
 
-const envFile = resolve(import.meta.dirname, "../../../.env.local");
-if (existsSync(envFile)) process.loadEnvFile(envFile);
+loadTestEnv();
 const hasDb = Boolean(process.env.DATABASE_ADMIN_URL && process.env.ASK_DATABASE_HOST);
 
 const A = "0193a3c0-0000-7000-8000-0000000000d3";

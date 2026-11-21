@@ -3,9 +3,9 @@ import { resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { ChangeSignal, SIGNAL_TIER, tierForSignals } from "@rms/contracts";
 import { adminDb, closeAll } from "./index.js";
+import { loadTestEnv } from "./testing.js";
 
-const envFile = resolve(import.meta.dirname, "../../../.env.local");
-if (existsSync(envFile)) process.loadEnvFile(envFile);
+loadTestEnv();
 const hasDb = Boolean(process.env.DATABASE_ADMIN_URL);
 
 describe.skipIf(!hasDb)("the database derives the tier the same way the code does", () => {
