@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { Actor } from "./auth.js";
+import { Actor, Role } from "./auth.js";
 import { ChangeSetId, OrgId } from "./ids.js";
 
 /** Shapes shared between sign-up (A), parent data (B), the Data API (D) and the console (F). */
@@ -67,3 +67,24 @@ export const OutboxMessage = z.object({
   payload: z.record(z.string(), z.unknown()),
 });
 export type OutboxMessage = z.infer<typeof OutboxMessage>;
+
+/** The two seeded demo restaurants a new owner can be given. */
+export const DemoTemplate = z.enum(["marigold", "slice_yard"]);
+export type DemoTemplate = z.infer<typeof DemoTemplate>;
+
+/** What `GET /auth/me` returns: the signed-in user and their restaurant, or null before onboarding. */
+export const MyRestaurant = z.object({
+  id: OrgId,
+  name: z.string(),
+  role: Role,
+  brandColour: z.string().nullable(),
+  locations: z.array(z.object({ id: z.string(), name: z.string() })),
+  ready: z.boolean(),
+});
+export type MyRestaurant = z.infer<typeof MyRestaurant>;
+
+export const MeResponse = z.object({
+  user: z.object({ id: z.string(), email: z.string().nullable() }),
+  restaurant: MyRestaurant.nullable(),
+});
+export type MeResponse = z.infer<typeof MeResponse>;
