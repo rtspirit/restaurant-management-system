@@ -9,6 +9,7 @@ import { type Sql, adminDb, apiDb, newUuid, withOrg } from "@rms/db";
 import { type SignedInUser, type UserEnv, membershipsFor, requireUser } from "@rms/auth";
 import { drainOutbox, recordChange } from "@rms/governance";
 import { createDemoRestaurant, seedDemoBooks } from "@rms/seed";
+import { allowWebOrigin } from "../lib/origins.js";
 
 /** The interface task B exports from `@rms/seed` (wave 1 brief, task A section). */
 export type CreateDemoRestaurant = (
@@ -126,10 +127,7 @@ export const createAuthRoutes = (deps: AuthRouteDeps) => {
   routes.use(
     "*",
     cors({
-      origin: (origin) => {
-        const web = process.env.WEB_URL?.replace(/\/$/, "");
-        return web && origin === web ? origin : null;
-      },
+      origin: (origin) => allowWebOrigin(origin),
       allowMethods: ["GET", "POST", "OPTIONS"],
       allowHeaders: ["authorization", "content-type"],
       credentials: false,

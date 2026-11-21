@@ -4,6 +4,7 @@ import { API_ERROR_STATUS, type ApiError, type ApiErrorCode, EVENT_STREAM } from
 import type { Context, MiddlewareHandler } from "hono";
 import { cors } from "hono/cors";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
+import { allowWebOrigin } from "./origins.js";
 
 /** The RMS web app's origin, from WEB_URL. Null when it is not set or not an address. */
 export const webOrigin = (): string | null => {
@@ -17,15 +18,13 @@ export const webOrigin = (): string | null => {
 };
 
 /**
- * Lets the RMS web app, and only it, call these routes from the browser. Exactly one origin,
- * never a wildcard, no cookies: the credential is always a bearer header.
+ * Lets the RMS web app, and only it, call these routes from the browser. Exact origins only
+ * (WEB_URL, plus phone mode's WEB_EXTRA_ORIGINS: lib/origins.ts), never a wildcard, no cookies:
+ * the credential is always a bearer header.
  */
 export const webCors = (): MiddlewareHandler =>
   cors({
-    origin: (origin) => {
-      const web = webOrigin();
-      return web !== null && origin === web ? web : null;
-    },
+    origin: (origin) => allowWebOrigin(origin),
     allowMethods: ["GET", "POST", "OPTIONS"],
     allowHeaders: ["authorization", "content-type"],
     credentials: false,

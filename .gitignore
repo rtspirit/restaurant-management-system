@@ -11,6 +11,9 @@ supabase/.temp/
 supabase/.branches/
 .claude/settings.local.json
 .claude/worktrees/
+# phone mode (scripts/demo-phone.sh): its settings overlay (also covered by .env.*), logs, process ids
+.env.phone
+.phone-mode/
 
 # build output
 node_modules/
