@@ -883,6 +883,25 @@ a.rms-logo--s {
   border-bottom: 0;
 }
 
+/* A second line under the row's name: what kind of thing it is, or who. */
+.rms-table__sub {
+  display: block;
+  color: var(--rms-muted);
+  font-size: var(--rms-text-xs);
+  font-weight: var(--rms-weight-body);
+  line-height: 1.25rem;
+}
+
+.rms-table tbody th:has(.rms-table__sub:not(.rms-table__sub--phone)) {
+  padding-block: var(--rms-space-2);
+  line-height: 1.375rem;
+}
+
+/* Lines that stand in for a column on a phone are not drawn while the column itself is. */
+.rms-table__sub--phone {
+  display: none;
+}
+
 .rms-table [data-align="end"] {
   text-align: right;
 }
@@ -907,6 +926,30 @@ a.rms-logo--s {
   .rms-table [data-strong="true"] {
     padding-left: var(--rms-cell-x);
     box-shadow: -1px 0 0 var(--rms-line);
+  }
+
+  /* A column that asked to sit under the row's name: the column goes, its line shows, and long words wrap. */
+  .rms-table [data-phone="under-name"] {
+    display: none;
+  }
+
+  .rms-table__sub--phone {
+    display: block;
+  }
+
+  .rms-table tbody th:has(.rms-table__sub--phone) {
+    padding-block: var(--rms-space-2);
+    line-height: 1.375rem;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    vertical-align: top;
+  }
+
+  /* The figure beside a tall name lines up with the name, not with the middle of the block. */
+  .rms-table tbody tr:has(.rms-table__sub--phone) > td {
+    padding-top: var(--rms-space-2);
+    line-height: 1.375rem;
+    vertical-align: top;
   }
 }
 
@@ -1281,6 +1324,28 @@ a.rms-logo--s {
   border: 2px solid var(--rms-bar);
 }
 
+/*
+ * Did not finish is an ink ring around a solid ink square: the stop sign on any player.
+ * The step and its word go heavy, so the one line that needs a look is the heaviest in the list.
+ */
+.rms-step[data-state="stopped"],
+.rms-step[data-state="stopped"] .rms-step__state {
+  color: var(--rms-ink);
+  font-weight: var(--rms-weight-strong);
+}
+
+.rms-step[data-state="stopped"] .rms-step__mark {
+  border: 2px solid var(--rms-ink);
+}
+
+.rms-step[data-state="stopped"] .rms-step__mark::after {
+  content: "";
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 2px;
+  background: var(--rms-ink);
+}
+
 /* ---------------------------------------------------------------- conversation */
 
 .rms-conversation {
@@ -1530,13 +1595,14 @@ a.rms-logo--s {
   cursor: pointer;
 }
 
-.rms-bottom-bar__item[aria-current="page"],
+.rms-bottom-bar__item[aria-current],
 .rms-bottom-bar__item[aria-expanded="true"] {
   color: var(--rms-action-ink);
   font-weight: var(--rms-weight-heavy);
 }
 
-.rms-bottom-bar__item[aria-current="page"]::before {
+/* The marker also sits over More when the page you are on lives behind it. */
+.rms-bottom-bar__item[aria-current]::before {
   content: "";
   position: absolute;
   top: -1px;
@@ -2192,6 +2258,27 @@ a.rms-logo--s {
   text-align: right;
 }
 
+/* A quieter line under the label. */
+.rms-detail-list__note {
+  display: block;
+  color: var(--rms-muted);
+  font-size: var(--rms-text-s);
+  font-weight: var(--rms-weight-body);
+  line-height: 1.25rem;
+}
+
+/* A list of things, not facts about one: the name is the thing you came for, so it is in ink. */
+.rms-detail-list[data-lead="label"] dt {
+  color: var(--rms-ink);
+  font-weight: var(--rms-weight-label);
+  line-height: 1.375rem;
+}
+
+.rms-detail-list[data-lead="label"] dd {
+  font-weight: var(--rms-weight-heavy);
+  white-space: nowrap;
+}
+
 /* ---------------------------------------------------------------- pattern: form */
 
 .rms-form {
@@ -2572,6 +2659,18 @@ a.rms-logo--s {
   display: grid;
   gap: var(--rms-space-6);
   min-width: 0;
+}
+
+/* On a phone the way out stays on the top line beside the name, and the navigation takes the line under it. */
+@media (max-width: 40rem) {
+  .rms-canvas__head {
+    column-gap: var(--rms-space-3);
+  }
+
+  .rms-canvas__head > nav {
+    order: 1;
+    flex-basis: 100%;
+  }
 }
 
 /* ---------------------------------------------------------------- reduced motion */

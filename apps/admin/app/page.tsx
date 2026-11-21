@@ -1,6 +1,6 @@
 "use client";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
-import { Button, Heading, Notice, Row, Select, Text } from "@rms/ui";
+import { Button, EmptyState, Heading, Notice, Row, Select, Text } from "@rms/ui";
 import { ChangeTable } from "@/components/change-table";
 import { ApiError, type FeedItem, apiFetch } from "@/lib/api";
 
@@ -20,6 +20,8 @@ export default function FeedPage() {
   const [items, setItems] = useState<FeedItem[]>([]);
   const [next, setNext] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // The API said this account is not a maintainer: there is nothing here to filter or page through.
+  const [refused, setRefused] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async (f: Filters, before?: string) => {
@@ -31,6 +33,7 @@ export default function FeedPage() {
       setNext(page.nextBefore);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Something went wrong.");
+      setRefused(e instanceof ApiError && e.status === 403);
     } finally {
       setLoading(false);
     }
@@ -45,6 +48,20 @@ export default function FeedPage() {
     const form = new FormData(event.currentTarget);
     setFilters({ tier: String(form.get("tier") ?? ""), decision: String(form.get("decision") ?? "") });
   };
+
+  if (refused) {
+    return (
+      <>
+        <Heading level={1} size="page">
+          Change feed
+        </Heading>
+        <Notice kind="problem">{error}</Notice>
+        <Text>The console is for RMS maintainers. Sign out, then sign in with a maintainer account.</Text>
+      </>
+    );
+  }
+
+  const filtered = filters.tier !== "" || filters.decision !== "";
 
   return (
     <>
@@ -84,9 +101,15 @@ export default function FeedPage() {
         </Row>
       </form>
       {error ? <Notice kind="problem">{error}</Notice> : null}
-      {!error && !loading && items.length === 0 ? <Text>No changes match these filters.</Text> : null}
+      {!error && !loading && items.length === 0 ? (
+        filtered ? (
+          <EmptyState title="No changes match these filters">Pick another tier or status, or go back to all tiers and any status.</EmptyState>
+        ) : (
+          <EmptyState title="No changes yet">Every change a restaurant or RMS makes shows here, newest first.</EmptyState>
+        )
+      ) : null}
       {items.length > 0 ? <ChangeTable items={items} caption="Changes, newest first" /> : null}
-      {loading ? <Notice kind="status">Loading...</Notice> : null}
+      {loading ? <Notice kind="status">Loading changes…</Notice> : null}
       {next && !loading ? (
         <div>
           <Button onClick={() => void load(filters, next)}>Show older changes</Button>

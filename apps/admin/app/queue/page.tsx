@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import { Button, FieldGroup, Heading, Notice, Row, Text, TextArea } from "@rms/ui";
+import { Button, EmptyState, FieldGroup, Heading, Notice, Row, Text, TextArea } from "@rms/ui";
 import { ChangeTable } from "@/components/change-table";
 import { ApiError, type FeedItem, apiFetch } from "@/lib/api";
 
@@ -8,6 +8,8 @@ export default function QueuePage() {
   const [items, setItems] = useState<FeedItem[]>([]);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
+  // The API said this account is not a maintainer.
+  const [refused, setRefused] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
@@ -19,6 +21,7 @@ export default function QueuePage() {
       setItems((await apiFetch<{ items: FeedItem[] }>("/admin/queue")).items);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Something went wrong.");
+      setRefused(e instanceof ApiError && e.status === 403);
     } finally {
       setLoading(false);
     }
@@ -49,10 +52,13 @@ export default function QueuePage() {
       <Heading level={1} size="page">
         Review queue
       </Heading>
-      <Text>Changes held until a maintainer approves them, oldest first.</Text>
+      {items.length > 0 ? <Text>Changes held until a maintainer approves them, oldest first.</Text> : null}
       {status ? <Notice kind="status">{status}</Notice> : null}
       {error ? <Notice kind="problem">{error}</Notice> : null}
-      {!error && !loading && items.length === 0 ? <Text>Nothing is waiting for review.</Text> : null}
+      {refused ? <Text>The console is for RMS maintainers. Sign out, then sign in with a maintainer account.</Text> : null}
+      {!error && !loading && items.length === 0 ? (
+        <EmptyState title="Nothing is waiting for review">A change that needs a maintainer to approve it is held here until one of us decides, oldest first.</EmptyState>
+      ) : null}
       {items.length > 0 ? (
         <ChangeTable
           items={items}
@@ -79,7 +85,7 @@ export default function QueuePage() {
           )}
         />
       ) : null}
-      {loading ? <Notice kind="status">Loading...</Notice> : null}
+      {loading ? <Notice kind="status">Loading the queue…</Notice> : null}
     </>
   );
 }

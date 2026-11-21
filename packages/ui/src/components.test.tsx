@@ -82,6 +82,38 @@ describe("Stepper", () => {
     expect(html.match(/aria-current="step"/g)).toHaveLength(1);
     expect(html).toContain('data-state="now" aria-current="step"');
   });
+
+  const stopped = renderToStaticMarkup(
+    <Stepper
+      label="Progress"
+      steps={[
+        { id: "a", label: "Set up your vendor list", state: "done" },
+        { id: "b", label: "Building the screen", state: "stopped" },
+        { id: "c", label: "Checking it works", state: "todo" },
+      ]}
+    />,
+  );
+
+  it("a step that did not finish says so in words, and is not the current step", () => {
+    expect(stopped).toContain('data-state="stopped"');
+    expect(stopped).toContain("Did not finish");
+    expect(stopped).not.toContain("aria-current");
+  });
+
+  it("a step that did not finish has its own ink shape, and no colour", () => {
+    expect(rule('.rms-step[data-state="stopped"] .rms-step__mark')).toContain("border: 2px solid var(--rms-ink)");
+    expect(rule('.rms-step[data-state="stopped"] .rms-step__mark::after')).toContain("background: var(--rms-ink)");
+    for (const block of css.match(/\.rms-step\[data-state="stopped"\][^{]*\{[^}]*\}/g) ?? []) expect(block).not.toContain("--rms-action");
+  });
+
+  it("changing one state's word keeps the usual words for the rest", () => {
+    const html = renderToStaticMarkup(
+      <Stepper label="Progress" words={{ stopped: "Stopped" }} steps={[{ id: "a", label: "One", state: "done" }, { id: "b", label: "Two", state: "stopped" }]} />,
+    );
+    expect(html).toContain("Done");
+    expect(html).toContain("Stopped");
+    expect(html).not.toContain("Did not finish");
+  });
 });
 
 describe("BarChart", () => {

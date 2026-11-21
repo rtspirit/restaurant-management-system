@@ -281,6 +281,17 @@ export function Gallery() {
                   { id: "c", label: "Ready to publish", state: "todo" },
                 ]}
               />
+              <Text tone="muted" size="s">
+                A step that did not finish is an ink ring around a solid square, in heavy words. The steps after it stay not started.
+              </Text>
+              <Stepper
+                label="Progress that stopped"
+                steps={[
+                  { id: "a", label: "Setting up your vendor list", state: "done" },
+                  { id: "b", label: "Building the screen", state: "stopped" },
+                  { id: "c", label: "Checking it works", state: "todo" },
+                ]}
+              />
             </Stack>
           </Card>
         </Section>

@@ -13,15 +13,19 @@ export default function SignUpPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // The two passwords differ: said at the second box, where it is fixed, not above the button.
+  const [mismatch, setMismatch] = useState(false);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const password = String(form.get("password") ?? "");
     if (password !== String(form.get("confirm") ?? "")) {
-      setError("The two passwords are not the same.");
+      setError(null);
+      setMismatch(true);
       return;
     }
+    setMismatch(false);
     setBusy(true);
     setError(null);
     try {
@@ -82,7 +86,17 @@ export default function SignUpPage() {
             minLength={MIN_PASSWORD}
             required
           />
-          <TextField id="confirm" name="confirm" type="password" label="Type the password again" autoComplete="new-password" minLength={MIN_PASSWORD} required />
+          <TextField
+            id="confirm"
+            name="confirm"
+            type="password"
+            label="Type the password again"
+            autoComplete="new-password"
+            minLength={MIN_PASSWORD}
+            required
+            {...(mismatch ? { error: "The two passwords are not the same. Type the same password in both boxes." } : {})}
+            onChange={() => setMismatch(false)}
+          />
         </FormLayout>
       )}
       <Text>
