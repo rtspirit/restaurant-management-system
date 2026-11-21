@@ -26,9 +26,11 @@ export async function updateSession(request: NextRequest) {
         cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
         supabaseResponse = NextResponse.next({ request });
         cookiesToSet.forEach(({ name, value, options }) => supabaseResponse.cookies.set(name, value, options));
-        // Responses that set auth cookies must never be cached for another person.
-        cacheHeaders = headers;
-        Object.entries(headers).forEach(([k, v]) => supabaseResponse.headers.set(k, v));
+        // Responses that set auth cookies must never be cached for another person. A later
+        // call may pass no headers, so merge rather than replace, and apply all of them to
+        // the new response.
+        cacheHeaders = { ...cacheHeaders, ...headers };
+        Object.entries(cacheHeaders).forEach(([k, v]) => supabaseResponse.headers.set(k, v));
       },
     },
   });

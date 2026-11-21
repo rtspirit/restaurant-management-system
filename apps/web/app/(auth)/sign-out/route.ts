@@ -5,7 +5,8 @@ import { createClient } from "@/lib/supabase/server";
 
 export async function POST(request: Request) {
   const supabase = await createClient();
-  await supabase.auth.signOut();
+  // Local scope: clears this browser's session even when the sign-in service is unreachable.
+  await supabase.auth.signOut({ scope: "local" });
   const res = NextResponse.redirect(new URL("/sign-in", request.url), 303);
   res.headers.set("cache-control", "private, no-store");
   return res;

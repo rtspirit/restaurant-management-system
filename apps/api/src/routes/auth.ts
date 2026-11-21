@@ -4,13 +4,12 @@
 // (`requireUser`). The body never names a user, restaurant or role.
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { OnboardingAnswers, type Role, type ServiceStyle, toPublicId } from "@rms/contracts";
-import { type Sql, type Tx, adminDb, apiDb, newUuid, withOrg } from "@rms/db";
+import { type DemoTemplate, type MeResponse, type MyRestaurant, OnboardingAnswers, type ServiceStyle, toPublicId } from "@rms/contracts";
+import { type Sql, adminDb, apiDb, newUuid, withOrg } from "@rms/db";
 import { type SignedInUser, type UserEnv, membershipsFor, requireUser } from "@rms/auth";
 import * as seed from "@rms/seed";
 
 /** The interface task B exports from `@rms/seed` (wave 1 brief, task A section). */
-export type DemoTemplate = "marigold" | "slice_yard";
 export type CreateDemoRestaurant = (
   adminSql: Sql,
   opts: { template: DemoTemplate },
@@ -21,27 +20,13 @@ export type AuthRouteDeps = { createDemoRestaurant: CreateDemoRestaurant | undef
 /** Which demo restaurant a new owner gets, from their answer about service style. */
 export const templateFor = (style: ServiceStyle): DemoTemplate => (style === "counter_service" ? "slice_yard" : "marigold");
 
-export type RestaurantView = {
-  id: string;
-  name: string;
-  role: Role;
-  brandColour: string | null;
-  locations: { id: string; name: string }[];
-  ready: boolean;
-};
-
-export type MeResponse = {
-  user: { id: string; email: string | null };
-  restaurant: RestaurantView | null;
-};
-
 const fail = (code: string, message: string) => ({ error: { code, message, requestId: crypto.randomUUID() } });
 
 /**
  * The signed-in user's restaurant, read through the restaurant-facing login fenced to the org
  * found from the user's own membership row. Returns null when they have not onboarded.
  */
-const restaurantFor = async (user: SignedInUser): Promise<RestaurantView | null> => {
+const restaurantFor = async (user: SignedInUser): Promise<MyRestaurant | null> => {
   const [m] = await membershipsFor(user.userUuid);
   if (!m) return null;
   return withOrg(apiDb(), m.orgUuid, async (tx) => {
@@ -65,9 +50,19 @@ const restaurantFor = async (user: SignedInUser): Promise<RestaurantView | null>
   });
 };
 
-/** One onboarding at a time per user, across every server instance (transaction-scoped lock). */
-const lockUser = (tx: Tx, userUuid: string) =>
-  tx`select pg_advisory_xact_lock(hashtextextended(${`rms.onboard:${userUuid}`}, 0))`;
+/**
+ * Switches off an org that nobody owns: suspended first, then its store dropped. An org with
+ * any member is never touched.
+ */
+const retireIfOwnerless = async (admin: Sql, orgUuid: string): Promise<void> => {
+  const suspended = await admin`
+    update platform.organizations o set status = 'suspended'
+    where o.id = ${orgUuid} and not exists (select 1 from platform.members m where m.org_id = o.id)
+    returning o.id`;
+  if (suspended.length > 0) await admin`select platform.drop_store(${orgUuid})`;
+};
+
+type Outcome = "exists" | "busy" | "blocked" | "not_ready" | "not_fresh" | "created";
 
 export const createAuthRoutes = (deps: AuthRouteDeps) => {
   const routes = new Hono<UserEnv>();
@@ -107,43 +102,70 @@ export const createAuthRoutes = (deps: AuthRouteDeps) => {
     const existing = await restaurantFor(user);
     if (existing) return c.json({ restaurant: existing, created: false });
 
-    const create = deps.createDemoRestaurant;
-    if (!create) return c.json(fail("not_ready", "Setting up restaurants is not available yet. Please try again later."), 503);
-
-    // Demo: every new owner gets a copy of a seeded fictional restaurant. The name the owner
-    // typed (answers.restaurantName) is deliberately NOT used: the seeded restaurant keeps its
-    // fictional name so its parent data (menu, staff, licences) stays consistent.
     const admin = adminDb();
-    const made = await create(admin, { template: templateFor(parsed.data.serviceStyle) });
+    const create = deps.createDemoRestaurant;
+    let made: string | undefined; // an org created by this request and not yet owned
+    let committed = false;
+    let outcome: Outcome;
+    try {
+      // One transaction holds the per-user lock across the whole flow. Try, never wait, so
+      // parallel requests do not pile up on the small admin pool and build nothing.
+      outcome = await admin.begin(async (tx): Promise<Outcome> => {
+        const [lock] = await tx<{ got: boolean }[]>`
+          select pg_try_advisory_xact_lock(hashtextextended(${`rms.onboard:${user.userUuid}`}, 0)) as got`;
+        if (!lock?.got) return "busy";
 
-    // Add the owner under a per-user lock, re-checking membership inside the lock, so two
-    // onboarding requests racing for one user cannot both get a restaurant.
-    const won = await admin.begin(async (tx) => {
-      await lockUser(tx, user.userUuid);
-      const [has] = await tx<{ id: string }[]>`
-        select m.id from platform.members m join platform.organizations o on o.id = m.org_id
-        where m.user_id = ${user.userUuid} and m.status = 'active' and o.status = 'active' limit 1`;
-      if (has) return false;
-      await tx`insert into platform.members (id, org_id, user_id, role) values (${newUuid()}, ${made.orgUuid}, ${user.userUuid}, 'owner')`;
-      return true;
-    });
+        const rows = await tx<{ member_status: string; org_status: string }[]>`
+          select m.status as member_status, o.status as org_status
+          from platform.members m join platform.organizations o on o.id = m.org_id
+          where m.user_id = ${user.userUuid}`;
+        if (rows.some((r) => r.member_status === "active" && r.org_status === "active")) return "exists";
+        // Removed, invited, or only in a suspended restaurant: no fresh restaurant for them.
+        if (rows.length > 0) return "blocked";
+        if (!create) return "not_ready";
 
-    if (!won) {
-      // Lost the race: the restaurant just made belongs to nobody. Take its store down and
-      // switch it off so it can never be reached.
-      await admin`select platform.drop_store(${made.orgUuid})`;
-      await admin`update platform.organizations set status = 'suspended' where id = ${made.orgUuid}`;
+        // Demo: every new owner gets a copy of a seeded fictional restaurant. The name the owner
+        // typed (answers.restaurantName) is deliberately NOT used: the seeded restaurant keeps
+        // its fictional name so its parent data (menu, staff, licences) stays consistent.
+        // createDemoRestaurant uses its own connections; this transaction only holds the lock.
+        const result = await create(admin, { template: templateFor(parsed.data.serviceStyle) });
+        const [owned] = await tx<{ n: number }[]>`select count(*)::int as n from platform.members where org_id = ${result.orgUuid}`;
+        // Must be a brand-new restaurant. One that already has people is not ours to touch.
+        if ((owned?.n ?? 0) > 0) return "not_fresh";
+        made = result.orgUuid;
+
+        await tx`insert into platform.members (id, org_id, user_id, role) values (${newUuid()}, ${result.orgUuid}, ${user.userUuid}, 'owner')`;
+        return "created";
+      });
+      committed = true;
+    } finally {
+      // Anything failed after the restaurant was made (or the commit itself): switch it off.
+      if (made && !committed) await retireIfOwnerless(admin, made);
     }
 
-    const restaurant = await restaurantFor(user);
-    return c.json({ restaurant, created: won }, won ? 201 : 200);
+    switch (outcome) {
+      case "busy":
+        return c.json(fail("busy", "Your restaurant is being set up. Give it a moment."), 409);
+      case "blocked":
+        return c.json(fail("not_allowed", "This account cannot set up a restaurant. Contact support."), 403);
+      case "not_ready":
+        return c.json(fail("not_ready", "Setting up restaurants is not available yet. Please try again later."), 503);
+      case "not_fresh":
+        console.error(JSON.stringify({ path: c.req.path, error: "createDemoRestaurant returned an org that already has members" }));
+        return c.json(fail("internal", "Something went wrong on our side. Please try again."), 500);
+      case "exists":
+      case "created": {
+        const restaurant = await restaurantFor(user);
+        return c.json({ restaurant, created: outcome === "created" }, outcome === "created" ? 201 : 200);
+      }
+    }
   });
 
   return routes;
 };
 
 // Task B's `createDemoRestaurant` is picked up once `@rms/seed` exports it. Until then
-// onboarding answers 503 in plain words.
+// onboarding answers 503 in plain words. The lead switches this to a direct import at integration.
 export const authRoutes = createAuthRoutes({
   createDemoRestaurant: (seed as Partial<{ createDemoRestaurant: CreateDemoRestaurant }>).createDemoRestaurant,
 });
