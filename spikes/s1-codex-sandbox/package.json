@@ -1,0 +1,9 @@
+{
+  "name": "s1-codex-sandbox-spike",
+  "private": true,
+  "type": "module",
+  "description": "Throwaway spike S1: Codex inside a Vercel Sandbox with firewall key injection. Not part of the workspace.",
+  "dependencies": {
+    "@vercel/sandbox": "4.1.0"
+  }
+}
