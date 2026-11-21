@@ -3,11 +3,7 @@
 // token and passes only that in. A restaurant that is not a demo template gets `null` here,
 // and every list comes back empty.
 import { DEMO_POS_TOOLS, type DemoPosRangeInput, type DemoPosToolName } from "@rms/contracts";
-import { DEMO_TEMPLATES, type DemoTemplate, type GeneratedSales, TEMPLATES, generateSales } from "@rms/seed";
-
-/** The demo template a restaurant's numbers come from, worked out from its own name. Null for any other restaurant. */
-export const templateForName = (restaurantName: string): DemoTemplate | null =>
-  DEMO_TEMPLATES.find((t) => TEMPLATES[t].name === restaurantName) ?? null;
+import { type DemoTemplate, type GeneratedSales, generateSales } from "@rms/seed";
 
 // The numbers are deterministic, so each template is generated once per process.
 const cache = new Map<DemoTemplate, GeneratedSales>();

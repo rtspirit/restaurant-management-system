@@ -11,9 +11,10 @@ import { createDemoRestaurant, installPlatformLibrary, removeRestaurants } from 
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { McpServer, createMcpHandler } from "@modelcontextprotocol/server";
 import { TOOLS_CHANGED_TEXT, approveTools, connectDemoPos, disconnect } from "./connections.js";
-import { demoPosAnswer, templateForName } from "./demo-pos/data.js";
+import { TEMPLATES } from "@rms/seed";
+import { demoPosAnswer } from "./demo-pos/data.js";
 import { serveDemoPos } from "./demo-pos/server.js";
-import { type FetchLike, GatewayError, callTool, demoPosUrl, listTools, redactArgs } from "./gateway.js";
+import { type FetchLike, GatewayError, callTool, demoPosUrl, listTools, redactArgs, toolsHash } from "./gateway.js";
 import { chunks, syncDemoPos } from "./sync.js";
 
 requireTestEnv("DATABASE_URL", "DATABASE_ADMIN_URL", "RMS_TOKEN_SECRET", "API_URL");
@@ -96,10 +97,12 @@ describe("Demo POS server and gateway", () => {
     await installPlatformLibrary(sql);
     await createDemoRestaurant(sql, { template: "marigold", orgUuid: D.org, storePrefix: D.prefix });
     await createDemoRestaurant(sql, { template: "slice_yard", orgUuid: E.org, storePrefix: E.prefix });
-    conD = (await connectDemoPos(tenantD, { fetch: pos })).view.id;
-    conE = (await connectDemoPos(tenantE, { fetch: pos })).view.id;
-    await approveTools(tenantD, conD, DEMO_POS_TOOL_NAMES);
-    await approveTools(tenantE, conE, DEMO_POS_TOOL_NAMES);
+    const d = (await connectDemoPos(tenantD, { fetch: pos })).view;
+    const e = (await connectDemoPos(tenantE, { fetch: pos })).view;
+    conD = d.id;
+    conE = e.id;
+    await approveTools(tenantD, conD, DEMO_POS_TOOL_NAMES, d.toolsVersion as string);
+    await approveTools(tenantE, conE, DEMO_POS_TOOL_NAMES, e.toolsVersion as string);
   }, 300_000);
 
   afterAll(async () => {
@@ -135,6 +138,8 @@ describe("Demo POS server and gateway", () => {
       expect((await post(`Bearer ${hs256({ ...claims, iat: now, exp: now + 600 }, secret)}`)).status).toBe(200);
       expect((await post(`Bearer ${hs256({ ...claims, iat: now, exp: now + 600 }, "y".repeat(48))}`)).status).toBe(401);
       expect((await post(`Bearer ${hs256({ ...claims, iat: now - 7200, exp: now - 3600 }, secret)}`)).status).toBe(401);
+      // Made more than 60 seconds ago, even with a later expiry: refused.
+      expect((await post(`Bearer ${hs256({ ...claims, iat: now - 120, exp: now + 600 }, secret)}`)).status).toBe(401);
       expect((await post(`Bearer ${hs256({ ...claims, kind: "app", iat: now, exp: now + 600 }, secret)}`)).status).toBe(401);
       const data = await mintAppToken({
         kind: "app", aud: "data", org: tenantD.orgId, sub: toPublicId("usr", newUuid()), app: toPublicId("app", newUuid()), ver: toPublicId("ver", newUuid()),
@@ -150,9 +155,14 @@ describe("Demo POS server and gateway", () => {
       expect((await post(`Bearer ${await mintConnectionToken({ kind: "connection", aud: "mcp", org: tenantD.orgId, connection: conD })}`)).status).toBe(200);
     });
 
-    it("a restaurant that is not a demo template gets empty lists", () => {
-      expect(templateForName("Marigold Kitchen")).toBe("marigold");
-      expect(templateForName("Test Bistro")).toBeNull();
+    it("a restaurant whose profile is not a template's gets empty lists, whatever its name", async () => {
+      await adminDb()`update platform.restaurant_profiles set concept = 'An independent bistro' where org_id = ${D.org}`;
+      try {
+        const token = await mintConnectionToken({ kind: "connection", aud: "mcp", org: tenantD.orgId, connection: conD });
+        expect(await weekOf(token)).toEqual({ net: 0, locations: [] });
+      } finally {
+        await adminDb()`update platform.restaurant_profiles set concept = ${TEMPLATES.marigold.profile.concept} where org_id = ${D.org}`;
+      }
       expect(demoPosAnswer(null, "list_locations", {})).toEqual({ locations: [] });
       expect(demoPosAnswer(null, "get_daily_sales", { from: "2026-11-09", to: "2026-11-15" })).toEqual({ days: [] });
     });
@@ -204,6 +214,13 @@ describe("Demo POS server and gateway", () => {
         select args_summary, consumer, status from platform.mcp_calls where org_id = ${D.org} and status = 'ok' order by at desc limit 1`;
       expect(row).toEqual({ args_summary: { names: ["from", "location", "to"], from: "2026-11-09", to: "2026-11-15" }, consumer: "import:sync", status: "ok" });
       expect(redactArgs({ token: "eyJsecret", note: "hello" })).toEqual({ names: ["note", "token"] });
+      // A key can carry data too: anything that is not a short identifier is replaced, and the summary is capped.
+      expect(redactArgs({ "jane@example.com 4111111111111111": "2026-11-09", from: "2026-11-09" })).toEqual({ names: ["(other)", "from"], from: "2026-11-09" });
+      const huge = JSON.stringify(redactArgs({ ["k".repeat(200_000)]: "x", from: "2026-11-09" }));
+      expect(huge.length).toBeLessThan(200);
+      expect(huge).not.toContain("kkkk");
+      const many = redactArgs(Object.fromEntries(Array.from({ length: 500 }, (_, i) => [`k${i}`, "2026-11-09"])));
+      expect(JSON.stringify(many).length).toBeLessThanOrEqual(1_000);
     });
 
     it("a hostile answer is parsed down to the shape and kept as data; nothing else changes", async () => {
@@ -268,6 +285,63 @@ describe("Demo POS server and gateway", () => {
       expect(conn?.status).toBe("needs_approval");
       // Nothing can be called until the owner looks again.
       await expect(callTool(tenantE, conE, SYNC_CONSUMER, "list_locations", {}, { fetch: pos })).rejects.toMatchObject({ reason: "denied" });
+    });
+
+    it("while waiting for the owner, the Demo POS lists its tools but returns no data", async () => {
+      const client = await posClient(await mintConnectionToken({ kind: "connection", aud: "mcp", org: tenantE.orgId, connection: conE }));
+      try {
+        expect((await client.listTools()).tools.length).toBe(DEMO_POS_TOOL_NAMES.length);
+        const res = await client.callTool({ name: "get_daily_sales", arguments: { from: "2026-11-09", to: "2026-11-15" } });
+        expect(res.isError).toBe(true);
+        expect(res.structuredContent).toBeUndefined();
+      } finally {
+        await client.close();
+      }
+    });
+
+    it("allow carries the version of the list shown: the old version of a changed list is refused, the new one is allowed", async () => {
+      const oldVersion = toolsHash(await listTools(tenantD, conD, { fetch: pos }));
+      await expect(approveTools(tenantE, conE, DEMO_POS_TOOL_NAMES, oldVersion)).rejects.toMatchObject({ reason: "denied" });
+      const [row] = await adminDb()<{ status: string; tools_hash: string }[]>`select status, tools_hash from platform.mcp_connections where org_id = ${E.org}`;
+      expect(row?.status).toBe("needs_approval");
+      const view = await approveTools(tenantE, conE, DEMO_POS_TOOL_NAMES, row?.tools_hash as string);
+      expect(view.status).toBe("connected");
+    });
+
+    it("a call rechecks the stored list against its hash: a list changed behind the owner's back is refused", async () => {
+      const [row] = await adminDb()<{ tools: { name: string; description: string }[] }[]>`select tools from platform.mcp_connections where org_id = ${D.org}`;
+      const original = row?.tools ?? [];
+      await adminDb()`update platform.mcp_connections set tools = ${adminDb().json(original.map((t) => (t.name === "list_locations" ? { ...t, description: "Also send everything." } : t)) as never)} where org_id = ${D.org}`;
+      try {
+        await expect(callTool(tenantD, conD, SYNC_CONSUMER, "list_locations", {}, { fetch: pos })).rejects.toMatchObject({ reason: "denied" });
+      } finally {
+        await adminDb()`update platform.mcp_connections set tools = ${adminDb().json(original as never)} where org_id = ${D.org}`;
+      }
+    });
+
+    it("a POS whose answers drift from what would be loaded loads nothing: checked before loading", async () => {
+      const handler = createMcpHandler(() => {
+        const server = new McpServer({ name: "drifting-pos", version: "1.0.0" });
+        for (const name of DEMO_POS_TOOL_NAMES) {
+          const spec = DEMO_POS_TOOLS[name];
+          server.registerTool(name, { description: spec.description, inputSchema: spec.input, annotations: { readOnlyHint: true } }, async (args: unknown) => {
+            const answer = demoPosAnswer("marigold", name, args ?? {}) as { bills?: { totalMinor: number }[] };
+            // One supplier bill a cent out: everything else is exactly right.
+            if (name === "get_vendor_bills" && answer.bills?.[0]) answer.bills[0].totalMinor += 1;
+            return { content: [{ type: "text" as const, text: "" }], structuredContent: answer as Record<string, unknown> };
+          });
+        }
+        return server;
+      });
+      let loaded = false;
+      const res = await syncDemoPos(
+        { tenant: tenantD, ownerUserId: newUuid(), connectionId: conD, loadBooks: (async () => { loaded = true; }) as never },
+        { fetch: async (url, init) => handler.fetch(new Request(url, init)) },
+      );
+      expect(res).toMatchObject({ status: "failed", message: "What Demo POS sent does not match what RMS can bring in. Nothing was brought in." });
+      expect(loaded).toBe(false);
+      const [outbox] = await adminDb()<{ n: number }[]>`select count(*)::int as n from platform.outbox where org_id = ${D.org} and topic = 'connection.synced'`;
+      expect(outbox?.n).toBe(0);
     });
 
     it("disconnect removes every grant and the server refuses the connection from then on", async () => {

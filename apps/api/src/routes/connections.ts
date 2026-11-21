@@ -6,7 +6,7 @@
 import { ApproveToolsRequest, ConnectRequest, SyncRequest, toUuid } from "@rms/contracts";
 import { type SessionEnv, requireSession } from "@rms/auth";
 import { adminDb } from "@rms/db";
-import { GovernanceError, confirmByOwner, recordChange } from "@rms/governance";
+import { GovernanceError, confirmByOwner, recordChange, writeAudit } from "@rms/governance";
 import {
   GatewayError,
   type GatewayOptions,
@@ -15,6 +15,7 @@ import {
   connectDemoPos,
   disconnect,
   listConnections,
+  markConnectionError,
   syncDemoPos,
 } from "@rms/mcp";
 import { type Context, Hono } from "hono";
@@ -67,45 +68,73 @@ connectionRoutes.post("/v1", async (c) => {
 
   const tenant = c.get("tenant");
   const requestId = crypto.randomUUID();
+  let outcome: Awaited<ReturnType<typeof connectDemoPos>>;
   try {
-    const outcome = await connectDemoPos(tenantOf(c), gatewayOptions);
-    if (outcome.created) {
-      // A new connection is a T2 change: recorded, then confirmed at once, because pressing
-      // Connect IS the owner's one-sentence yes. Both on the admin connection (ADR 0004).
-      const change = await adminDb().begin((tx) =>
-        recordChange(tx, {
-          orgUuid: tenant.orgId,
-          origin: "connection",
-          actor: tenant.actor,
-          signals: ["new_connection"],
-          subject: { kind: "connection", name: outcome.view.name },
-          diff: { tools: outcome.tools.map((t) => t.name), readOnly: outcome.tools.every((t) => t.readOnly) },
-          requestId,
-        }),
-      );
-      if (change.decision === "pending_owner") {
-        await confirmByOwner(adminDb(), { orgUuid: tenant.orgId, changeSetId: change.id, actor: tenant.actor, role: tenant.role, requestId });
-      }
-    }
-    return c.json(outcome.view);
+    outcome = await connectDemoPos(tenantOf(c), gatewayOptions);
   } catch (e) {
-    if (e instanceof GovernanceError) {
-      logLine({ requestId, at: "connections.connect", error: e.message });
-      return apiError(c, "internal", "Something went wrong on our side. Please try again.", requestId);
+    return gatewayFailure(c, e);
+  }
+  if (!outcome.created) return c.json(outcome.view);
+  // A new connection is a T2 change: recorded, then confirmed at once, because pressing Connect
+  // IS the owner's one-sentence yes. Both on the admin connection (ADR 0004). The connection can
+  // read nothing until Allow; if the change cannot be recorded it is marked `error` (no grants),
+  // so it never works unrecorded and the next press records it again.
+  try {
+    const change = await adminDb().begin((tx) =>
+      recordChange(tx, {
+        orgUuid: tenant.orgId,
+        origin: "connection",
+        actor: tenant.actor,
+        signals: ["new_connection"],
+        subject: { kind: "connection", name: outcome.view.name },
+        diff: { tools: outcome.tools.map((t) => t.name), readOnly: outcome.tools.every((t) => t.readOnly) },
+        requestId,
+      }),
+    );
+    if (change.decision === "pending_owner") {
+      await confirmByOwner(adminDb(), { orgUuid: tenant.orgId, changeSetId: change.id, actor: tenant.actor, role: tenant.role, requestId });
     }
+  } catch (e) {
+    logLine({ requestId, at: "connections.connect", error: e instanceof GovernanceError ? e.message : e instanceof Error ? e.name : "unknown" });
+    await markConnectionError(tenantOf(c), outcome.view.id).catch(() => undefined);
+    return apiError(c, "internal", "Something went wrong on our side. Please try again.", requestId);
+  }
+  return c.json(outcome.view);
+});
+
+connectionRoutes.post("/v1/:connectionId/approve", async (c) => {
+  // `toolsVersion` is the hash of the list the owner was shown (from the connection view). It is
+  // taken out before the shared, strict `ApproveToolsRequest` shape is checked. (Asked of the lead:
+  // add it to the contract.)
+  const body = await readJson(c);
+  if (body === null || typeof body !== "object" || Array.isArray(body)) return apiError(c, "invalid_request", "That request was not understood.");
+  const { toolsVersion, ...rest } = body as Record<string, unknown>;
+  const parsed = ApproveToolsRequest.safeParse(rest);
+  if (!parsed.success || typeof toolsVersion !== "string" || !/^[0-9a-f]{64}$/.test(toolsVersion)) {
+    return apiError(c, "invalid_request", "That request was not understood.");
+  }
+  const tenant = c.get("tenant");
+  const requestId = crypto.randomUUID();
+  try {
+    const view = await approveTools(tenantOf(c), c.req.param("connectionId"), parsed.data.tools, toolsVersion);
+    // The owner's yes to a tool list goes on the record: which connection and how many tools, never their text.
+    await adminDb().begin((tx) =>
+      writeAudit(tx, {
+        orgUuid: tenant.orgId,
+        actor: tenant.actor,
+        action: "connection.approve",
+        targetType: "connection",
+        targetId: view.id,
+        meta: { tools: view.tools.length, granted: view.tools.filter((t) => t.granted).length },
+        requestId,
+      }),
+    );
+    return c.json(view);
+  } catch (e) {
     return gatewayFailure(c, e);
   }
 });
 
-connectionRoutes.post("/v1/:connectionId/approve", async (c) => {
-  const parsed = ApproveToolsRequest.safeParse(await readJson(c));
-  if (!parsed.success) return apiError(c, "invalid_request", "That request was not understood.");
-  try {
-    return c.json(await approveTools(tenantOf(c), c.req.param("connectionId"), parsed.data.tools));
-  } catch (e) {
-    return gatewayFailure(c, e);
-  }
-});
 
 connectionRoutes.post("/v1/:connectionId/sync", async (c) => {
   const body = await readJson(c);

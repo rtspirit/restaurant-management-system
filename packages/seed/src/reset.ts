@@ -250,7 +250,7 @@ export const resetDemo = async (adminSql: Sql, env: Env = process.env, opts: Res
     const [owner] = await adminSql<{ user_id: string }[]>`
       select user_id from platform.members where org_id = ${r.orgUuid} and role = 'owner' order by created_at limit 1`;
     if (!owner) throw new Error(`${r.name} has no owner to record its numbers under`);
-    const { books: loaded } = await seedDemoBooks(adminSql, { orgUuid: r.orgUuid, template, ownerUserId: owner.user_id, withSales });
+    const { books: loaded } = await seedDemoBooks(adminSql, { orgUuid: r.orgUuid, template, ownerUserId: owner.user_id, withSales, draftSamples: true });
     // Giving a restaurant its tables is a change like any other, so it goes on the record:
     // one change set per restaurant, which the maintainer console's feed then shows.
     await adminSql.begin((tx) =>

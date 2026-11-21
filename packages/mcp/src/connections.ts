@@ -47,6 +47,8 @@ type Row = {
   granted: string[] | null;
 };
 
+// Built once from constants (SYNC_CONSUMER is a literal in @rms/contracts), never from a request:
+// nothing a caller sends reaches this text. Ids are bound as parameters where it is used.
 const ROW_SELECT = `
   select c.id, c.name, c.catalog_key, c.status, c.tools, c.tools_hash, c.last_synced_at,
          (select array_agg(g.tool_name order by g.tool_name) from platform.mcp_tool_grants g
@@ -78,7 +80,14 @@ const statusText = (r: Row): string => {
   }
 };
 
-const toView = (r: Row): ConnectionView => {
+/**
+ * A connection as the owner sees it, plus `toolsVersion`: the hash of the tool list shown, which
+ * Allow must send back so the owner can only allow the list they saw. (Not yet in the shared
+ * `ConnectionView` contract: asked of the lead.)
+ */
+export type ConnectionViewWithVersion = ConnectionView & { toolsVersion: string | null };
+
+const toView = (r: Row): ConnectionViewWithVersion => {
   const granted = new Set(r.granted ?? []);
   return {
     id: toPublicId("con", r.id),
@@ -89,6 +98,7 @@ const toView = (r: Row): ConnectionView => {
     tools: storedTools(r.tools).map((t) => ({ name: t.name, description: t.description, readOnly: t.readOnly, granted: granted.has(t.name) })),
     lastSyncedAt: r.last_synced_at ? r.last_synced_at.toISOString() : null,
     canSync: r.catalog_key === DEMO_POS.catalogKey,
+    toolsVersion: r.tools_hash,
   };
 };
 
@@ -101,14 +111,14 @@ const readRow = async (tx: Tx, orgUuid: string, connectionUuid: string): Promise
 };
 
 /** One connection as the owner sees it. */
-export const connectionView = async (tenant: GatewayTenant, connectionId: string): Promise<ConnectionView> => {
+export const connectionView = async (tenant: GatewayTenant, connectionId: string): Promise<ConnectionViewWithVersion> => {
   const conn = await loadConnection(tenant, connectionId);
   const orgUuid = orgUuidOf(tenant);
   return toView(await withOrg(apiDb(), orgUuid, (tx) => readRow(tx, orgUuid, conn.id)));
 };
 
 /** Every connection of this restaurant that is not switched off, newest first. */
-export const listConnections = async (tenant: GatewayTenant): Promise<ConnectionView[]> => {
+export const listConnections = async (tenant: GatewayTenant): Promise<ConnectionViewWithVersion[]> => {
   const orgUuid = orgUuidOf(tenant);
   const rows = await withOrg(apiDb(), orgUuid, (tx) =>
     tx.unsafe<Row[]>(`${ROW_SELECT} where c.org_id = $1 and c.status <> 'disconnected' order by c.created_at desc limit 50`, [orgUuid]),
@@ -133,7 +143,7 @@ export const catalogEntries = async (tenant: GatewayTenant): Promise<McpCatalogE
 };
 
 export type ConnectOutcome = {
-  view: ConnectionView;
+  view: ConnectionViewWithVersion;
   /** True when this press made (or remade) the connection, so a change must be recorded. False when it was already there. */
   created: boolean;
   tools: McpToolInfo[];
@@ -192,17 +202,27 @@ export const connectDemoPos = async (tenant: GatewayTenant, opts: GatewayOptions
  * The owner allows the tool list they were shown. Refused as stale unless `names` is exactly the
  * stored list. Every read-only tool is then granted to the sync; a write tool never is.
  */
-export const approveTools = async (tenant: GatewayTenant, connectionId: string, names: readonly string[]): Promise<ConnectionView> => {
+export const approveTools = async (
+  tenant: GatewayTenant,
+  connectionId: string,
+  names: readonly string[],
+  toolsVersion: string,
+): Promise<ConnectionViewWithVersion> => {
   const conn = await loadConnection(tenant, connectionId);
   if (conn.status === "disconnected" || conn.status === "error") throw new GatewayError("denied", "This connection is switched off. Connect it again first.");
   const tools = storedTools(conn.tools);
   const stored = tools.map((t) => t.name).sort();
   const sent = [...new Set(names)].sort();
-  if (stored.length === 0 || stored.length !== sent.length || stored.some((n, i) => n !== sent[i])) {
-    throw new GatewayError("denied", "What this system offers has changed since you looked. Please look again.");
-  }
+  const stale = new GatewayError("denied", "What this system offers has changed since you looked. Please look again.");
+  // Names AND the hash of the list the owner was shown: a changed description with the same names is a different list.
+  if (stored.length === 0 || stored.length !== sent.length || stored.some((n, i) => n !== sent[i])) throw stale;
+  if (!conn.tools_hash || conn.tools_hash !== toolsVersion || toolsHash(tools) !== conn.tools_hash) throw stale;
   const orgUuid = orgUuidOf(tenant);
   await withOrg(apiDb(), orgUuid, async (tx) => {
+    // Re-checked under a row lock, so the list cannot change between the check and the yes.
+    const [locked] = await tx<{ tools_hash: string | null }[]>`
+      select tools_hash from platform.mcp_connections where id = ${conn.id} and org_id = ${orgUuid} for update`;
+    if (locked?.tools_hash !== toolsVersion) throw stale;
     await tx`delete from platform.mcp_tool_grants where connection_id = ${conn.id} and org_id = ${orgUuid}`;
     for (const t of tools.filter((x) => x.readOnly)) {
       await tx`insert into platform.mcp_tool_grants (org_id, connection_id, consumer_type, consumer_id, tool_name, access, confirm)
@@ -214,7 +234,7 @@ export const approveTools = async (tenant: GatewayTenant, connectionId: string, 
 };
 
 /** Switches a connection off: no grants, no stored secret. The row stays, so its history does too. */
-export const disconnect = async (tenant: GatewayTenant, connectionId: string): Promise<ConnectionView> => {
+export const disconnect = async (tenant: GatewayTenant, connectionId: string): Promise<ConnectionViewWithVersion> => {
   const conn = await loadConnection(tenant, connectionId);
   const orgUuid = orgUuidOf(tenant);
   const secretId = await withOrg(apiDb(), orgUuid, async (tx) => {
@@ -226,4 +246,17 @@ export const disconnect = async (tenant: GatewayTenant, connectionId: string): P
   // Stored secrets are admin-only.
   if (secretId) await adminDb()`delete from platform.secrets where id = ${secretId} and org_id = ${orgUuid}`;
   return connectionView(tenant, connectionId);
+};
+
+/**
+ * Marks a connection as failed, with no grants: for example when its change could not be
+ * recorded. It then works for nothing until the owner connects it again (which records again).
+ */
+export const markConnectionError = async (tenant: GatewayTenant, connectionId: string): Promise<void> => {
+  const conn = await loadConnection(tenant, connectionId);
+  const orgUuid = orgUuidOf(tenant);
+  await withOrg(apiDb(), orgUuid, async (tx) => {
+    await tx`delete from platform.mcp_tool_grants where connection_id = ${conn.id} and org_id = ${orgUuid}`;
+    await tx`update platform.mcp_connections set status = 'error' where id = ${conn.id} and org_id = ${orgUuid}`;
+  });
 };

@@ -9,12 +9,12 @@
 // connection becomes the thing that calls it, which is why the reset has a `withSales` switch.
 import { type AppManifestInput, type TenantContext, toPublicId } from "@rms/contracts";
 import { handleData } from "@rms/data";
-import { type Sql, newUuid } from "@rms/db";
+import { type Sql, newUuid, withStore } from "@rms/db";
 import { DEFAULT_POSTING_RULES, LIBRARY, ensureModels } from "@rms/models";
 import { addDays } from "./rng.js";
 import { DEFAULT_SALES_END, type GenerateSalesOptions, type GeneratedSales, type LabourGroup, type PaymentType, generateSales } from "./sales.js";
 import type { CostGroup, StockUnit } from "./stock.js";
-import { type DemoTemplate, templateSpec } from "./templates.js";
+import { type DemoTemplate, TEMPLATES, templateSpec } from "./templates.js";
 
 export type BooksRoute = "query" | "batch" | "named" | "action";
 
@@ -359,9 +359,9 @@ export type SeedBooksOptions = GenerateSalesOptions & {
   withSales: boolean;
   /**
    * Also fill the DRAFT store (what a mini-app's preview reads during a build) with sample
-   * numbers: the template's own eight weeks, every row marked with `SAMPLE_SOURCE`. Default true,
-   * so every restaurant whose books are set up has a preview with numbers in it. The live store
-   * is never touched by this. Safe to run again: a second run adds nothing.
+   * numbers: the template's own eight weeks, every row marked with `SAMPLE_SOURCE`. Default
+   * FALSE: it takes about ten seconds, so sign-up never waits for it. The reset passes true; a
+   * build calls `ensureDraftSamples` when it starts. The live store is never touched by this.
    */
   draftSamples?: boolean;
 };
@@ -410,13 +410,84 @@ const readWeeks = async (client: BooksClient, from: string, to: string): Promise
     .sort((a, b) => a.weekStart.localeCompare(b.weekStart));
 };
 
+
+// ------------------------------------------------------------------ the loader lock and the sweep
+//
+// The hidden "demo data" mini-app may write to every library model, so it must never stay
+// switched on. Every load holds a per-restaurant lock for its whole length: a transaction-scoped
+// advisory lock, so it goes away by itself if the process dies. `sweepBooksLoader` switches off
+// any loader app (and removes any sample-numbers build) whose restaurant has no load holding the
+// lock: what a crash left behind. Run it at start-up; the Demo POS sync also runs it first.
+
+const loaderLockKey = (orgUuid: string) => `rms.books_loader:${orgUuid}`;
+
+/** Runs `fn` while this restaurant's loader lock is held. One load per restaurant at a time. */
+const withLoaderLock = async <T>(adminSql: Sql, orgUuid: string, fn: () => Promise<T>): Promise<T> => {
+  let out: { value: T } | null = null;
+  await adminSql.begin(async (tx) => {
+    await tx`select pg_advisory_xact_lock(hashtextextended(${loaderLockKey(orgUuid)}, 0))`;
+    out = { value: await fn() };
+  });
+  if (!out) throw new Error("The loader lock ended without a result");
+  return (out as { value: T }).value;
+};
+
+/** Switches off loader apps and removes sample-numbers builds that no running load owns. Admin connection. Safe to run any time. */
+export const sweepBooksLoader = async (adminSql: Sql): Promise<{ paused: number; buildsRemoved: number }> => {
+  const apps = await adminSql<{ id: string; org_id: string }[]>`
+    select a.id, a.org_id from platform.apps a
+     where a.slug = 'demo-data' and a.kind = 'system'
+       and (a.status = 'published' or exists (select 1 from platform.agent_sessions s where s.app_id = a.id and s.org_id = a.org_id))`;
+  const result = { paused: 0, buildsRemoved: 0 };
+  for (const app of apps) {
+    await adminSql.begin(async (tx) => {
+      const [lock] = await tx<{ got: boolean }[]>`select pg_try_advisory_xact_lock(hashtextextended(${loaderLockKey(app.org_id)}, 0)) as got`;
+      if (!lock?.got) return; // a load is running right now
+      const paused = await tx`update platform.apps set status = 'paused' where id = ${app.id} and org_id = ${app.org_id} and status = 'published'`;
+      await tx`delete from platform.agent_runs r using platform.agent_sessions s
+                where r.session_id = s.id and s.app_id = ${app.id} and s.org_id = ${app.org_id}`;
+      const removed = await tx`delete from platform.agent_sessions where app_id = ${app.id} and org_id = ${app.org_id}`;
+      result.paused += paused.count;
+      result.buildsRemoved += removed.count;
+    });
+  }
+  return result;
+};
+
+// ------------------------------------------------------------------ which restaurants are demo restaurants
+
+/**
+ * The demo template a restaurant was made from, decided by its restaurant profile: parent data
+ * that only the platform writes (restaurant logins cannot change it, unlike the restaurant's own
+ * name). Name, concept and cuisine must all be the template's. Null for any other restaurant.
+ * Interim: an explicit demo flag on the restaurant needs a schema change (asked of the lead).
+ */
+export const templateForProfile = (profile: { name: string; concept: string; cuisine: string } | null | undefined): DemoTemplate | null => {
+  if (!profile) return null;
+  for (const t of Object.keys(TEMPLATES) as DemoTemplate[]) {
+    const spec = TEMPLATES[t];
+    if (spec.name === profile.name && spec.profile.concept === profile.concept && spec.profile.cuisine === profile.cuisine) return t;
+  }
+  return null;
+};
+
+/** `templateForProfile` for one restaurant, read on the admin connection. */
+export const demoTemplateOf = async (adminSql: Sql, orgUuid: string): Promise<DemoTemplate | null> => {
+  const [p] = await adminSql<{ name: string; concept: string; cuisine: string }[]>`
+    select name, concept, cuisine from platform.restaurant_profiles where org_id = ${orgUuid}`;
+  return templateForProfile(p);
+};
+
+// ------------------------------------------------------------------ sample numbers in the draft store
+
 /**
  * Loads the sample numbers into the draft store, through the Data API like everything else.
  *
  * The Data API lets a mini-app into a draft store only while one of its builds is running. So
  * the hidden "demo data" mini-app gets a build of its own for the length of the load: a closed
- * session with one run, removed again straight after, whether the load worked or not. Nobody
- * sees it: it belongs to the hidden mini-app, holds no events and lives for a few seconds.
+ * session with one run, removed again straight after in a `finally` (and by `sweepBooksLoader`
+ * if the process died). Nobody sees it: it belongs to the hidden mini-app and holds no events.
+ * The caller holds the loader lock and has switched the loader app on.
  */
 const loadDraftSamples = async (
   adminSql: Sql,
@@ -424,12 +495,12 @@ const loadDraftSamples = async (
 ): Promise<DraftSamples> => {
   const sessionUuid = newUuid();
   const runUuid = newUuid();
-  await adminSql.begin(async (tx) => {
-    await tx`insert into platform.agent_sessions (id, org_id, user_id, app_id, mode, model, title, status)
-             values (${sessionUuid}, ${ctx.orgUuid}, ${ctx.ownerUserId}, ${ctx.app.appUuid}, 'build', 'none', 'Sample numbers', 'closed')`;
-    await tx`insert into platform.agent_runs (id, session_id, org_id, status) values (${runUuid}, ${sessionUuid}, ${ctx.orgUuid}, 'running')`;
-  });
   try {
+    await adminSql.begin(async (tx) => {
+      await tx`insert into platform.agent_sessions (id, org_id, user_id, app_id, mode, model, title, status)
+               values (${sessionUuid}, ${ctx.orgUuid}, ${ctx.ownerUserId}, ${ctx.app.appUuid}, 'build', 'none', 'Sample numbers', 'closed')`;
+      await tx`insert into platform.agent_runs (id, session_id, org_id, status) values (${runUuid}, ${sessionUuid}, ${ctx.orgUuid}, 'running')`;
+    });
     const client = dataClient({
       orgId: toPublicId("org", ctx.orgUuid),
       storePrefix: ctx.prefix,
@@ -453,56 +524,102 @@ const loadDraftSamples = async (
   }
 };
 
+/** True when the draft store already has sample numbers. One indexed lookup, no load. */
+const hasDraftSamples = async (adminSql: Sql, orgUuid: string, prefix: string): Promise<boolean> => {
+  const ctx: TenantContext = {
+    orgId: toPublicId("org", orgUuid), storePrefix: prefix, actor: { type: "system", id: "books-loader" }, role: "owner", locations: "all", env: "draft",
+  };
+  return withStore(adminSql, ctx, async (tx, store) => {
+    const rows = await tx.unsafe(`select 1 from ${store.table("sales_day")} where source_id like $1 limit 1`, [`${SAMPLE_SOURCE}/%`]);
+    return rows.length > 0;
+  });
+};
+
+export type EnsureDraftSamplesResult = { status: "filled"; draft: DraftSamples } | { status: "already" } | { status: "not_demo" };
+
+/**
+ * Makes sure a demo restaurant's draft store has its sample numbers. Call it when a build
+ * starts: cheap when they are there already (one lookup), about ten seconds when they are not.
+ * The template comes from the restaurant's profile, the owner from its members. A restaurant
+ * that is not a demo restaurant gets nothing. The library tables must exist (sign-up and the
+ * reset make them). Admin connection. Throws on a real failure: a build should carry on without
+ * sample numbers rather than stop.
+ */
+export const ensureDraftSamples = async (adminSql: Sql, orgUuid: string): Promise<EnsureDraftSamplesResult> => {
+  const template = await demoTemplateOf(adminSql, orgUuid);
+  if (!template) return { status: "not_demo" };
+  const [org] = await adminSql<{ prefix: string }[]>`select store_prefix as prefix from platform.organizations where id = ${orgUuid}`;
+  if (!org) throw new Error("Unknown restaurant");
+  if (await hasDraftSamples(adminSql, orgUuid, org.prefix)) return { status: "already" };
+  const [owner] = await adminSql<{ user_id: string }[]>`
+    select user_id from platform.members where org_id = ${orgUuid} and role = 'owner' and status = 'active' order by created_at limit 1`;
+  if (!owner) throw new Error("The restaurant has no owner to record the sample numbers under");
+  return withLoaderLock(adminSql, orgUuid, async () => {
+    if (await hasDraftSamples(adminSql, orgUuid, org.prefix)) return { status: "already" } as const;
+    const app = await ensureBooksApp(adminSql, orgUuid);
+    try {
+      const draft = await loadDraftSamples(adminSql, { orgUuid, prefix: org.prefix, ownerUserId: owner.user_id, app, template, range: {} });
+      return { status: "filled", draft } as const;
+    } finally {
+      await pauseBooksApp(adminSql, orgUuid);
+    }
+  });
+};
+
+// ------------------------------------------------------------------ the one entry point
+
 /**
  * Gives one demo restaurant its books. Used by the reset, by onboarding, and by the Demo POS
  * sync: make the library tables, add the chart of accounts and the fiscal calendar, and, with
- * `withSales`, load and post the demo numbers into the live store. With `draftSamples` (the
- * default) the draft store gets the same template's numbers as clearly marked sample numbers.
+ * `withSales`, load and post the demo numbers into the live store. With `draftSamples` the
+ * draft store gets the same template's numbers as clearly marked sample numbers.
  *
  * Everything after the tables goes through the Data API as the hidden "demo data" mini-app,
  * which is switched on for the load and ALWAYS switched off again, whether the load worked or
- * not. The library must be installed first (`installPlatformLibrary`). Admin connection only,
- * and only for seeded demo restaurants.
+ * not, under the restaurant's loader lock. The library must be installed first
+ * (`installPlatformLibrary`). Admin connection only, and only for seeded demo restaurants.
  */
 export const seedDemoBooks = async (adminSql: Sql, opts: SeedBooksOptions): Promise<SeedBooksResult> => {
-  const { orgUuid, template, ownerUserId, withSales, draftSamples = true, ...range } = opts;
+  const { orgUuid, template, ownerUserId, withSales, draftSamples = false, ...range } = opts;
   await ensureModels(adminSql, orgUuid, LIBRARY.models.map((m) => m.key));
 
   const [org] = await adminSql<{ prefix: string }[]>`select store_prefix as prefix from platform.organizations where id = ${orgUuid}`;
   if (!org) throw new Error("Unknown restaurant");
-  const app = await ensureBooksApp(adminSql, orgUuid);
-  try {
-    // The same context a signed app token would give: this restaurant, its owner, live data.
-    const client = dataClient({
-      orgId: toPublicId("org", orgUuid),
-      storePrefix: org.prefix,
-      actor: { type: "user", id: toPublicId("usr", ownerUserId) },
-      role: "owner",
-      locations: "all",
-      env: "live",
-      appId: toPublicId("app", app.appUuid),
-      appVersionId: toPublicId("ver", app.versionUuid),
-    });
+  return withLoaderLock(adminSql, orgUuid, async () => {
+    const app = await ensureBooksApp(adminSql, orgUuid);
+    try {
+      // The same context a signed app token would give: this restaurant, its owner, live data.
+      const client = dataClient({
+        orgId: toPublicId("org", orgUuid),
+        storePrefix: org.prefix,
+        actor: { type: "user", id: toPublicId("usr", ownerUserId) },
+        role: "owner",
+        locations: "all",
+        env: "live",
+        appId: toPublicId("app", app.appUuid),
+        appVersionId: toPublicId("ver", app.versionUuid),
+      });
 
-    let setUp: BooksSetUp;
-    let books: SeededBooks | null = null;
-    if (!withSales) {
-      setUp = await setUpBooks(client, range);
-    } else {
-      const loaded = await loadDemoBooks(client, { template, ...range });
-      // Read the weeks back through the prime cost report, so callers can show (and the Demo
-      // POS sync can check) that the reports work on what was just loaded.
-      const weeks = await readWeeks(client, loaded.startsOn, loaded.endsOn);
-      const weekStart = addDays(loaded.endsOn, -6);
-      const lastWeek = weeks.find((w) => w.weekStart === weekStart);
-      if (!lastWeek) throw new Error("Loading the demo numbers: the prime cost report has no row for the last week");
-      setUp = loaded.setUp;
-      books = { ...loaded, lastWeek, weeks };
+      let setUp: BooksSetUp;
+      let books: SeededBooks | null = null;
+      if (!withSales) {
+        setUp = await setUpBooks(client, range);
+      } else {
+        const loaded = await loadDemoBooks(client, { template, ...range });
+        // Read the weeks back through the prime cost report, so callers can show (and the Demo
+        // POS sync can check) that the reports work on what was just loaded.
+        const weeks = await readWeeks(client, loaded.startsOn, loaded.endsOn);
+        const weekStart = addDays(loaded.endsOn, -6);
+        const lastWeek = weeks.find((w) => w.weekStart === weekStart);
+        if (!lastWeek) throw new Error("Loading the demo numbers: the prime cost report has no row for the last week");
+        setUp = loaded.setUp;
+        books = { ...loaded, lastWeek, weeks };
+      }
+
+      const draft = draftSamples ? await loadDraftSamples(adminSql, { orgUuid, prefix: org.prefix, ownerUserId, app, template, range }) : null;
+      return { setUp, books, draft };
+    } finally {
+      await pauseBooksApp(adminSql, orgUuid);
     }
-
-    const draft = draftSamples ? await loadDraftSamples(adminSql, { orgUuid, prefix: org.prefix, ownerUserId, app, template, range }) : null;
-    return { setUp, books, draft };
-  } finally {
-    await pauseBooksApp(adminSql, orgUuid);
-  }
+  });
 };

@@ -22,9 +22,9 @@ import {
   toUuid,
 } from "@rms/contracts";
 import { adminDb, apiDb, withOrg } from "@rms/db";
-import { DEFAULT_SALES_END, type SeedBooksResult, seedDemoBooks } from "@rms/seed";
+import { DEFAULT_SALES_END, type SeedBooksResult, demoTemplateOf, seedDemoBooks, sweepBooksLoader } from "@rms/seed";
 import { TOOLS_CHANGED_TEXT } from "./connections.js";
-import { templateForName } from "./demo-pos/data.js";
+import { demoPosAnswer } from "./demo-pos/data.js";
 import { type GatewayOptions, GatewayError, type GatewayTenant, callTool, listTools, loadConnection, toolsHash } from "./gateway.js";
 
 const DAY_MS = 86_400_000;
@@ -58,7 +58,7 @@ export type SyncInput = {
 
 const empty = { salesDays: 0, labourDays: 0, deliveryPayouts: 0, vendorBills: 0, stockCounts: 0, posted: 0 };
 const failed = (message: string, from: string | null = null, to: string | null = null): SyncResult => ({ status: "failed", from, to, counts: empty, message });
-const dollars = (minor: number): string => `$${(minor / 100).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+const dollars = (minor: number): string => `$${(minor / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 /** Lock the connection row for the length of the sync, so two presses at once cannot both load. */
 const BUSY = "55P03";
@@ -73,6 +73,8 @@ export const syncDemoPos = async (input: SyncInput, opts: GatewayOptions = {}): 
   const conn = await loadConnection(tenant, connectionId);
   if (conn.catalog_key !== DEMO_POS.catalogKey) return failed("RMS cannot bring information in from this system yet.");
   const orgUuid = toUuid(tenant.orgId);
+  // Switch off any loader a crashed load left on (it skips a load that is running).
+  await sweepBooksLoader(adminDb());
 
   try {
     return await withOrg(apiDb(), orgUuid, async (lock) => {
@@ -111,11 +113,18 @@ const runSync = async (
   // ---- 2. ask the POS
   const to = DEFAULT_SALES_END;
   const from = addDays(to, -(SYNC_WEEKS * 7 - 1));
-  const ask = (tool: DemoPosToolName, args: Record<string, unknown>) => callTool(tenant, connectionId, SYNC_CONSUMER, tool, args, opts);
+  // A demo restaurant is one whose platform-written profile is a template's; never its own name.
+  const template = await demoTemplateOf(adminDb(), orgUuid);
+  // Every answer must be exactly what the loader will load (the demo shortcut above), checked
+  // BEFORE anything is loaded: a POS that drifts in any tool's answer loads nothing.
+  let drift = false;
+  const ask = async (tool: DemoPosToolName, args: Record<string, unknown>): Promise<unknown> => {
+    const answer = await callTool(tenant, connectionId, SYNC_CONSUMER, tool, args, opts);
+    if (template && JSON.stringify(answer) !== JSON.stringify(demoPosAnswer(template, tool, args))) drift = true;
+    return answer;
+  };
 
   const { locations } = (await ask("list_locations", {})) as { locations: { key: string; name: string }[] };
-  const [org] = await lock<{ name: string }[]>`select name from platform.organizations where id = ${orgUuid}`;
-  const template = org ? templateForName(org.name) : null;
   if (!template || locations.length === 0) {
     await lock`update platform.mcp_connections set last_synced_at = now() where id = ${conn.id} and org_id = ${orgUuid}`;
     return { status: "nothing_new", from, to, counts: empty, message: "Demo POS has no sales for this restaurant, so nothing was brought in." };
@@ -139,6 +148,9 @@ const runSync = async (
         }
       }
     }
+  }
+  if (drift || weekly.size !== SYNC_WEEKS) {
+    return failed("What Demo POS sent does not match what RMS can bring in. Nothing was brought in.", from, to);
   }
 
   // ---- 3. load, with the one loader (live store only: the draft store has its own sample numbers)

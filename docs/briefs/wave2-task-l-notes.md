@@ -2,6 +2,22 @@
 
 Branch `worktree-agent-af196bf9c0e288990` (fast-forwarded to `main` at `965830d` first). Nothing pushed. No Vercel command, no model call, no demo reset. Security review is still to be done (not by me).
 
+## Fix round (security review and code review)
+
+| Item | Fix | Test |
+|---|---|---|
+| Sign-up slower | `seedDemoBooks` defaults `draftSamples` to false; the reset passes true (`reset.ts`, the one lead-owned seed line I changed). New `ensureDraftSamples(adminSql, orgUuid)`: call it when a build starts. It skips with one indexed lookup when a `sample/` row exists. Sign-up's set-up: 0.8 s (was about 10 s). First fill: about 15 s. Already filled: 3 ms. **Task I or the lead must call `ensureDraftSamples` at build start.** | `books.draft.test.ts` |
+| Call log kept key text | `redactArgs` keeps only short `[a-z0-9_]` keys; any other key becomes `(other)`; at most 20 names; summary capped at 1,000 characters. Tool names are filtered the same way. | `demo-pos.test.ts` |
+| Failed sync still loaded | Every tool answer is compared, before loading, with exactly what the loader will load (`demoPosAnswer` for the same template and arguments). Any drift: `failed`, nothing loaded, no outbox row. The weekly check after loading stays as a second check. | drift test (one bill a cent out) |
+| Allow checked names only | The view carries `toolsVersion` (the list's hash). Allow must send it back; it is rechecked under a row lock. `callTool` rechecks the stored list against its hash on every call. Allow writes an audit row (`connection.approve`, counts only). **Lead: please add `toolsVersion` to `ConnectionView` and `ApproveToolsRequest`.** The route takes it out of the body before the strict contract shape is checked. | API and mcp tests |
+| Token lifetime, data while waiting | The Demo POS refuses a token made more than 60 seconds ago, whatever its expiry. While `needs_approval` it lists tools and every call answers with an error, no data. **Lead: please set `TOKEN_TTL.connection` to 60.** | mcp tests |
+| Loader left on after a crash | Every load holds a per-restaurant loader lock (a transaction advisory lock, gone if the process dies). `sweepBooksLoader` pauses any loader app and removes any sample-numbers build whose restaurant has no load running. The sync runs it first. **Lead: please run it at API start-up too.** The sample-numbers run is also removed in a `finally`. The lock also means one load per restaurant at a time. | `books.draft.test.ts` |
+| Name-based demo gate | The template comes from the restaurant profile (name, concept and cuisine), which only the platform writes. Restaurant logins can change the restaurant's name but not the profile. **A real demo flag column needs a schema change: lead.** | API and mcp tests |
+| Change recorded after connecting | If recording or confirming the change fails, the connection is set to `error` with no grants. The next press records again. | not tested (needs a governance failure) |
+| Error state on screen | "This connection needs attention. Connect it again to carry on." with **Connect again**. | not run in a browser |
+| Host check | Kept mine (the SDK's check is Hono middleware for its own app, not a route mounted inside ours). Tests: another host on the right port, a sub-domain, upper case and another port, a trailing dot. A userinfo address cannot even be built into a request. | API test |
+| Money format | `$84,310.00`. No progress messages during the sync (not quick to do with one plain request). | API test |
+
 ## Not done, or not proven
 
 - **Connect by address and token (`kind: "custom"`) is not built.** The route answers "Connecting your own system is not available yet." (503). No secret is ever stored, so `RMS_SECRETS_KEY` is not needed yet. `disconnect` already deletes a stored secret if one exists.

@@ -74,6 +74,7 @@ type ConnectionRow = {
   status: string;
   catalog_key: string | null;
   tools: unknown;
+  tools_hash: string | null;
 };
 
 const orgUuidOf = (tenant: GatewayTenant): string => toUuid(tenant.orgId);
@@ -84,7 +85,7 @@ export const loadConnection = async (tenant: GatewayTenant, connectionId: string
   if (!parsed.success) throw new GatewayError("not_found", "That connection was not found.");
   const orgUuid = orgUuidOf(tenant);
   const [row] = await withOrg(apiDb(), orgUuid, (tx) => tx<ConnectionRow[]>`
-    select id, org_id, status, catalog_key, tools from platform.mcp_connections
+    select id, org_id, status, catalog_key, tools, tools_hash from platform.mcp_connections
      where id = ${toUuid(parsed.data)} and org_id = ${orgUuid}`);
   if (!row) throw new GatewayError("not_found", "That connection was not found.");
   return row;
@@ -97,13 +98,25 @@ export const storedTools = (raw: unknown): McpToolInfo[] =>
     return p.success ? [p.data] : [];
   });
 
-/** Names and dates only. A value that is not a plain date is replaced by its kind. */
+export const ARG_PLACEHOLDER = "(other)";
+const SAFE_KEY = /^[a-z][a-z0-9_]{0,31}$/;
+const MAX_SUMMARY_CHARS = 1_000;
+
+/**
+ * What `mcp_calls` keeps of a call's arguments: identifier-shaped NAMES (short, `[a-z0-9_]`) and
+ * plain dates. Any other key is replaced by a placeholder (a key can carry data too), at most 20
+ * names, and the whole summary is capped in size.
+ */
 export const redactArgs = (args: Record<string, unknown>): Record<string, unknown> => {
-  const out: Record<string, unknown> = { names: Object.keys(args).sort().slice(0, 20) };
-  for (const [k, v] of Object.entries(args)) {
-    if (/^[a-z][a-z0-9_]{0,40}$/i.test(k) && typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v)) out[k] = v;
+  const keys = Object.keys(args);
+  const names = [...new Set(keys.slice(0, 50).map((k) => (SAFE_KEY.test(k) ? k : ARG_PLACEHOLDER)))].sort().slice(0, 20);
+  const out: Record<string, unknown> = { names };
+  if (keys.length > 20) out.more = true;
+  for (const k of keys.slice(0, 20)) {
+    const v = args[k];
+    if (SAFE_KEY.test(k) && typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v)) out[k] = v;
   }
-  return out;
+  return JSON.stringify(out).length <= MAX_SUMMARY_CHARS ? out : { names: [ARG_PLACEHOLDER], more: true };
 };
 
 const recordCall = async (
@@ -118,7 +131,7 @@ const recordCall = async (
   const orgUuid = orgUuidOf(tenant);
   await withOrg(apiDb(), orgUuid, (tx) => tx`
     insert into platform.mcp_calls (id, org_id, connection_id, consumer, tool_name, args_summary, status, duration_ms)
-    values (${newUuid()}, ${orgUuid}, ${connectionUuid}, ${`${consumer.type}:${consumer.id}`.slice(0, 120)}, ${tool.slice(0, 64)},
+    values (${newUuid()}, ${orgUuid}, ${connectionUuid}, ${`${consumer.type}:${consumer.id}`.slice(0, 120)}, ${/^[a-z][a-z0-9_]{0,63}$/.test(tool) ? tool : ARG_PLACEHOLDER},
             ${tx.json(redactArgs(args) as never)}, ${status}, ${durationMs})`);
 };
 
@@ -208,6 +221,8 @@ export const callTool = async (
   };
 
   if (conn.status !== "connected") return deny("This connection is not switched on.");
+  // The list the owner allowed must still be the list stored: its hash is checked on every call.
+  if (!conn.tools_hash || toolsHash(storedTools(conn.tools)) !== conn.tools_hash) return deny("What this system offers has changed. Please look again.");
   const approved = storedTools(conn.tools).find((t) => t.name === tool);
   if (!approved) return deny("RMS was not allowed to use that.");
   if (!approved.readOnly) return deny("RMS only reads from connected systems.");

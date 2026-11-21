@@ -104,7 +104,8 @@ describe("Demo POS: connect, allow, bring in the sales", () => {
     await createDemoRestaurant(sql, { template: "marigold", orgUuid: A.org, storePrefix: A.prefix });
     await createDemoRestaurant(sql, { template: "slice_yard", orgUuid: B.org, storePrefix: B.prefix });
     await createDemoRestaurant(sql, { template: "marigold", orgUuid: C.org, storePrefix: C.prefix });
-    await sql`update platform.organizations set name = 'Test Bistro' where id = ${C.org}`;
+    // Named exactly like the template, but its platform-written profile is not the template's.
+    await sql`update platform.restaurant_profiles set concept = 'An independent bistro' where org_id = ${C.org}`;
     [ownerA, staffA, ownerB, ownerC] = [await signUp(), await signUp(), await signUp(), await signUp()];
     await sql`insert into platform.members (id, org_id, user_id, role) values
       (${newUuid()}, ${A.org}, ${ownerA.id}, 'owner'), (${newUuid()}, ${A.org}, ${staffA.id}, 'staff'),
@@ -174,12 +175,18 @@ describe("Demo POS: connect, allow, bring in the sales", () => {
     expect(await calls(A.org)).toBe(0);
   });
 
-  it("allow: refused as stale unless the names are exactly the list; then every read-only tool is granted", async () => {
-    expect((await call("POST", `/connections/v1/${conA}/approve`, ownerA.token, { tools: ["list_locations"] })).status).toBe(409);
-    const view = ok(await call("POST", `/connections/v1/${conA}/approve`, ownerA.token, { tools: [...DEMO_POS_TOOL_NAMES] }));
+  it("allow: refused unless the names AND the version are the list shown; then every read-only tool is granted, on the record", async () => {
+    const shown = ok(await call("GET", "/connections/v1", ownerA.token)).connections[0];
+    expect(shown.toolsVersion).toMatch(/^[0-9a-f]{64}$/);
+    expect((await call("POST", `/connections/v1/${conA}/approve`, ownerA.token, { tools: ["list_locations"], toolsVersion: shown.toolsVersion })).status).toBe(409);
+    expect((await call("POST", `/connections/v1/${conA}/approve`, ownerA.token, { tools: [...DEMO_POS_TOOL_NAMES] })).status).toBe(400);
+    expect((await call("POST", `/connections/v1/${conA}/approve`, ownerA.token, { tools: [...DEMO_POS_TOOL_NAMES], toolsVersion: "0".repeat(64) })).status).toBe(409);
+    const view = ok(await call("POST", `/connections/v1/${conA}/approve`, ownerA.token, { tools: [...DEMO_POS_TOOL_NAMES], toolsVersion: shown.toolsVersion }));
     expect(view.status).toBe("connected");
     expect(view.tools.every((t: any) => t.granted)).toBe(true);
     expect(view.statusText).toBe("Connected. Nothing brought in yet.");
+    const audit = await adminDb()<{ action: string; meta: unknown }[]>`select action, meta from platform.audit_log where org_id = ${A.org} and action = 'connection.approve'`;
+    expect(audit).toEqual([{ action: "connection.approve", meta: { tools: 9, granted: 9 } }]);
   });
 
   it("bring in my sales: eight weeks for two locations, last week $84,310; the reports show 61.3% prime cost", async () => {
@@ -189,7 +196,7 @@ describe("Demo POS: connect, allow, bring in the sales", () => {
     expect(res).toMatchObject({ status: "ok", from: "2026-09-21", to: "2026-11-15" });
     expect(res.counts).toMatchObject({ salesDays: 112, labourDays: 336, stockCounts: 18 });
     expect(res.counts.posted).toBeGreaterThan(400);
-    expect(res.message).toBe("Brought in 8 weeks of sales for 2 locations. Last week's sales: $84,310.");
+    expect(res.message).toBe("Brought in 8 weeks of sales for 2 locations. Last week's sales: $84,310.00.");
     expect(await countRows(A, "sales_day")).toBe(112);
     // Every call went through the gateway and is on the record, with names and dates only.
     expect(await calls(A.org, "ok")).toBe(2 + 7); // list_locations, get_stock_items, then the seven dated tools in one chunk
@@ -207,7 +214,7 @@ describe("Demo POS: connect, allow, bring in the sales", () => {
     const res = ok(await call("POST", `/connections/v1/${conA}/sync`, ownerA.token, {}));
     expect(res.status).toBe("nothing_new");
     expect(res.counts.posted).toBe(0);
-    expect(res.message).toBe("Your sales are already up to date. Last week's sales: $84,310.");
+    expect(res.message).toBe("Your sales are already up to date. Last week's sales: $84,310.00.");
     expect({ days: await countRows(A, "sales_day"), entries: await countRows(A, "journal_entry") }).toEqual(before);
     const list = ok(await call("GET", "/connections/v1", ownerA.token));
     expect(list.connections[0].statusText).toMatch(/^Connected\. Last brought in sales /);
@@ -244,6 +251,24 @@ describe("Demo POS: connect, allow, bring in the sales", () => {
       expect(res.status).toBe(403);
       const other = await app.fetch(new Request(`https://evil.example${DEMO_POS.route}`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: "{}" }));
       expect(other.status).toBe(403);
+      // Host shapes that must not slip past the check: userinfo, a trailing dot, another host with the right port.
+      const api = new URL(demoPosUrl());
+      const send = (url: string) => app.fetch(new Request(url, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: "{}" }));
+      // Userinfo ("api-host@evil.example") cannot even reach the server: a request with credentials in its address cannot be made.
+      expect(() => new Request(`${api.protocol}//${api.hostname}@evil.example${DEMO_POS.route}`)).toThrow();
+      // A trailing dot: the address parser turns an IP address with one back into the same host, and
+      // a name with one is a different host. Either way it never gets an answer with data in it.
+      expect((await send(`${api.protocol}//${api.hostname}.${api.port ? `:${api.port}` : ""}${DEMO_POS.route}`)).status).not.toBe(200);
+      for (const url of [
+        `${api.protocol}//evil.example${api.port ? `:${api.port}` : ""}${DEMO_POS.route}`,
+        `${api.protocol}//${api.hostname}.evil.example${DEMO_POS.route}`,
+      ]) {
+        expect((await send(url)).status, url).toBe(403);
+      }
+      // The same host in upper case or on another port is the same host: it gets past the host check to the token check.
+      for (const url of [`${api.protocol}//${api.hostname.toUpperCase()}${api.port ? `:${api.port}` : ""}${DEMO_POS.route}`, `${api.protocol}//${api.hostname}:1${DEMO_POS.route}`]) {
+        expect((await send(url)).status, url).not.toBe(403);
+      }
     });
 
     it("one restaurant's tokens reach only its own connection", async () => {
@@ -259,15 +284,16 @@ describe("Demo POS: connect, allow, bring in the sales", () => {
     const before = await calls(B.org);
     await expect(callTool({ orgId: toPublicId("org", B.org) }, conA, SYNC_CONSUMER, "list_locations", {}, { fetch: inProcess })).rejects.toMatchObject({ reason: "not_found" });
     expect(await calls(B.org)).toBe(before);
-    expect((await call("POST", `/connections/v1/${conA}/approve`, ownerB.token, { tools: [...DEMO_POS_TOOL_NAMES] })).status).toBe(404);
+    expect((await call("POST", `/connections/v1/${conA}/approve`, ownerB.token, { tools: [...DEMO_POS_TOOL_NAMES], toolsVersion: "0".repeat(64) })).status).toBe(404);
     expect((await call("POST", `/connections/v1/${conA}/sync`, ownerB.token, {})).status).toBe(404);
     expect((await call("POST", `/connections/v1/${conA}/disconnect`, ownerB.token)).status).toBe(404);
     expect((await call("POST", "/connections/v1/not-an-id/sync", ownerB.token, {})).status).toBe(404);
   });
 
-  it("a restaurant that is not a demo template brings in nothing, and says so", async () => {
-    conC = ok(await call("POST", "/connections/v1", ownerC.token, { kind: "catalog", key: "demo_pos" })).id;
-    ok(await call("POST", `/connections/v1/${conC}/approve`, ownerC.token, { tools: [...DEMO_POS_TOOL_NAMES] }));
+  it("a restaurant named like a template, but not made from one, brings in nothing, and says so", async () => {
+    const view = ok(await call("POST", "/connections/v1", ownerC.token, { kind: "catalog", key: "demo_pos" }));
+    conC = view.id;
+    ok(await call("POST", `/connections/v1/${conC}/approve`, ownerC.token, { tools: [...DEMO_POS_TOOL_NAMES], toolsVersion: view.toolsVersion }));
     const res = ok(await call("POST", `/connections/v1/${conC}/sync`, ownerC.token, {}));
     expect(res).toMatchObject({ status: "nothing_new", message: "Demo POS has no sales for this restaurant, so nothing was brought in." });
     expect(await countRows(C, "sales_day")).toBe(0);

@@ -7,4 +7,4 @@ export * from "./gateway.js";
 export * from "./connections.js";
 export * from "./sync.js";
 export { buildDemoPosServer, demoPosCaller, serveDemoPos, type DemoPosCaller } from "./demo-pos/server.js";
-export { demoPosAnswer, templateForName } from "./demo-pos/data.js";
+export { demoPosAnswer } from "./demo-pos/data.js";
