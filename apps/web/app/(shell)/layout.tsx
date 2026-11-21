@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Button, Canvas, Heading, Logo, Text } from "@rms/ui";
+import { WaitingBanner } from "@/components/changes/waiting-banner";
 import { RmsShell } from "@/components/rms-shell";
 import { loadShell } from "@/components/shell-data";
 import { SignOutNow } from "@/lib/sign-out";
@@ -34,5 +35,11 @@ export default async function ShellLayout({ children }: { children: ReactNode })
     );
   }
 
-  return <RmsShell data={load.data}>{children}</RmsShell>;
+  // The banner is task O's. It draws nothing unless a change is waiting for the owner's OK.
+  return (
+    <RmsShell data={load.data}>
+      <WaitingBanner />
+      {children}
+    </RmsShell>
+  );
 }

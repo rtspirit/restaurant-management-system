@@ -269,6 +269,9 @@ importers:
       '@rms/governance':
         specifier: workspace:*
         version: link:../../packages/governance
+      '@rms/marketplace':
+        specifier: workspace:*
+        version: link:../../packages/marketplace
       '@rms/mcp':
         specifier: workspace:*
         version: link:../../packages/mcp
@@ -281,6 +284,9 @@ importers:
       '@rms/parent':
         specifier: workspace:*
         version: link:../../packages/parent
+      '@rms/publish':
+        specifier: workspace:*
+        version: link:../../packages/publish
       '@rms/runner':
         specifier: workspace:*
         version: link:../../packages/runner
@@ -299,6 +305,28 @@ importers:
       zod:
         specifier: 4.6.7
         version: 4.6.7
+    devDependencies:
+      '@hono/node-server':
+        specifier: 2.1.11
+        version: 2.1.11(hono@4.13.19)
+      '@types/node':
+        specifier: 26.6.6
+        version: 26.6.6
+      tsx:
+        specifier: 4.23.15
+        version: 4.23.15
+
+  apps/apps-host:
+    dependencies:
+      '@rms/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      '@rms/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      hono:
+        specifier: 4.13.19
+        version: 4.13.19
     devDependencies:
       '@hono/node-server':
         specifier: 2.1.11
@@ -507,6 +535,34 @@ importers:
         specifier: 26.6.6
         version: 26.6.6
 
+  packages/marketplace:
+    dependencies:
+      '@rms/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@rms/db':
+        specifier: workspace:*
+        version: link:../db
+      '@rms/governance':
+        specifier: workspace:*
+        version: link:../governance
+      '@rms/memory':
+        specifier: workspace:*
+        version: link:../memory
+      '@rms/models':
+        specifier: workspace:*
+        version: link:../models
+      '@rms/publish':
+        specifier: workspace:*
+        version: link:../publish
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      '@types/node':
+        specifier: 26.6.6
+        version: 26.6.6
+
   packages/mcp:
     dependencies:
       '@modelcontextprotocol/client':
@@ -584,6 +640,37 @@ importers:
       '@rms/db':
         specifier: workspace:*
         version: link:../db
+    devDependencies:
+      '@types/node':
+        specifier: 26.6.6
+        version: 26.6.6
+
+  packages/publish:
+    dependencies:
+      '@rms/app-template':
+        specifier: workspace:*
+        version: link:../app-template
+      '@rms/auth':
+        specifier: workspace:*
+        version: link:../auth
+      '@rms/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@rms/db':
+        specifier: workspace:*
+        version: link:../db
+      '@rms/generators':
+        specifier: workspace:*
+        version: link:../generators
+      '@rms/governance':
+        specifier: workspace:*
+        version: link:../governance
+      '@rms/models':
+        specifier: workspace:*
+        version: link:../models
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
     devDependencies:
       '@types/node':
         specifier: 26.6.6
