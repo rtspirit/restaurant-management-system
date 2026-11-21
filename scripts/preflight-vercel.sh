@@ -7,14 +7,15 @@
 # Stops unless:
 #   - .rms/vercel-team holds the personal team id and slug
 #   - the Vercel CLI is logged in and that team is reachable
-#   - no team name, project name, linked project or argument contains "tradeengage" or "te-team"
+#   - no target team, project name, linked project or argument contains "tradeengage" or "te-team"
+#     (the login may be a member of other teams; they are never targeted or read)
 #   - no argument or environment variable points the command at another team
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 EXPECTED_ID="team_RM4toarAtl8vljERLdxRvfeh"
 EXPECTED_SLUG="rtspirits-projects"
-ALLOWED_PROJECTS="rms-web rms-admin rms-apps"
+ALLOWED_PROJECTS="rms-web rms-admin rms-apps rms-api"
 BANNED='tradeengage|te-team'
 
 stop() { echo "PREFLIGHT STOP: $*" >&2; exit 1; }
@@ -71,12 +72,16 @@ WHO="$(vercel whoami 2>/dev/null | tail -1 | tr -d '[:space:]')" || stop "not lo
 [ -n "$WHO" ] || stop "not logged in. Run: vercel login"
 banned "$WHO" && stop "logged in as '$WHO', which looks like a TradeEngage account"
 
-TEAMS="$(vercel teams ls 2>&1)" || stop "could not list teams"
-printf '%s\n' "$TEAMS" | grep -Eq "(^|[[:space:]])$EXPECTED_SLUG([[:space:]]|$)" \
-  || stop "team $EXPECTED_SLUG is not visible to '$WHO'. Wrong account?"
-if printf '%s' "$TEAMS" | tr '[:upper:]' '[:lower:]' | grep -Eq "$BANNED"; then
-  stop "the login '$WHO' can see a TradeEngage team. Log in with the personal account only"
+# Check the personal team is reachable WITHOUT listing the login's other teams.
+PROJECTS="$(VERCEL_ORG_ID="$EXPECTED_ID" vercel project ls --scope "$EXPECTED_SLUG" 2>&1)" \
+  || stop "team $EXPECTED_SLUG is not reachable for '$WHO'. Wrong account?"
+if printf '%s' "$PROJECTS" | tr '[:upper:]' '[:lower:]' | grep -Eq "$BANNED"; then
+  stop "a project in $EXPECTED_SLUG has a banned name"
 fi
+# The personal login may be a member of other teams (Rahul allowed this on 2026-11-21, ADR 0005).
+# We never act on them: every command below is pinned to the personal team, and any argument,
+# environment variable or linked project that names another team or a banned name has already
+# stopped this script. Other teams are not listed, read or switched to.
 
 echo "preflight ok: user=$WHO team=$EXPECTED_SLUG ($EXPECTED_ID)" >&2
 
