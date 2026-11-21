@@ -83,6 +83,78 @@
         ],
         "createdAt": "2026-11-21T18:02:28.828Z",
         "reason": "user decided 2026-11-21: the build moves to a more distinct tint (ADR 0006); this C0 sketch is kept unchanged as the record of what was picked from"
+      },
+      {
+        "rule": "design-system-font",
+        "value": "*",
+        "files": [
+          ".impeccable/mocks/decision/challenger-concourse.html"
+        ],
+        "createdAt": "2026-11-21T18:31:47.609Z",
+        "reason": "lead: spent C0 direction sketch, kept as the record of what was picked from; it predates DESIGN.md and is not part of the product"
+      },
+      {
+        "rule": "design-system-font",
+        "value": "*",
+        "files": [
+          ".impeccable/mocks/decision/challenger-concourse-phone.html"
+        ],
+        "createdAt": "2026-11-21T18:31:47.623Z",
+        "reason": "lead: spent C0 direction sketch, kept as the record of what was picked from; it predates DESIGN.md and is not part of the product"
+      },
+      {
+        "rule": "design-system-font",
+        "value": "*",
+        "files": [
+          ".impeccable/mocks/decision/model-pick.html"
+        ],
+        "createdAt": "2026-11-21T18:31:47.634Z",
+        "reason": "lead: spent C0 direction sketch, kept as the record of what was picked from; it predates DESIGN.md and is not part of the product"
+      },
+      {
+        "rule": "design-system-font",
+        "value": "*",
+        "files": [
+          ".impeccable/mocks/decision/model-pick-phone.html"
+        ],
+        "createdAt": "2026-11-21T18:31:47.644Z",
+        "reason": "lead: spent C0 direction sketch, kept as the record of what was picked from; it predates DESIGN.md and is not part of the product"
+      },
+      {
+        "rule": "design-system-font",
+        "value": "*",
+        "files": [
+          ".impeccable/mocks/decision/assigned.html"
+        ],
+        "createdAt": "2026-11-21T18:31:47.654Z",
+        "reason": "lead: spent C0 direction sketch, kept as the record of what was picked from; it predates DESIGN.md and is not part of the product"
+      },
+      {
+        "rule": "design-system-font",
+        "value": "*",
+        "files": [
+          ".impeccable/mocks/decision/assigned-phone.html"
+        ],
+        "createdAt": "2026-11-21T18:31:47.664Z",
+        "reason": "lead: spent C0 direction sketch, kept as the record of what was picked from; it predates DESIGN.md and is not part of the product"
+      },
+      {
+        "rule": "design-system-font",
+        "value": "*",
+        "files": [
+          ".impeccable/mocks/decision/challenger-warm.html"
+        ],
+        "createdAt": "2026-11-21T18:31:47.674Z",
+        "reason": "lead: spent C0 direction sketch, kept as the record of what was picked from; it predates DESIGN.md and is not part of the product"
+      },
+      {
+        "rule": "design-system-font",
+        "value": "*",
+        "files": [
+          ".impeccable/mocks/decision/challenger-warm-phone.html"
+        ],
+        "createdAt": "2026-11-21T18:31:47.688Z",
+        "reason": "lead: spent C0 direction sketch, kept as the record of what was picked from; it predates DESIGN.md and is not part of the product"
       }
     ]
   }
