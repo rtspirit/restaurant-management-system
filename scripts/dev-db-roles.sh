@@ -41,5 +41,9 @@ case "$API_URL" in http://127.0.0.1:*|http://localhost:*)
   set_kv ADMIN_URL "http://127.0.0.1:3001"
   ;;
 esac
+# Next.js only reads .env files from the app's own folder, so point each app at the root file.
+for app in web admin apps-host; do
+  [ -d "$ROOT/apps/$app" ] && ln -sf ../../.env.local "$ROOT/apps/$app/.env.local"
+done
 chmod 600 "$ENV_FILE"
 echo "Local settings are in .env.local." >&2
