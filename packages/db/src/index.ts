@@ -143,3 +143,5 @@ export const asParentSync = <T>(adminSql: Sql, fn: (tx: Tx) => Promise<T>): Prom
     await tx.unsafe("set local role rms_parent_sync");
     return fn(tx);
   }) as Promise<T>;
+
+export * from "./ask.js";

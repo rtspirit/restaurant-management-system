@@ -11,6 +11,8 @@ Read `CLAUDE.md` first, then your task below. This file is the contract between 
 - **Lead-owned, read-only for you:** `packages/contracts`, `packages/db`, `packages/auth/src/{tokens,session,hono,index}.ts`, `supabase/**`, `apps/api/src/index.ts`, `apps/api/src/dev.ts`, root config files (`package.json`, `pnpm-workspace.yaml`, `turbo.json`, `tsconfig.base.json`), `CLAUDE.md`, `docs/plan/**`, `docs/adr/**`.
 - **Dependencies:** your package's `package.json` already lists what you should need. You may add a dependency to YOUR OWN package only if you must: say so in your report with the exact version (check the current version on npm, do not guess). Never add a UI library.
 - **Check library facts** in `docs/reference/verified-apis.md` before using Supabase, Next.js 16, Hono, the AI SDK or MCP. If it is not there, check the current official docs. Do not code these from memory.
+- **Which database login:** request handlers for a signed-in restaurant use `apiDb()` with `withOrg` / `withStore`. The platform login `adminDb()` is for: sign-up and provisioning, the seed, jobs, publishing, installing, deploying, maintainer decisions, owner confirmations, and creating notifications. The database enforces this: `rms_api` can only write the columns a restaurant may change, new apps, versions and listings must start as `draft`, and a change set must carry the decision its tier allows. Read `docs/adr/0003` and `0004`.
+- **Rows only point at rows of the same restaurant.** Child rows carry `org_id` and the database checks (org, id) on every link, so always set `org_id` on inserts.
 - **Outside services:** none. No Vercel command, no hosted Supabase, no MCP connector, no OpenAI call in Wave 1. Nothing related to TradeEngage.
 - **Finish:** run `pnpm typecheck`, `pnpm build` and your package's tests. All must pass. Report in this order: what failed or was skipped, what you built, exact check commands and results, anything you need from the lead, anything out of scope you noticed.
 
@@ -20,7 +22,7 @@ Id ranges for test data (uuid prefix `0193a3c0-0000-7000-8000-0000000000`, then 
 |---|---|---|
 | A | `a0` to `af` | `o_a1a1a1a1a1xx` |
 | B | `b0` to `bf` | `o_b1b1b1b1b1xx` |
-| C | `c0` to `cf` (after the security review finishes) | `o_c1c1c1c1c1xx` |
+| C | `c0` to `cf` | `o_c1c1c1c1c1xx` |
 | D | `e0` to `ef` | `o_e1e1e1e1e1xx` |
 | F | `f0` to `ff` | `o_f1f1f1f1f1xx` |
 | G | `90` to `9f` | `o_919191919xxx` |
@@ -193,7 +195,7 @@ You cannot run the SQL templates until tasks C and D merge. Write them carefully
 **You own:** `tests/security/**`, `vitest.security.config.ts` at the repo root, and the CI job (send the lead the exact YAML to add: `.github/workflows/ci.yml` is lead-owned).
 
 **Build**, as vitest tests driven by `pnpm test:security`:
-1. Database level: port every check in `tests/security/db-walls.smoke.sh` to vitest, then add the attack ideas from your agent definition and from the security review notes the lead gives you. Two restaurants created fresh per run through `@rms/db`.
+1. Database level: port every check in `tests/security/db-walls.smoke.sh` to vitest, then add the attack ideas from your agent definition and every proposed test in the security review (the lead pastes it into your prompt; `docs/adr/0004-database-hardening.md` lists what was closed and what stays open). The Ask path already has tests in `packages/db/src/ask.test.ts`: do not duplicate them, extend them from `tests/security` with new attacks. Two restaurants created fresh per run through `@rms/db`.
 2. Token level: forged, expired, replayed, swapped-kind and cross-restaurant tokens against `requireDataToken` and `requireSession` (a tiny Hono app in the test).
 3. Contract level: every request schema in `@rms/contracts` rejects org, schema, role and environment fields, at every nesting level.
 4. Data API level: written against `DATA_ROUTES` and the wire shapes, importing the route app from `apps/api`. Task D is building it in parallel, so wrap these in a check that skips them with a loud message when the routes are still the empty stub. The lead re-runs them at integration.

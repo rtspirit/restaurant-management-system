@@ -5,7 +5,12 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOCAL_URL="${LOCAL_DB_URL:-postgresql://postgres:postgres@127.0.0.1:54322/postgres}"
-case "$LOCAL_URL" in *@127.0.0.1:*|*@localhost:*) ;; *) echo "Refusing: not a local database" >&2; exit 1;; esac
+# Strict host check: the part after the LAST "@" before the first "/" must be a local host and port.
+if ! printf '%s' "$LOCAL_URL" | grep -Eq '^postgres(ql)?://[^@/?#]+@(127\.0\.0\.1|localhost):[0-9]+/[A-Za-z0-9_]+$'; then
+  echo "Refusing: not a local database" >&2; exit 1
+fi
+# The database only ever receives a SCRAM verifier, so no password appears in its logs.
+scram() { node -e 'const c=require("node:crypto");const pw=process.argv[1];const salt=c.randomBytes(16);const s=c.pbkdf2Sync(pw.normalize("NFKC"),salt,4096,32,"sha256");const ck=c.createHmac("sha256",s).update("Client Key").digest();const sk=c.createHash("sha256").update(ck).digest();const sv=c.createHmac("sha256",s).update("Server Key").digest();process.stdout.write("SCRAM-SHA-256$4096:"+salt.toString("base64")+"$"+sk.toString("base64")+":"+sv.toString("base64"))' "$1"; }
 ENV_FILE="$ROOT/.env.local"
 [ -f "$ENV_FILE" ] || cp "$ROOT/.env.example" "$ENV_FILE"
 set_kv() { local k="$1" v="$2"; if grep -q "^$k=" "$ENV_FILE"; then sed -i.bak "s|^$k=.*|$k=$v|" "$ENV_FILE" && rm -f "$ENV_FILE.bak"; else printf '%s=%s\n' "$k" "$v" >> "$ENV_FILE"; fi; }
@@ -15,7 +20,7 @@ if [ -n "$CUR_API" ] && [ -n "$CUR_ADMIN" ] && psql "$CUR_API" -q -c "select 1" 
   echo "Local logins already work. Left unchanged." >&2
 else
   API_PW="$(openssl rand -hex 24)"; ADMIN_PW="$(openssl rand -hex 24)"
-  psql "$LOCAL_URL" -v ON_ERROR_STOP=1 -q -c "alter role rms_api login password '$API_PW'" -c "alter role rms_admin login password '$ADMIN_PW'" >/dev/null
+  psql "$LOCAL_URL" -v ON_ERROR_STOP=1 -q -c "alter role rms_api login password '$(scram "$API_PW")'" -c "alter role rms_admin login password '$(scram "$ADMIN_PW")'" >/dev/null
   set_kv DATABASE_URL "postgresql://rms_api:$API_PW@127.0.0.1:54322/postgres"
   set_kv DATABASE_ADMIN_URL "postgresql://rms_admin:$ADMIN_PW@127.0.0.1:54322/postgres"
   fi
