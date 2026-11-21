@@ -175,6 +175,21 @@ importers:
 
   .:
     devDependencies:
+      '@rms/auth':
+        specifier: workspace:*
+        version: link:packages/auth
+      '@rms/contracts':
+        specifier: workspace:*
+        version: link:packages/contracts
+      '@rms/db':
+        specifier: workspace:*
+        version: link:packages/db
+      '@types/node':
+        specifier: 26.6.6
+        version: 26.6.6
+      hono:
+        specifier: 4.13.19
+        version: 4.13.19
       supabase:
         specifier: 3.2.0
         version: 3.2.0

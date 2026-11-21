@@ -1,0 +1,4 @@
+{
+  "comment": "The database extensions installed on the local stack after the migrations, recorded 2026-11-21. Any login can install an extension outside the Ask envelope (ADR 0004, still open), so a new name here is either a lead-approved migration or an attack that got through. Change this list only together with the migration that adds the extension.",
+  "extensions": ["pg_stat_statements", "pgcrypto", "plpgsql", "supabase_vault", "uuid-ossp", "vector"]
+}

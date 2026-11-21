@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -u
-# ENV_FILE=.env.hosted runs the same checks against the hosted project.
-ENV_FILE="${ENV_FILE:-./.env.local}"
+# Settings come from ./.env.local, or from RMS_ENV_FILE (a git worktree has no .env.local of its own).
+# RMS_ENV_FILE=.env.hosted runs the same checks against the hosted project. ENV_FILE is an older alias.
+ENV_FILE="${RMS_ENV_FILE:-${ENV_FILE:-./.env.local}}"
 set -a; . "$ENV_FILE"; set +a
 ASK_HOST="${ASK_DATABASE_HOST:-127.0.0.1:54322}"; ASK_SUFFIX="${ASK_DATABASE_USER_SUFFIX:-}"
 SSL=""; case "$ASK_HOST" in 127.0.0.1:*|localhost:*) ;; *) SSL="?sslmode=require";; esac
