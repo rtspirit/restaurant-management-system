@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
-import { MiniAppsPage } from "@/components/mini-apps-page";
+import { MiniAppsFrame } from "@/components/build/mini-apps-frame";
 
 export default function MiniAppsLayout({ children }: { children: ReactNode }) {
-  return <MiniAppsPage>{children}</MiniAppsPage>;
+  return <MiniAppsFrame>{children}</MiniAppsFrame>;
 }

@@ -1,0 +1,174 @@
+<!doctype html>
+<!--
+  A stand-in for a mini-app's frame, until the real app template (Wave 2, task H) is merged.
+  It plays the FRAME side of the hand-off in @rms/contracts frame.ts and nothing more:
+  it holds no token, calls no network (the policy header forbids it), posts only to the one
+  shell origin it was served for, and listens only to its parent at that origin.
+  It is drawn with the real @rms/ui stylesheet, served beside it. Not part of the web app.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Suppliers</title>
+    <link rel="stylesheet" href="/ui.css" />
+  </head>
+  <body>
+    <div class="rms-canvas">
+      <main class="rms-canvas__main" id="app">
+        <div class="rms-row rms-row--between">
+          <h1 class="rms-heading rms-heading--app">Suppliers</h1>
+          <span class="rms-text rms-text--muted" id="place"></span>
+        </div>
+        <section class="rms-card">
+          <header class="rms-card__head"><h2 class="rms-heading rms-heading--card">Add a supplier</h2></header>
+          <form class="rms-form" id="add">
+            <div class="rms-field">
+              <label class="rms-field__label" for="name">Name</label>
+              <input class="rms-input" id="name" name="name" autocomplete="off" required maxlength="80" />
+            </div>
+            <div class="rms-field">
+              <label class="rms-field__label" for="phone">Phone</label>
+              <input class="rms-input" id="phone" name="phone" autocomplete="off" inputmode="tel" maxlength="40" />
+            </div>
+            <div class="rms-field">
+              <label class="rms-field__label" for="delivers">What they deliver</label>
+              <input class="rms-input" id="delivers" name="delivers" autocomplete="off" maxlength="80" />
+            </div>
+            <div id="problem" role="alert"></div>
+            <div class="rms-form__actions">
+              <button class="rms-button rms-button--primary" type="submit">Add supplier</button>
+            </div>
+          </form>
+        </section>
+        <section id="list" aria-live="polite"></section>
+      </main>
+      <main class="rms-canvas__main" id="outside">
+        <div class="rms-empty">
+          <h1 class="rms-heading rms-heading--card">Open this from RMS</h1>
+          <p class="rms-text rms-text--muted">This is part of RMS. Open it from Mini-apps and it will show here.</p>
+        </div>
+      </main>
+    </div>
+    <script>
+      (() => {
+        const SHELL = "__RMS_SHELL_ORIGIN__";
+        const RMS = 1;
+        const canvas = document.querySelector(".rms-canvas");
+        const app = document.getElementById("app");
+        const outside = document.getElementById("outside");
+        const list = document.getElementById("list");
+        const problem = document.getElementById("problem");
+        const form = document.getElementById("add");
+        const place = document.getElementById("place");
+        const waiting = new Map();
+        let started = false;
+
+        // Nothing shows until it is known where this is running. Then exactly one of the two.
+        app.remove();
+        outside.remove();
+        if (window.parent === window) {
+          canvas.append(outside);
+          return;
+        }
+
+        const post = (message) => window.parent.postMessage(message, SHELL);
+        const id = () => Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(16).padStart(2, "0")).join("");
+        const data = (route, body) =>
+          new Promise((resolve) => {
+            const key = id();
+            waiting.set(key, resolve);
+            post({ rms: RMS, type: "rms.data", id: key, route, body });
+            setTimeout(() => {
+              if (waiting.delete(key)) resolve({ status: 500, body: { error: { message: "RMS did not answer. Try again in a moment." } } });
+            }, 20000);
+          });
+
+        const el = (tag, className, text) => {
+          const node = document.createElement(tag);
+          if (className) node.className = className;
+          if (text !== undefined) node.textContent = text;
+          return node;
+        };
+
+        const draw = (rows) => {
+          list.replaceChildren();
+          if (rows.length === 0) {
+            const empty = el("div", "rms-empty");
+            empty.append(el("h2", "rms-heading rms-heading--card", "No suppliers yet"), el("p", "rms-text rms-text--muted", "Add your first one above. It shows here straight away."));
+            list.append(empty);
+            return;
+          }
+          const card = el("section", "rms-card rms-card--flush");
+          const items = el("ul", "rms-list");
+          items.setAttribute("aria-label", "Suppliers");
+          for (const row of rows) {
+            const item = el("li", "rms-list__item");
+            const line = el("div", "rms-list__row");
+            const words = el("span");
+            words.append(el("span", "rms-list__title", String(row.name ?? "")));
+            if (row.delivers) words.append(el("span", "rms-list__sub", String(row.delivers)));
+            line.append(words, el("span", "rms-list__meta", String(row.phone ?? "")), el("span"));
+            item.append(line);
+            items.append(item);
+          }
+          card.append(items);
+          list.append(card);
+        };
+
+        const say = (result) => {
+          const words = result.body && result.body.error ? result.body.error.message : "That did not work. Try again in a moment.";
+          problem.replaceChildren(el("p", "rms-notice rms-notice--problem", words));
+        };
+
+        const load = async () => {
+          const result = await data("query", { model: "vendor" });
+          if (result.status === 200) draw(result.body.rows);
+          else say(result);
+        };
+
+        form.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          problem.replaceChildren();
+          const typed = new FormData(form);
+          const values = { name: String(typed.get("name")).trim(), phone: String(typed.get("phone")).trim(), delivers: String(typed.get("delivers")).trim() };
+          if (!values.name) return;
+          const result = await data("batch", { ops: [{ op: "insert", model: "vendor", values }] });
+          if (result.status !== 200) return say(result);
+          form.reset();
+          await load();
+        });
+
+        window.addEventListener("message", (event) => {
+          // Only the parent window, and only at the one shell origin this was served for.
+          if (event.source !== window.parent || event.origin !== SHELL) return;
+          const message = event.data;
+          if (!message || message.rms !== RMS) return;
+          if (message.type === "rms.init" && !started) {
+            started = true;
+            place.textContent = message.context.restaurant.name;
+            canvas.append(app);
+            void load();
+          }
+          if (message.type === "rms.data.result") {
+            const resolve = waiting.get(message.id);
+            if (resolve) {
+              waiting.delete(message.id);
+              resolve({ status: message.status, body: message.body });
+            }
+          }
+        });
+
+        // Say hello until the shell answers (contracts: FRAME_LIMITS).
+        let tries = 0;
+        const hello = () => {
+          if (started || tries >= 20) return clearInterval(timer);
+          tries += 1;
+          post({ rms: RMS, type: "rms.ready" });
+        };
+        const timer = setInterval(hello, 500);
+        hello();
+      })();
+    </script>
+  </body>
+</html>

@@ -39,6 +39,7 @@ export { Composer } from "./components/composer";
 export type { ComposerProps } from "./components/composer";
 export { Dialog } from "./components/dialog";
 export type { DialogProps } from "./components/dialog";
+export { Frame, FRAME_SANDBOX, FRAME_REFERRER_POLICY, FRAME_ALLOW, type FrameProps } from "./components/frame";
 export { Logo, TabLinks, NavItem, NavList, BottomBar, BottomBarItem, Avatar, Account, Pager } from "./components/nav";
 export type {
   LogoProps,
