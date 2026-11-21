@@ -271,7 +271,7 @@ Sign in as `staff@marigold.test`.
 5. The live preview will appear beside the conversation with a "Sample numbers" tag.
 6. Type a change (section 4.2 follow-ups). The preview reloads.
 
-**You should see:** a list of suppliers with a detail panel and add, edit and remove. It reuses the standard Vendor record, so no new table should be made. If sample data is in the draft store (not confirmed), the list will show Marigold's four suppliers: Lanterbury Greengrocers Co-op, Quillfield Meat and Seafood, Pellbrook Beverage Supply, Tidewell Paper and Cleaning, each with 14 days to pay.
+**You should see:** a list of suppliers with a detail panel and add, edit and remove. It reuses the standard Vendor record, so no new table should be made. If sample data is in the draft store (not confirmed), the list will show Marigold's four suppliers: Lanterbury Greengrocers Co-op, Quillfield Meat and Seafood, Pellbrook Beverage Supply, Tidewell Paper and Cleaning, each with 14 days to pay. Once the eight weeks are loaded it also shows the two delivery apps, Ferrymeal and Trolleybite: their weekly statements of what they kept are held as bills that are already paid, because the apps keep their cut out of the payout.
 
 **What it proves:** an owner gets a working tool from a sentence, built only from RMS's own parts, without seeing code.
 
@@ -283,12 +283,14 @@ Sign in as `staff@marigold.test`.
 
 - **Caveat:** the preview shows **sample numbers** from the restaurant's draft copy, not the live books. Whether the draft copy is filled with the same eight weeks is planned (Wave 2 brief, task I step 9) but not confirmed.
 - **Caveat:** a "target" for prime cost has no standard place to live today. How the agent will store it (a new small record, or a fixed number on the screen) is not confirmed.
-- **Caveat:** there is no "post" step for delivery payouts. Commissions show in the payout view, but whether they reach the profit and loss is not confirmed.
+- **Delivery commissions are in the books** (ADR 0011). Each weekly payout statement is also recorded as a statement from the delivery app and posted. The profit and loss has a line "Delivery platform commissions and fees", and net profit is after it. Prime cost does not move.
+- **Caveat:** there is still no "post" step for the payout itself. What a delivery app owes and what it kept show as two figures in the books, not one net figure.
 
 **Who:** Marigold owner. **Steps:** as in 3.5, with the prompts in section 4.1, in that order.
 
 **You should see (built from the reports that already exist):**
 - A money overview for the week of 9 to 15 November 2026: net sales $84,310.00, food and drink cost $25,460.00 (30.2%), staff cost $26,220.00 (31.1%), prime cost 61.3%.
+- On the weekly profit and loss for that week: supplies $1,437.99, delivery platform commissions and fees $1,306.56, net profit **$29,885.45** (35.4% of sales). Rent, utilities and other running costs are not in the demo books, so this is higher than a real restaurant's.
 - Sales day by day, a weekly profit and loss, prime cost by week, a delivery payout check, stock on hand, by location.
 
 **What it proves:** the central promise. "I want to see how much money I'm making" becomes a correct, restaurant-shaped profit and loss on the owner's own numbers.
@@ -302,7 +304,7 @@ Sign in as `staff@marigold.test`.
 
 **Steps:** Settings, under "Connected systems" press **See connected systems**, then **Connect Demo POS**. RMS lists in plain words what it will read (daily sales, payments, and so on), with **Not now** and **Allow**. Press **Allow**. Then **Bring in my sales** ("Bringing in your sales. This takes a few seconds.", about 14 seconds). A second press says "Your sales are already up to date."
 
-**You should see:** "Brought in 8 weeks of sales for 2 locations. Last week's sales: $84,310.00." Behind it, eight weeks, 21 September to 15 November 2026, arrive. For Marigold: 112 location-days of sales, 128 supplier bills ($204,129.58 in all), 18 stock counts, 32 delivery payouts. No screen shows the books yet; the prime cost report behind them reads 61.3% for the week of 9 November (checked by the tests).
+**You should see:** "Brought in 8 weeks of sales for 2 locations. Last week's sales: $84,310.00." Behind it, eight weeks, 21 September to 15 November 2026, arrive. For Marigold: 112 location-days of sales, 128 supplier bills ($204,129.58 in all), 18 stock counts, 32 delivery payouts, and 32 delivery app statements of what the apps kept ($10,066.50 in all). No screen shows the books yet; the prime cost report behind them reads 61.3% for the week of 9 November (checked by the tests).
 
 **What it proves:** a connected system feeds the restaurant's own books, through one gateway, read-only, with the owner's yes.
 
@@ -479,7 +481,7 @@ Written the way an owner would type them. The figures are what should appear, wo
 3. **What is left each week**
    > Show me what's left each week after food, drink and staff.
 
-   Should show: last week $32,630.00 ($84,310.00 - $25,460.00 - $26,220.00). The slow week of 19 October: $22,064.00. If RMS shows the full profit and loss "net profit" line instead, it will be lower because it also takes off supplies and other costs. That figure is not confirmed: check it after a reset.
+   Should show: last week $32,630.00 ($84,310.00 - $25,460.00 - $26,220.00). The slow week of 19 October: $22,064.00. If RMS shows the full profit and loss "net profit" line instead, it is lower because it also takes off supplies and what the delivery apps kept: last week **$29,885.45** ($32,630.00 - supplies $1,437.99 - delivery commissions and fees $1,306.56), the slow week of 19 October $19,881.99 ($22,064.00 - $1,178.52 - $1,003.49).
 
 4. **Prime cost with a target**
    > Show my prime cost each week and warn me if it goes over 62%.
@@ -489,7 +491,7 @@ Written the way an owner would type them. The figures are what should appear, wo
 5. **The delivery payout view**
    > Show me what the delivery apps paid me and what they kept.
 
-   Should show for last week, two apps (Ferrymeal and Trolleybite) at each location: sales on their statements $5,069.69, commission $1,205.95, marketing fee $90.61, one refund charge $10.00, payouts $4,279.47, all **expected on 18 November** (not yet paid). The week before (2 to 8 November) shows as paid on 11 November, commission $1,192.52. The till's delivery sales should match the statements to the cent.
+   Should show for last week, two apps (Ferrymeal and Trolleybite) at each location: sales on their statements $5,069.69, commission $1,205.95, marketing fee $90.61, one refund charge $10.00, payouts $4,279.47, all **expected on 18 November** (not yet paid). The week before (2 to 8 November) shows as paid on 11 November, commission $1,192.52. The till's delivery sales should match the statements to the cent. What the apps kept last week, $1,306.56 (commission + marketing fee + refund charge), is the same figure as the "Delivery platform commissions and fees" line on the weekly profit and loss.
 
 6. **A stock count screen**
    > Add a screen where I can see my Sunday stock count.
@@ -572,11 +574,13 @@ A good extra test, which **should** add one small optional field (T1 in the feed
 | What was my busiest day in the last eight weeks? | Saturday 7 November, $18,188.33 | highest of 56 daily totals, both locations |
 | What share of my sales went on food and drink last week? | **30.2%** ($25,460.00) | opening $32,866.86 + purchases $26,429.13 - closing $33,835.99 = $25,460.00; ÷ $84,310.00 |
 | How much did staff cost me last week? | **$26,220.00**, 31.1% of sales | Downtown $16,285.06 + Riverside $9,934.94. By group: front of house $11,482.78, kitchen $10,819.33, managers $3,917.89 (whether Ask splits it this way is not confirmed) |
-| How much did I spend with suppliers last week? | **$27,645.96** across 16 bills | Quillfield Meat and Seafood $12,791.69 + Lanterbury Greengrocers Co-op $8,368.43 + Pellbrook Beverage Supply $5,269.01 + Tidewell Paper and Cleaning $1,216.83 (supplies). Food and drink alone: $26,429.13 |
+| How much did I spend with suppliers last week, delivery apps included? | **$28,952.52** across 20 bills | Four suppliers, 16 bills, $27,645.96: Quillfield Meat and Seafood $12,791.69 + Lanterbury Greengrocers Co-op $8,368.43 + Pellbrook Beverage Supply $5,269.01 + Tidewell Paper and Cleaning $1,216.83 (supplies). Two delivery apps, 4 statements, $1,306.56: Ferrymeal $855.70 + Trolleybite $450.86. Food and drink alone: $26,429.13. Asked without "delivery apps included", the total is the same $28,952.52, because the statements are kept as bills: a good answer says the delivery apps are in it |
 | How much stock do I have? | **$35,671.41** at the count on Sun 15 Nov, of which food and drink $33,835.99 | Downtown $22,085.96 + Riverside $13,585.45 |
-| How much did the delivery apps take last week? | $1,306.56 taken from $5,069.69 of orders | commission $1,205.95 + marketing $90.61 + refund charge $10.00. Payouts $4,279.47, expected 18 Nov |
+| How much did delivery apps keep last week? | **$1,306.56**, kept from $5,069.69 of orders (25.8%) | commission $1,205.95 + marketing $90.61 + refund charge $10.00. The same figure is the "Delivery platform commissions and fees" line on the weekly profit and loss. Payouts $4,279.47, expected 18 Nov. Ferrymeal kept $855.70, Trolleybite $450.86. In the slow week of 19 October: $1,003.49 |
+| What was my profit last week? | **$29,885.45** (35.4% of sales), after every cost in the books | net sales $84,310.00 - food and drink $25,460.00 - staff $26,220.00 - supplies $1,437.99 - delivery commissions and fees $1,306.56. Before delivery commissions were in the books this read $31,192.01. Rent and utilities are not in the demo books |
 | How much sales tax did I collect last week? | $6,933.51 (owed to the state, not income) | sum of the seven days, both locations. Delivery-app tax ($443.62) is paid over by the apps, not owed by the restaurant |
 | What was Slice Yard's prime cost last week? (as `owner@sliceyard.test`) | **55.3%** ($15,893.00 on $28,750.00) | food and drink $8,150.00 + staff $7,743.00 |
+| How much did delivery apps keep last week? (as `owner@sliceyard.test`) | **$2,369.25**, kept from $9,098.59 of orders (26.0%) | commission $2,070.12 + marketing $282.13 + refund charge $17.00. Slice Yard sells about a third of its food through the apps, so its net profit last week is $9,396.23 (32.7% of sales), not $11,765.48 |
 
 ### 4.5 Things to try that should be refused or handled gracefully
 
@@ -600,6 +604,8 @@ A good extra test, which **should** add one small optional field (T1 in the feed
 | Tip pool | Help me share out the tips between the servers and bussers each night. | Last week's tips at Marigold: $14,022.16. |
 | Waste log | I want my cooks to write down what gets thrown away. | Out of scope today (ADR 0006). Expect RMS to say so or build a simple list. |
 | Vendor bills due | Show me which supplier bills I need to pay this week. | Last week's 16 Marigold bills ($27,645.96) fall due 23 to 29 November. |
+
+The two delivery apps, Ferrymeal and Trolleybite, are in the vendor list and their weekly statements are among the supplier bills (ADR 0011). Those statements are always marked paid, on the payout date, so they add to what was spent but never to what is left to pay or overdue.
 
 ---
 

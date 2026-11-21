@@ -11,6 +11,7 @@ import { type AppManifestInput, type TenantContext, toPublicId } from "@rms/cont
 import { handleData } from "@rms/data";
 import { type Sql, newUuid, withStore } from "@rms/db";
 import { DEFAULT_POSTING_RULES, LIBRARY, ensureModels } from "@rms/models";
+import { loadDeliveryStatements } from "./delivery.js";
 import { addDays } from "./rng.js";
 import { DEFAULT_SALES_END, type GenerateSalesOptions, type GeneratedSales, type LabourGroup, type PaymentType, generateSales } from "./sales.js";
 import type { CostGroup, StockUnit } from "./stock.js";
@@ -343,6 +344,7 @@ export const loadDemoBooks = async (client: BooksClient, opts: LoadBooksOptions)
     // Oldest first: a count is compared with the one before it.
     for (const c of counts) if ((await act("post_stock_count", { stock_count_id: need(countId, countKey(c), "stock count") })) > 0) posted.stockCounts++;
   }
+  await loadDeliveryStatements(sales, { upsert, upsertKeyed, act, loc, accountByCode, post, posted });
 
   return { startsOn: sales.startsOn, endsOn: sales.endsOn, rows, posted, setUp: { accountsAndRules, calendar } };
 };
