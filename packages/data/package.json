@@ -1,0 +1,14 @@
+{
+  "name": "@rms/data",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": { "@rms/contracts": "workspace:*", "@rms/db": "workspace:*", "@rms/models": "workspace:*" },
+  "devDependencies": { "@types/node": "26.6.6" }
+}
