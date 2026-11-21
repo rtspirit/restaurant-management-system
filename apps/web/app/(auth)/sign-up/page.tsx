@@ -8,6 +8,9 @@ import { createClient } from "@/lib/supabase/client";
 
 const MIN_PASSWORD = 8;
 
+/** The sign-in service refuses with status 429 after too many sign-ups or sign-ins from one place in a few minutes. */
+const tooManyTries = (e: { status?: number | undefined; code?: string | undefined }): boolean => e.status === 429 || (e.code ?? "").endsWith("rate_limit");
+
 export default function SignUpPage() {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
@@ -35,9 +38,11 @@ export default function SignUpPage() {
       });
       if (signUpError) {
         setError(
-          signUpError.status === 422 || signUpError.code === "user_already_exists"
-            ? "We could not create an account with that email. If you already have one, sign in instead."
-            : "We could not create your account just now. Please try again.",
+          tooManyTries(signUpError)
+            ? "Too many tries. Wait a minute and try again."
+            : signUpError.status === 422 || signUpError.code === "user_already_exists"
+              ? "We could not create an account with that email. If you already have one, sign in instead."
+              : "We could not create your account just now. Please try again.",
         );
         return;
       }
