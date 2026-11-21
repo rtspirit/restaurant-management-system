@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { type Sql, adminDb, asMigrator, asParentSync, askQuery, closeAll, ident, inAskEnvelope, mintAskLogin, openAsk, provisionStore, scramVerifier } from "./index.js";
+import { AskTooLargeError, type Sql, adminDb, asMigrator, asParentSync, askQuery, closeAll, ident, inAskEnvelope, mintAskLogin, openAsk, provisionStore, scramVerifier } from "./index.js";
 import { loadTestEnv } from "./testing.js";
 
 loadTestEnv();
@@ -70,6 +70,19 @@ describe.skipIf(!hasDb)("the Ask login and its envelope", () => {
     await expect(askQuery(ask, "select * from platform.organizations")).rejects.toEqual(code("42501"));
     await expect(askQuery(ask, "select * from platform.secrets")).rejects.toEqual(code("42501"));
     await expect(askQuery(ask, "select * from auth.users")).rejects.toEqual(code("42501"));
+  });
+
+  it("refuses an answer that is too big, even in one row", async () => {
+    await expect(askQuery(ask, "select repeat('x', 8000000) as big")).rejects.toBeInstanceOf(AskTooLargeError);
+    await expect(askQuery(ask, "select repeat('x', 3000) as big from generate_series(1, 500)")).rejects.toBeInstanceOf(AskTooLargeError);
+  });
+
+  it("sets the caller's locations inside the envelope, defaulting to all", async () => {
+    const all = await askQuery(ask, "select current_setting('rms.locations') as l");
+    expect(all.rows[0]?.l).toBe("all");
+    const one = await askQuery(ask, "select current_setting('rms.locations') as l", 10, ["0193a3c0-0000-7000-8000-0000000000d5"]);
+    expect(one.rows[0]?.l).toBe("0193a3c0-0000-7000-8000-0000000000d5");
+    await expect(askQuery(ask, "select 1", 10, ["all'; drop schema platform cascade; --"])).rejects.toThrow();
   });
 
   it("refuses a second statement, a write and a setting change hidden in the text", async () => {

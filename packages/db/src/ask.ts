@@ -9,7 +9,7 @@
 // Walls 2 and 3 are built so that they hold even when wall 1 has a bug.
 import { createHash, createHmac, pbkdf2Sync, randomBytes } from "node:crypto";
 import postgres from "postgres";
-import { ASK_QUERY_LIMITS } from "@rms/contracts";
+import { ASK_QUERY_LIMITS, SESSION_SETTINGS, Uuid } from "@rms/contracts";
 import type { Sql, Tx } from "./index.js";
 
 /** SCRAM-SHA-256 verifier for a password, so the password itself never reaches the database or its logs. */
@@ -64,6 +64,15 @@ export const openAsk = (login: AskLogin): Sql => {
 
 const ROLLBACK = Symbol("rollback");
 
+/** The most data one Ask answer may carry (about 1 MB of JSON). */
+export const ASK_MAX_BYTES = 1_000_000;
+
+export class AskTooLargeError extends Error {
+  constructor() {
+    super("The answer is too large");
+  }
+}
+
 /**
  * Runs `fn` inside the Ask envelope and always rolls back:
  *   begin read only -> reset all (drops anything an earlier session left on a pooled
@@ -71,7 +80,8 @@ const ROLLBACK = Symbol("rollback");
  *   Postgres refuses to turn the transaction read-write.
  * Exported for the security tests. Product code uses `askQuery`.
  */
-export const inAskEnvelope = async <T>(askSql: Sql, fn: (tx: Tx) => Promise<T>): Promise<T> => {
+export const inAskEnvelope = async <T>(askSql: Sql, fn: (tx: Tx) => Promise<T>, locations: "all" | string[] = "all"): Promise<T> => {
+  const scope = locations === "all" ? "all" : locations.map((l) => Uuid.parse(l)).join(",");
   let out: T | undefined;
   try {
     await askSql.begin("transaction read only", async (tx) => {
@@ -79,7 +89,10 @@ export const inAskEnvelope = async <T>(askSql: Sql, fn: (tx: Tx) => Promise<T>):
       await tx.unsafe(`set local statement_timeout = '${ASK_QUERY_LIMITS.timeoutMs}ms'`);
       await tx.unsafe("set local lock_timeout = '1s'");
       await tx.unsafe("set local work_mem = '16MB'");
-      await tx`select pg_advisory_unlock_all()`;
+      // Location-scoped tables show nothing unless the caller's locations are set. Demo: the Ask
+      // agent is owner-only, so this is "all". A model-written SELECT could call set_config
+      // itself, which is one reason staff do not get Ask (ADR 0002) and the parser must refuse it.
+      await tx`select set_config(${SESSION_SETTINGS.locations}, ${scope}, true), pg_advisory_unlock_all()`;
       out = await fn(tx);
       throw ROLLBACK;
     });
@@ -96,12 +109,35 @@ export type AskResult = { columns: string[]; rows: Record<string, unknown>[]; tr
  * bound parameter, so the server parses it as a single prepared statement: a second
  * statement, a write, a SET or any other command is a syntax error before anything runs.
  */
-export const askQuery = async (askSql: Sql, text: string, maxRows: number = ASK_QUERY_LIMITS.maxRows): Promise<AskResult> => {
+export const askQuery = async (
+  askSql: Sql,
+  text: string,
+  maxRows: number = ASK_QUERY_LIMITS.maxRows,
+  locations: "all" | string[] = "all",
+): Promise<AskResult> => {
   if (text.length > 8000) throw new Error("Query is too long");
   const cap = Math.min(Math.max(1, Math.trunc(maxRows)), ASK_QUERY_LIMITS.maxRows);
-  return inAskEnvelope(askSql, async (tx) => {
-    const res = await tx.unsafe(`select * from (\n${text}\n) as _rms_ask limit $1`, [cap + 1]);
-    const rows = res.slice(0, cap) as Record<string, unknown>[];
-    return { columns: res.columns.map((c) => c.name), rows, truncated: res.length > cap };
-  });
+  return inAskEnvelope(
+    askSql,
+    async (tx) => {
+      // Read in small batches and stop once the answer is too big to hand to a model. The row
+      // cap alone let one row carry megabytes.
+      const rows: Record<string, unknown>[] = [];
+      let columns: string[] = [];
+      let bytes = 0;
+      let truncated = false;
+      const cursor = tx.unsafe(`select * from (\n${text}\n) as _rms_ask limit $1`, [cap + 1]).cursor(50);
+      for await (const batch of cursor) {
+        for (const row of batch as Record<string, unknown>[]) {
+          if (columns.length === 0) columns = Object.keys(row);
+          bytes += JSON.stringify(row).length;
+          if (bytes > ASK_MAX_BYTES) throw new AskTooLargeError();
+          if (rows.length >= cap) truncated = true;
+          else rows.push(row);
+        }
+      }
+      return { columns, rows, truncated };
+    },
+    locations,
+  );
 };
